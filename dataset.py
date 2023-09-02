@@ -115,7 +115,7 @@ def embed_with_cache(embedder: str, cache_name: str, texts: List[str]) -> datase
     embedder_cache_path = embedder.replace('/', '__')
     cache_folder = os.path.join(datasets.config.HF_DATASETS_CACHE, 'corpus_embeddings', embedder_cache_path)
     os.makedirs(cache_folder, exist_ok=True)
-    cache_path = os.path.join(cache_folder, cache_name) # something like /home/jxm3/.cache/huggingface/datasets
+    cache_path = os.path.join(cache_folder, cache_name + "_small")
 
     # texts = texts[:1000]
 
@@ -176,10 +176,9 @@ class MSMarcoDataset(torch.utils.data.Dataset):
         self.corpus_embeddings = embed_with_cache(embedder, "msmarco_corpus", [c['text'] for c in self.corpus])
         self.hard_negatives = load_msmarco_hard_negatives()
         self.tokenized = False
-        self.size = len(self.queries)
+        self.size = len(self.query_embeddings)
     
     def __len__(self):
-        # return 50
         return self.size
 
     def next_dataset_idx(self) -> int:
@@ -190,26 +189,23 @@ class MSMarcoDataset(torch.utils.data.Dataset):
 
     def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
         """Returns example from MSMARCO, including query, document, and hard-negative document."""
-        if not self.tokenized:
-            raise ValueError('cannot get items before tokenizing them')
-
-        # idx = random.randint(0, len(self.queries) - 1) # get random datapoint
-        # print(f'msmarco returning query {idx}')
         q_ex = self.queries[idx]
+
+        query_id_str = q_ex['id']
 
         ex = {}
 
-        hn_dict = self.hard_negatives[q_ex['id']]
+        hn_dict = self.hard_negatives[query_id_str]
+        document_id = int(hn_dict['pos'][0])
 
-        pos = self.corpus[int(random.choice(hn_dict['pos']))]
-        ex['document_input_ids'] = pos['text_input_ids']
-        ex['document_attention_mask'] = pos['text_attention_mask']
+        # neg = self.corpus[int(random.choice(hn_dict['hard_neg']))]
+        # ex['hn_document_input_ids'] = neg['text_input_ids']
+        # ex['hn_document_attention_mask'] = neg['text_attention_mask']
 
-        neg = self.corpus[int(random.choice(hn_dict['hard_neg']))]
-        ex['hn_document_input_ids'] = neg['text_input_ids']
-        ex['hn_document_attention_mask'] = neg['text_attention_mask']
-
-        return ex
+        return {
+            "query_embedding": self.query_embeddings[int(query_id_str)%1000]["embeds"],
+            "document_embeddings": self.corpus_embeddings[document_id%1000]["embeds"],
+        }
 
 
 if __name__ == '__main__':

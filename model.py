@@ -6,9 +6,8 @@ class Model(torch.nn.Module):
         super().__init__()
         # TODO argparse stuff
         self.transformer = transformers.AutoModel.from_pretrained("t5-small")
-        for layer in self.transformer.layers: 
-            self.has_relative_attention_bias = False
-
+        for block in self.transformer.decoder.block: 
+            block.layer[0].SelfAttention.has_relative_attention_bias
 
         embedding_dim = 768
         self.hidden_size = self.transformer.config.hidden_size
@@ -24,24 +23,25 @@ class Model(torch.nn.Module):
             torch.nn.ReLU(),
             torch.nn.Linear(self.hidden_size, self.hidden_size)
         )
-        self.score = torch.nn.Linear((self.hidden_size, 1))
+        self.score = torch.nn.Linear(self.hidden_size, 1)
 
-    def forward(self, query_embeddings: torch.Tensor, corpus_embeddings: torch.Tensor) -> torch.Tensor:
-        batch_size, corpus_size, hidden_dim = corpus_embeddings.shape
-        query_embeddings = self.query_projection(query_embeddings)
-        query_embeddings = query_embeddings.reshape((-1, self.n_sequence, self.hidden_size))
+    def forward(self, query_embedding: torch.Tensor, document_embeddings: torch.Tensor) -> torch.Tensor:
+        batch_size, corpus_size, hidden_dim = document_embeddings.shape
+        query_embedding = self.query_projection(query_embedding)
+        query_embedding = query_embedding.reshape((batch_size, self.n_sequence, self.hidden_size))
+        assert query_embedding.shape == (batch_size, self.n_sequence, self.hidden_size)
 
-        corpus_embeddings = self.corpus_projection(corpus_embeddings)
-
+        document_embeddings = self.corpus_projection(document_embeddings)
+        assert document_embeddings.shape == (batch_size, corpus_size, self.hidden_size)
 
         output = self.transformer(
-            inputs_embeds=query_embeddings,
-            attention_mask=torch.ones((batch_size, self.n_sequence), dtype=torch.long, device=query_embeddings.device),
-            decoder_inputs_embeds=corpus_embeddings,
-            decoder_attention_mask=torch.ones((batch_size, corpus_size), dtype=torch.long, device=query_embeddings.device)
+            inputs_embeds=query_embedding,
+            attention_mask=torch.ones((batch_size, self.n_sequence), dtype=torch.long, device=query_embedding.device),
+            decoder_inputs_embeds=document_embeddings,
+            decoder_attention_mask=torch.ones((batch_size, corpus_size), dtype=torch.long, device=query_embedding.device)
         )
 
-        return self.score(output.last_hidden_state)
+        return self.score(output.last_hidden_state).squeeze(2)
 
  
 # We construct the SentenceTransformer bi-encoder from scratch with mean-pooling

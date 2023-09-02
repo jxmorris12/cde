@@ -3,11 +3,6 @@ from typing import Optional
 from dataclasses import dataclass, field
 
 import transformers
-from transformers import MODEL_FOR_CAUSAL_LM_MAPPING
-
-
-MODEL_CONFIG_CLASSES = list(MODEL_FOR_CAUSAL_LM_MAPPING.keys())
-MODEL_TYPES = tuple(conf.model_type for conf in MODEL_CONFIG_CLASSES)
 
 
 @dataclass
@@ -15,11 +10,6 @@ class ModelArguments:
     """
     Arguments pertaining to which model/config/tokenizer we are going to fine-tune, or train from scratch.
     """
-    )
-    model_type: Optional[str] = field(
-        default=None,
-        metadata={"help": "If training from scratch, pass a model type from the list: " + ", ".join(MODEL_TYPES)},
-    )
     config_overrides: Optional[str] = field(
         default=None,
         metadata={
@@ -156,3 +146,5 @@ class TrainingArguments(transformers.TrainingArguments):
     #         "choices": ["prompt_tune", "fine_tune", "weighted_embeddings"],
     #     }
     # )
+
+    dataloader_num_workers = 0

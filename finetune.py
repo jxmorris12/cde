@@ -24,6 +24,8 @@ import pathlib, os, gzip, json
 import logging
 import random
 
+import transformers
+
 from dataset import MSMarcoDataset
 from model import Model
 from run_args import ModelArguments, DataTrainingArguments, TrainingArguments
@@ -47,5 +49,5 @@ trainer = CustomTrainer(
     train_dataset=train_dataset,
     eval_dataset=None,
 )
-trainer.fit()
+trainer.train()
 
