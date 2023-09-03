@@ -113,9 +113,11 @@ def load_msmarco_beir_uncached(split: str) -> Tuple[datasets.Dataset, datasets.D
 
 def embed_with_cache(embedder: str, cache_name: str, texts: List[str]) -> datasets.Dataset:
     embedder_cache_path = embedder.replace('/', '__')
-    cache_folder = os.path.join(datasets.config.HF_DATASETS_CACHE, 'corpus_embeddings', embedder_cache_path)
+    # cache_folder = datasets.config.HF_DATASETS_CACHE
+    cache_folder = "/scratch/jxm3"
+    cache_folder = os.path.join(cache_folder, 'corpus_embeddings', embedder_cache_path)
     os.makedirs(cache_folder, exist_ok=True)
-    cache_path = os.path.join(cache_folder, cache_name + "_small")
+    cache_path = os.path.join(cache_folder, cache_name) #  + "_small")
 
     # texts = texts[:1000]
 
@@ -128,11 +130,20 @@ def embed_with_cache(embedder: str, cache_name: str, texts: List[str]) -> datase
     model = SentenceTransformer(embedder)
     model.max_seq_length = 512
     embeddings = model.encode(texts, show_progress_bar=True)
+    # import numpy as np
+    # embeddings = np.random.rand(len(texts), 768)
 
-
-    dataset = datasets.Dataset.from_dict({"embeds": embeddings })
-    dataset.save_to_disk(cache_path)
-    return dataset
+    datasets_list = []
+    dataset_size = 1_000_000
+    i = 0
+    while i < len(embeddings):
+        dataset = datasets.Dataset.from_dict({
+            "embeds": embeddings[i : i + dataset_size] 
+        })
+        datasets_list.append(dataset)
+        i += dataset_size
+    
+    return datasets.concatenate_datasets(datasets_list)
 
 
 def load_msmarco_beir(split: str) -> Tuple[datasets.Dataset, datasets.Dataset]:
@@ -189,7 +200,7 @@ class MSMarcoDataset(torch.utils.data.Dataset):
 
     def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
         """Returns example from MSMARCO, including query, document, and hard-negative document."""
-        q_ex = self.queries[idx]
+        q_ex = self.queries[idx] # %1000 is temp (testing)
 
         query_id_str = q_ex['id']
 
@@ -203,8 +214,8 @@ class MSMarcoDataset(torch.utils.data.Dataset):
         # ex['hn_document_attention_mask'] = neg['text_attention_mask']
 
         return {
-            "query_embedding": self.query_embeddings[int(query_id_str)%1000]["embeds"],
-            "document_embeddings": self.corpus_embeddings[document_id%1000]["embeds"],
+            "query_embedding": self.query_embeddings[int(query_id_str)]["embeds"],
+            "document_embeddings": self.corpus_embeddings[document_id]["embeds"],
         }
 
 
