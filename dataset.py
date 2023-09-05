@@ -9,6 +9,7 @@ import beir.datasets.data_loader
 import datasets
 import numpy as np
 import pickle
+import random
 import torch
 import transformers
 import tqdm
@@ -143,7 +144,9 @@ def embed_with_cache(embedder: str, cache_name: str, texts: List[str]) -> datase
         datasets_list.append(dataset)
         i += dataset_size
     
-    return datasets.concatenate_datasets(datasets_list)
+    d = datasets.concatenate_datasets(datasets_list)
+    d.save_to_disk(cache_path)
+    return d
 
 
 def load_msmarco_beir(split: str) -> Tuple[datasets.Dataset, datasets.Dataset]:
@@ -171,11 +174,10 @@ def load_msmarco_beir(split: str) -> Tuple[datasets.Dataset, datasets.Dataset]:
 class MSMarcoDataset(torch.utils.data.Dataset):
     corpus: datasets.Dataset
     queries: datasets.Dataset
+    query_embeddings: datasets.Dataset
+    corpus_embeddings: datasets.Dataset
     size: int
-    tokenized: bool
-    token_histogram: torch.Tensor
-    token_idf: torch.Tensor
-    column_names: List[str] = ["id", "text_input_ids", "text_attention_mask"]
+    column_names: List[str] = ["id", "query_embedding", "document_embeddings", "negative_document_embeddings"]
     hard_negatives: Optional[Dict[str, Any]]
     def __init__(
             self,
@@ -186,8 +188,7 @@ class MSMarcoDataset(torch.utils.data.Dataset):
         self.query_embeddings = embed_with_cache(embedder, "msmarco_queries", [q['text'] for q in self.queries])
         self.corpus_embeddings = embed_with_cache(embedder, "msmarco_corpus", [c['text'] for c in self.corpus])
         self.hard_negatives = load_msmarco_hard_negatives()
-        self.tokenized = False
-        self.size = len(self.query_embeddings)
+        self.size = len(self.queries)
     
     def __len__(self):
         return self.size
@@ -200,22 +201,31 @@ class MSMarcoDataset(torch.utils.data.Dataset):
 
     def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
         """Returns example from MSMARCO, including query, document, and hard-negative document."""
-        q_ex = self.queries[idx] # %1000 is temp (testing)
-
-        query_id_str = q_ex['id']
-
-        ex = {}
+        LIMIT = 1000 # tmp
+        idx %= LIMIT
+        query_id_str = self.queries[idx]['id']
+        while query_id_str not in self.hard_negatives:
+            # We don't have negative samples for a few queries in the corpus 
+            # (maybe because the hard negatives were filtered out by the 
+            # cross encoder?). This iterates until we find one.
+            #  TODO: Figure out why some queries are missing.
+            idx = random.randint(0, len(self)-1) % LIMIT
+            query_id_str = self.queries[idx]['id']
 
         hn_dict = self.hard_negatives[query_id_str]
+        
+        ex = {}
         document_id = int(hn_dict['pos'][0])
 
-        # neg = self.corpus[int(random.choice(hn_dict['hard_neg']))]
+        neg_embedding_id = int(random.choice(hn_dict['hard_neg']))
         # ex['hn_document_input_ids'] = neg['text_input_ids']
         # ex['hn_document_attention_mask'] = neg['text_attention_mask']
 
         return {
-            "query_embedding": self.query_embeddings[int(query_id_str)]["embeds"],
+            "id": idx,
+            "query_embedding": self.query_embeddings[idx]["embeds"],
             "document_embeddings": self.corpus_embeddings[document_id]["embeds"],
+            "negative_document_embeddings": self.corpus_embeddings[neg_embedding_id]["embeds"],
         }
 
 

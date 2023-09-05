@@ -24,12 +24,16 @@ import pathlib, os, gzip, json
 import logging
 import random
 
+import torch
 import transformers
 
 from dataset import MSMarcoDataset
 from model import Model
 from run_args import ModelArguments, DataTrainingArguments, TrainingArguments
 from trainer import CustomTrainer
+
+
+assert torch.cuda.device_count() > 0, "can't train without CUDA"
 
 
 parser = transformers.HfArgumentParser((ModelArguments, DataTrainingArguments, TrainingArguments))

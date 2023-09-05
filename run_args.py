@@ -2,7 +2,10 @@ from typing import Optional
 
 from dataclasses import dataclass, field
 
+import torch
 import transformers
+
+import os
 
 
 @dataclass
@@ -147,4 +150,13 @@ class TrainingArguments(transformers.TrainingArguments):
     #     }
     # )
 
-    dataloader_num_workers = 0
+    def __setattr__(self, name, value):
+        super(transformers.TrainingArguments, self).__setattr__(name, value)
+
+    def __post_init__(self):
+        super().__post_init__()
+        num_workers = int(len(os.sched_getaffinity(0)) / torch.cuda.device_count())
+        os.environ["RAYON_RS_NUM_CPUS"] = str(
+            num_workers
+        )  # Sets threads for hf tokenizers
+        self.dataloader_num_workers = num_workers

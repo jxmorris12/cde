@@ -7,7 +7,7 @@ class Model(torch.nn.Module):
         # TODO argparse stuff
         self.transformer = transformers.AutoModel.from_pretrained("t5-small")
         for block in self.transformer.decoder.block: 
-            block.layer[0].SelfAttention.has_relative_attention_bias
+            block.layer[0].SelfAttention.has_relative_attention_bias = False
 
         embedding_dim = 768
         self.hidden_size = self.transformer.config.hidden_size
@@ -41,7 +41,9 @@ class Model(torch.nn.Module):
             decoder_attention_mask=torch.ones((batch_size, corpus_size), dtype=torch.long, device=query_embedding.device)
         )
 
-        return self.score(output.last_hidden_state).squeeze(2)
+        scores = self.score(output.last_hidden_state)
+        assert scores.shape == (batch_size, corpus_size, 1)
+        return scores.squeeze(2)
 
  
 # We construct the SentenceTransformer bi-encoder from scratch with mean-pooling
