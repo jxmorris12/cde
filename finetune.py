@@ -26,6 +26,7 @@ import random
 
 import torch
 import transformers
+import wandb
 
 from dataset import MSMarcoDataset
 from model import Model
@@ -35,6 +36,13 @@ from trainer import CustomTrainer
 
 assert torch.cuda.device_count() > 0, "can't train without CUDA"
 
+
+wandb.init(
+    project="dataset-transformer",
+    # name=exp_name,
+    # id=kwargs_hash,
+    # resume=True,
+)
 
 parser = transformers.HfArgumentParser((ModelArguments, DataTrainingArguments, TrainingArguments))
 model_args, data_args, training_args = parser.parse_args_into_dataclasses()

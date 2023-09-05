@@ -201,15 +201,13 @@ class MSMarcoDataset(torch.utils.data.Dataset):
 
     def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
         """Returns example from MSMARCO, including query, document, and hard-negative document."""
-        LIMIT = 1000 # tmp
-        idx %= LIMIT
         query_id_str = self.queries[idx]['id']
         while query_id_str not in self.hard_negatives:
             # We don't have negative samples for a few queries in the corpus 
             # (maybe because the hard negatives were filtered out by the 
             # cross encoder?). This iterates until we find one.
             #  TODO: Figure out why some queries are missing.
-            idx = random.randint(0, len(self)-1) % LIMIT
+            idx = random.randint(0, len(self)-1)
             query_id_str = self.queries[idx]['id']
 
         hn_dict = self.hard_negatives[query_id_str]
