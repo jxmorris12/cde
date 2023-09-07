@@ -50,6 +50,10 @@ class ModelArguments:
             "choices": ["auto", "bfloat16", "float16", "float32"],
         },
     )
+    embedder: str = field(
+        default="sentence-transformers/gtr-t5-base",
+        metadata={"help": "embedder name"}
+    )
 
     def __post_init__(self):
         if self.config_overrides is not None and (self.config_name is not None or self.model_name_or_path is not None):
@@ -140,6 +144,8 @@ class TrainingArguments(transformers.TrainingArguments):
     )
     report_to: str = "wandb"
 
+    save_total_limit: int = 1  # Maximum number of checkpoints to save.
+
     ##################### Experimental Settings ####################
     # exp_name: str = field(
     #     default=None,
@@ -155,6 +161,10 @@ class TrainingArguments(transformers.TrainingArguments):
 
     def __post_init__(self):
         super().__post_init__()
+        ############################################################################
+        # num_workers =  0
+        # self.report_to = []
+        ############################################################################
         num_workers = int(len(os.sched_getaffinity(0)) / torch.cuda.device_count())
         os.environ["RAYON_RS_NUM_CPUS"] = str(
             num_workers

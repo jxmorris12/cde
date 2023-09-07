@@ -55,6 +55,10 @@ class Model(torch.nn.Module):
         # )
         # output_vectors = output.last_hidden_state
 
+        # query_output_vectors = output.last_hidden_state[:, :self.n_sequence, :].mean(dim=1)
+        # scores = torch.bmm(output_vectors, query_output_vectors[:,:, None])
+        # return scores.squeeze(2)
+
         scores = self.score(output_vectors)
         assert scores.shape == (batch_size, corpus_size, 1)
         return scores.squeeze(2)

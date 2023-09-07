@@ -177,7 +177,7 @@ class MSMarcoDataset(torch.utils.data.Dataset):
     query_embeddings: datasets.Dataset
     corpus_embeddings: datasets.Dataset
     size: int
-    column_names: List[str] = ["id", "query_embedding", "document_embeddings", "negative_document_embeddings"]
+    column_names: List[str] = ["idx", "query_embedding", "document_embeddings", "negative_document_embeddings"]
     hard_negatives: Optional[Dict[str, Any]]
     def __init__(
             self,
@@ -220,7 +220,7 @@ class MSMarcoDataset(torch.utils.data.Dataset):
         # ex['hn_document_attention_mask'] = neg['text_attention_mask']
 
         return {
-            "id": idx,
+            "idx": idx,
             "query_embedding": self.query_embeddings[idx]["embeds"],
             "document_embeddings": self.corpus_embeddings[document_id]["embeds"],
             "negative_document_embeddings": self.corpus_embeddings[neg_embedding_id]["embeds"],
@@ -229,3 +229,4 @@ class MSMarcoDataset(torch.utils.data.Dataset):
 
 if __name__ == '__main__':
     dataset = MSMarcoDataset(embedder="sentence-transformers/gtr-t5-base")
+    print(dataset[10_001])

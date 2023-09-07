@@ -52,7 +52,7 @@ logging.basicConfig(format='%(asctime)s - %(message)s',
                     level=logging.INFO)
 
 
-train_dataset = MSMarcoDataset(embedder="sentence-transformers/gtr-t5-base")
+train_dataset = MSMarcoDataset(embedder=model_args.embedder)
 
 model = Model()
 trainer = CustomTrainer(
