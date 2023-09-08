@@ -10,6 +10,7 @@ class Model(torch.nn.Module):
         self.transformer.embeddings.position_embeddings.weight.requires_grad = False # don't want position embeddings
         self.transformer.embeddings.position_embeddings.weight.fill_(0.0)
 
+        # TODO - fix. consider BART?
         # self.transformer = transformers.AutoModel.from_pretrained("t5-small")
         # for block in self.transformer.decoder.block: 
         #     block.layer[0].SelfAttention.has_relative_attention_bias = False
@@ -28,7 +29,6 @@ class Model(torch.nn.Module):
             torch.nn.ReLU(),
             torch.nn.Linear(self.hidden_size, self.hidden_size)
         )
-        self.score = torch.nn.Linear(self.hidden_size, 1)
 
     def forward(self, query_embedding: torch.Tensor, document_embeddings: torch.Tensor) -> torch.Tensor:
         batch_size, corpus_size, hidden_dim = document_embeddings.shape
@@ -55,13 +55,13 @@ class Model(torch.nn.Module):
         # )
         # output_vectors = output.last_hidden_state
 
-        # query_output_vectors = output.last_hidden_state[:, :self.n_sequence, :].mean(dim=1)
-        # scores = torch.bmm(output_vectors, query_output_vectors[:,:, None])
-        # return scores.squeeze(2)
-
-        scores = self.score(output_vectors)
-        assert scores.shape == (batch_size, corpus_size, 1)
+        query_output_vectors = output.last_hidden_state[:, :self.n_sequence, :].mean(dim=1)
+        scores = torch.bmm(output_vectors, query_output_vectors[:,:, None])
         return scores.squeeze(2)
+
+        # scores = self.score(output_vectors)
+        # assert scores.shape == (batch_size, corpus_size, 1)
+        # return scores.squeeze(2)
 
  
 # We construct the SentenceTransformer bi-encoder from scratch with mean-pooling

@@ -3,6 +3,7 @@ import gzip
 import json
 import logging
 import os
+import pathlib
 import random
 
 import beir.datasets.data_loader
@@ -83,24 +84,41 @@ def load_msmarco_hard_negatives() -> Dict[str, Dict[str, Any]]:
     return train_queries
 
 
-def load_msmarco_beir_uncached(split: str) -> Tuple[datasets.Dataset, datasets.Dataset]:
-    """Loads MSMARCO through tools provided by BeIR.
+def get_bm25_results(dataset: str, corpus, queries) -> Dict:
+    from beir.retrieval.evaluation import EvaluateRetrieval
+    from beir.retrieval.search.lexical import BM25Search as BM25
+
+    index_name = f"beir_{dataset}"
+    username = "elastic"
+    password = "FjZD_LI-=AJOtsfpq9U*"
+
+    # url = f"https://{username}:{password}@rush-compute-01.tech.cornell.edu:9200""
+    hostname = f"{username}:{password}@rush-compute-01.tech.cornell.edu:9200"
+    bm25_model = BM25(index_name=index_name, hostname=hostname, initialize=True)
+    retriever = EvaluateRetrieval(bm25_model)
+    return retriever.retrieve(corpus, queries)
+
+
+def load_beir_uncached(dataset: str, split: str) -> Tuple[datasets.Dataset, datasets.Dataset, Dict[str, Dict[str, int]], Dict]:
+    """Loads a BEIR test dataset through tools provided by BeIR.
 
     Returns:
         corpus (datasets.Dataset): Corpus of documents
             keys -- corpus_id, text
         queries (datasets.Dataset):  Corpus of queries
             keys -- query_id, text
+        qrels
+        bm25_results
     """
 
     #### Download msmarco.zip dataset and unzip the dataset
-    dataset = "msmarco"
     url = "https://public.ukp.informatik.tu-darmstadt.de/thakur/BEIR/datasets/{}.zip".format(dataset)
     out_dir = os.path.join(pathlib.Path(__file__).parent.absolute(), "datasets")
     data_path = download_url_and_unzip(url, out_dir)
 
     ### Load BEIR MSMARCO training dataset, this will be used for query and corpus for reference.
-    corpus, queries, _ = beir.datasets.data_loader.GenericDataLoader(data_path).load(split=split)
+    corpus, queries, qrels = beir.datasets.data_loader.GenericDataLoader(data_path).load(split=split)
+    bm25_results = get_bm25_results(dataset=dataset, corpus=corpus, queries=queries)
 
     corpus = datasets.Dataset.from_list(
         [{"id": k, "text": v["text"]} for k,v in corpus.items()])
@@ -109,7 +127,7 @@ def load_msmarco_beir_uncached(split: str) -> Tuple[datasets.Dataset, datasets.D
     queries = datasets.Dataset.from_list([{ "id": k, "text": v} for k,v in queries.items()])
     # queries._fingerprint = md5_hash(f"msmarco_beir_{split}") 
 
-    return corpus, queries
+    return corpus, queries, qrels, bm25_results
 
 
 def embed_with_cache(embedder: str, cache_name: str, texts: List[str]) -> datasets.Dataset:
@@ -135,43 +153,94 @@ def embed_with_cache(embedder: str, cache_name: str, texts: List[str]) -> datase
     # embeddings = np.random.rand(len(texts), 768)
 
     datasets_list = []
-    dataset_size = 1_000_000
+    max_dataset_size = 1_000_000
     i = 0
     while i < len(embeddings):
         dataset = datasets.Dataset.from_dict({
-            "embeds": embeddings[i : i + dataset_size] 
+            "embeds": embeddings[i : i + max_dataset_size] 
         })
         datasets_list.append(dataset)
-        i += dataset_size
+        i += max_dataset_size
     
     d = datasets.concatenate_datasets(datasets_list)
     d.save_to_disk(cache_path)
     return d
 
 
-def load_msmarco_beir(split: str) -> Tuple[datasets.Dataset, datasets.Dataset]:
+def load_beir(dataset: str, split: str) -> Tuple[datasets.Dataset, datasets.Dataset, Dict[str, Dict[str, int]]]:
     cache_path = datasets.config.HF_DATASETS_CACHE # something like /home/jxm3/.cache/huggingface/datasets
-    corpus_path = os.path.join(cache_path, f'tti_beir_local_msmarco_corpus_{split}')
-    queries_path = os.path.join(cache_path, f'tti_beir_local_msmarco_queries_{split}')
+    corpus_path = os.path.join(cache_path, f'tti_beir_local_{dataset}_corpus_{split}')
+    queries_path = os.path.join(cache_path, f'tti_beir_local_{dataset}_queries_{split}')
+    qrels_path = os.path.join(cache_path, f'tti_beir_local_{dataset}_qrels_{split}.p')
+    bm25_path = os.path.join(cache_path, f'tti_beir_local_{dataset}_bm25_results')
 
-    print(corpus_path)
-
-    if os.path.exists(corpus_path) and os.path.exists(queries_path):
-        logging.info("Loading MSMARCO split %s corpus from path %s", split, corpus_path)
+    if os.path.exists(corpus_path) and os.path.exists(queries_path) and os.path.exists(qrels_path) and os.path.exists(bm25_path):
+        logging.info(f"Loading {dataset} split %s corpus from path %s", split, corpus_path)
         corpus = datasets.load_from_disk(corpus_path)
-        logging.info("Loading MSMARCO split %s queries from path %s", split, queries_path)
+        logging.info(f"Loading {dataset} split %s queries from path %s", split, queries_path)
         queries = datasets.load_from_disk(queries_path)
+        logging.info(f"Loading {dataset} split %s qrels from path %s", split, qrels_path)
+        qrels = pickle.load(open(qrels_path, 'rb'))
+        logging.info(f"Loading {dataset} split %s bm25 results from path %s", split, bm25_path)
+        bm25_path = pickle.load(open(bm25_path, 'rb'))
     else:
-        corpus, queries = load_msmarco_beir_uncached(split=split)
+        corpus, queries, qrels, bm25_results = load_beir_uncached(dataset=dataset, split=split)
+        logging.info(f"Saving {dataset} split %s corpus to path %s", split, corpus_path)
         corpus.save_to_disk(corpus_path)
-        logging.info("Saving MSMARCO split %s corpus to path %s", split, corpus_path)
+        logging.info(f"Saving {dataset} split %s queries to path %s", split, queries_path)
         queries.save_to_disk(queries_path)
-        logging.info("Saving MSMARCO split %s queries to path %s", split, queries_path)
-    
-    return corpus, queries
+        pickle.dump(qrels, open(qrels_path, 'wb'))
+        pickle.dump(bm25_results, open(bm25_path, 'wb'))
+
+    return corpus, queries, qrels, bm25_results
 
 
-class MSMarcoDataset(torch.utils.data.Dataset):
+class BeirDataset(torch.utils.data.Dataset):
+    corpus: datasets.Dataset
+    queries: datasets.Dataset
+    query_embeddings: datasets.Dataset
+    corpus_embeddings: datasets.Dataset
+    size: int
+    column_names: List[str] = ["idx", "query_embedding", "document_embeddings", "negative_document_embeddings"]
+    hard_negatives: Optional[Dict[str, Any]]
+    def __init__(
+            self,
+            dataset: str,
+            embedder: str
+        ):
+       
+        self.corpus, self.queries, self.qrels, self.bm25_results = load_beir(dataset=dataset, split="train")
+        self.query_embeddings = embed_with_cache(embedder, f"{dataset}_queries", [q['text'] for q in self.queries])
+        self.corpus_embeddings = embed_with_cache(embedder, f"{dataset}_corpus", [c['text'] for c in self.corpus])
+        self.size = len(self.queries)
+
+    def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
+        """Returns example from BEIR, including query, document, and hard-negative document."""
+        raise NotImplementedError
+        # ex = {}
+        # if idx < len(self.queries):
+        #     ex.update(self.queries[idx])
+        #     q_id = self.query_ids[idx]
+        #     ex['qrels_idxs'] = self.qrels_idxs[q_id]
+        #     ex['qrels_scores'] = self.qrels_scores[q_id]
+        #     if not len(ex['qrels_idxs']):
+        #         print('Warning: BEIR dataset trying to return example without qrels')
+        #         # raise ValueError('BEIR dataset trying to return example without qrels')
+        # if idx < len(self.corpus):
+        #     ex.update({ "self.corpus_embedding": }[idx])
+
+        # assert ('document_input_ids' in ex) or ('query_input_ids' in ex)
+        # return ex
+        # 
+        # return {
+        #     "idx": idx,
+        #     "query_embedding": self.query_embeddings[idx]["embeds"],
+        #     "document_embeddings": self.corpus_embeddings[document_id]["embeds"],
+        #     "negative_document_embeddings": self.corpus_embeddings[neg_embedding_id]["embeds"],
+        # }
+
+
+class MsmarcoDatasetHardNegatives(BeirDataset):
     corpus: datasets.Dataset
     queries: datasets.Dataset
     query_embeddings: datasets.Dataset
@@ -183,21 +252,8 @@ class MSMarcoDataset(torch.utils.data.Dataset):
             self,
             embedder: str
         ):
-       
-        self.corpus, self.queries = load_msmarco_beir(split="train")
-        self.query_embeddings = embed_with_cache(embedder, "msmarco_queries", [q['text'] for q in self.queries])
-        self.corpus_embeddings = embed_with_cache(embedder, "msmarco_corpus", [c['text'] for c in self.corpus])
+        super().__init__(dataset="msmarco", embedder=embedder)
         self.hard_negatives = load_msmarco_hard_negatives()
-        self.size = len(self.queries)
-    
-    def __len__(self):
-        return self.size
-
-    def next_dataset_idx(self) -> int:
-        return 0
-        
-    def reset_dataset_idx(self, idx: int) -> None:
-        pass
 
     def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
         """Returns example from MSMARCO, including query, document, and hard-negative document."""
@@ -228,5 +284,12 @@ class MSMarcoDataset(torch.utils.data.Dataset):
 
 
 if __name__ == '__main__':
-    dataset = MSMarcoDataset(embedder="sentence-transformers/gtr-t5-base")
+    nfcorpus = BeirDataset(
+        dataset="nfcorpus",    
+        embedder="sentence-transformers/gtr-t5-base"
+    )
+
+    dataset = MsmarcoDatasetHardNegatives(
+        embedder="sentence-transformers/gtr-t5-base"
+    )
     print(dataset[10_001])

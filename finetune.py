@@ -1,24 +1,3 @@
-'''
-This example shows how to train a SOTA Bi-Encoder for the MS Marco dataset (https://github.com/microsoft/MSMARCO-Passage-Ranking).
-The model is trained using hard negatives which were specially mined with different dense and lexical search methods for MSMARCO. 
-
-This example has been taken from here with few modifications to train SBERT (MSMARCO-v3) models: 
-(https://github.com/UKPLab/sentence-transformers/blob/master/examples/training/ms_marco/train_bi-encoder-v3.py)
-
-The queries and passages are passed independently to the transformer network to produce fixed sized embeddings.
-These embeddings can then be compared using cosine-similarity to find matching passages for a given query.
-
-For training, we use MultipleNegativesRankingLoss. There, we pass triplets in the format:
-(query, positive_passage, negative_passage)
-
-Negative passage are hard negative examples, that were mined using different dense embedding methods and lexical search methods.
-Each positive and negative passage comes with a score from a Cross-Encoder. This allows denoising, i.e. removing false negative
-passages that are actually relevant for the query.
-
-Running this script:
-python train_msmarco_v3.py
-'''
-
 from torch.utils.data import Dataset
 import pathlib, os, gzip, json
 import logging
@@ -28,7 +7,7 @@ import torch
 import transformers
 import wandb
 
-from dataset import MSMarcoDataset
+from dataset import BeirDataset, MsmarcoDatasetHardNegatives
 from model import Model
 from run_args import ModelArguments, DataTrainingArguments, TrainingArguments
 from trainer import CustomTrainer
@@ -51,8 +30,29 @@ logging.basicConfig(format='%(asctime)s - %(message)s',
                     datefmt='%Y-%m-%d %H:%M:%S',
                     level=logging.INFO)
 
+beir_dataset_names = [
+    # these are the 5 smallest beir datasets...
+    # 'arguana', # problem: query-doc IDs don't match? (TODO: investigate...)
+    'nfcorpus',
+    'scidocs', 
+    'scifact',
+    'fiqa',
+    ########
+    # 'trec-covid',
+    # Other ones are certainly too big for repeated eval
+    # 'webis-touche2020',
+    # 'fever', 'quora',
+]
+beir_dict = {
+    d: BeirDataset(dataset=d, embedder=model_args.embedder) for d in ["nfcorpus"]
+}
+retrieval_datasets = {
+    **{f"BeIR/{k}": v for k,v in beir_dict.items()}
+}
 
-train_dataset = MSMarcoDataset(embedder=model_args.embedder)
+train_dataset = MsmarcoDatasetHardNegatives(
+    embedder=model_args.embedder
+)
 
 model = Model()
 trainer = CustomTrainer(
@@ -60,6 +60,7 @@ trainer = CustomTrainer(
     args=training_args,
     train_dataset=train_dataset,
     eval_dataset=None,
+    retrieval_datasets=retrieval_datasets,
 )
 trainer.train()
 

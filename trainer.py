@@ -1,12 +1,20 @@
-from typing import Dict, Tuple, Union
+from typing import Dict, Optional, Tuple, Union
+import datasets
 import torch
 import transformers
 
+from dataset import BeirDataset
+from helpers import RerankHelper
 from model import Model
 
+
 class CustomTrainer(transformers.Trainer):
-    def __init__(self, *args, **kwargs):
+    retrieval_datasets: Dict[str, datasets.Dataset]
+
+    def __init__(self, *args,
+                 retrieval_datasets: Dict[str, datasets.Dataset], **kwargs):
         super().__init__(*args, **kwargs)
+        self.retrieval_datasets = retrieval_datasets
         self._signature_columns = [
             "idx", "query_embedding", "document_embeddings", "negative_document_embeddings"]
 
@@ -49,3 +57,79 @@ class CustomTrainer(transformers.Trainer):
         })
 
         return loss
+    
+    # Custom retrieval evalution code
+    def _retrieval_evaluate(
+            self,
+            eval_dataset: BeirDataset,
+            metric_key_prefix: str,
+        ) -> Dict[str, float]:
+        # github.com/jxmorris12/tti/blob/master/trainer.py
+        # github.com/beir-cellar/beir/blob/main/examples/retrieval/evaluation/reranking/evaluate_bm25_ce_reranking.py
+        from beir.retrieval.evaluation import EvaluateRetrieval
+
+        dataloader = self.get_eval_dataloader(eval_dataset)
+        model = self._wrap_model(self.model, training=False, dataloader=dataloader)
+
+        # if full fp16 or bf16 eval is wanted and this funciton isn't called
+        # while ``train`` is running, cast it to the right dtype first and then put on device
+        if not self.is_in_train:
+            if self.args.fp16_full_eval:
+                model = model.to(dtype=torch.float16, device=self.args.device)
+            elif self.args.bf16_full_eval:
+                model = model.to(dtype=torch.bfloat16, device=self.args.device)
+        model.eval()
+        
+        reranker = RerankHelper(self.model, batch_size=128)
+
+        # TODO cache this if it's slow
+        # index_name = ""
+        # hostname = "rush-compute-01"
+        # username = "elastic"
+        # password = "FjZD_LI-=AJOtsfpq9U*"
+
+        # url = f"https://{username}:{password}@rush-compute-01.tech.cornell.edu:9200""
+
+        # Rerank top-100 results using the reranker provided
+        rerank_results = reranker.rerank(eval_dataset.corpus, eval_dataset.queries, eval_dataset.bm25_results, top_k=100)
+
+        #### Evaluate your retrieval using NDCG@k, MAP@K ...
+        ndcg, _map, recall, precision = EvaluateRetrieval.evaluate(eval_dataset.qrels, rerank_results, [1, 5, 10, 100])
+
+        return {
+            **ndcg, **_map, **recall, **precision
+        }
+    
+
+    def evaluate_retrieval_datasets(self) -> Dict[str, float]:
+        all_metrics = {}
+        for eval_dataset_name, eval_dataset in self.retrieval_datasets.items():
+            metric_key_prefix = f"eval_{eval_dataset_name}"
+            metrics = self._retrieval_evaluate(
+                eval_dataset=eval_dataset,
+                metric_key_prefix=metric_key_prefix,
+            )
+                # Prefix all keys with metric_key_prefix + '_'
+            for key in list(metrics.keys()):
+                if not key.startswith(f"{metric_key_prefix}_"):
+                    metrics[f"{metric_key_prefix}_{key}"] = metrics.pop(key)
+                    
+            self._memory_tracker.stop_and_update_metrics(metrics)
+            self.log(metrics)
+            all_metrics.update(metrics)
+        return all_metrics
+
+    def _maybe_log_save_evaluate(self, *args, **kwargs):
+        ####   (have to hook in here to call my special function)
+        # 
+        # evaluate on retrieval datasets!
+
+        # check should_evaluate bool because it'll be reset by call to super()..
+        should_evaluate = self.control.should_evaluate
+        
+        # do all the other stuff
+        super()._maybe_log_save_evaluate(*args, **kwargs)
+
+        # do my custom eval
+        if should_evaluate:
+            self.evaluate_retrieval_datasets()

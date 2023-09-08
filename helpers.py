@@ -378,3 +378,54 @@ def download_url_and_unzip(url: str, out_dir: str, chunk_size: int = 1024) -> st
         unzip(zip_file, out_dir)
     
     return os.path.join(out_dir, dataset.replace(".zip", ""))
+
+
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+class RerankHelper:
+    """Wraps our model and does reranking.
+    
+    Template: https://github.com/beir-cellar/beir/blob/main/beir/reranking/rerank.py#L7
+    """
+    def __init__(self, model, tokenizer):
+        self.model = model
+        self.tokenizer = tokenizer
+    
+    def _score(self, query: str, corpus: List[str]) -> float:
+        query = self.tokenizer(query, return_tensors='pt').to(device)
+        corpus = self.tokenizer(corpus, return_tensors='pt').to(device)
+        return self.model(query_embeddings=..., corpus=...)
+    
+    def rerank(self, 
+               corpus: Dict[str, Dict[str, str]], 
+               queries: Dict[str, str],
+               results: Dict[str, Dict[str, float]],
+               top_k: int) -> Dict[str, Dict[str, float]]:
+        
+        sentence_pairs, pair_ids = [], []
+        rerank_scores = []
+        
+        #### Starting to Rerank using cross-attention
+        logging.info("Starting To Rerank Top-{}....".format(top_k))
+        
+        for query_id in results:
+            corpus = []
+            if len(results[query_id]) > top_k:
+                for (doc_id, _) in sorted(results[query_id].items(), key=lambda item: item[1], reverse=True)[:top_k]:
+                    pair_ids.append([query_id, doc_id])
+                    corpus_text = (corpus[doc_id].get("title", "") + " " + corpus[doc_id].get("text", "")).strip()
+                    corpus.append(corpus_text)
+            
+            else:
+                for doc_id in results[query_id]:
+                    pair_ids.append([query_id, doc_id])
+                    corpus_text = (corpus[doc_id].get("title", "") + " " + corpus[doc_id].get("text", "")).strip()
+                    corpus.append(corpus_text)
+            rerank_scores.extend(self._score(queries[query_id], corpus))
+
+        #### Reranking results
+        self.rerank_results = {query_id: {} for query_id in results}
+        for pair, score in zip(pair_ids, rerank_scores):
+            query_id, doc_id = pair[0], pair[1]
+            self.rerank_results[query_id][doc_id] = score
+
+        return self.rerank_results 
