@@ -1,6 +1,7 @@
 from torch.utils.data import Dataset
 import pathlib, os, gzip, json
 import logging
+import os
 import random
 
 import torch
@@ -15,7 +16,6 @@ from trainer import CustomTrainer
 
 assert torch.cuda.device_count() > 0, "can't train without CUDA"
 
-
 wandb.init(
     project="dataset-transformer",
     # name=exp_name,
@@ -25,6 +25,7 @@ wandb.init(
 
 parser = transformers.HfArgumentParser((ModelArguments, DataTrainingArguments, TrainingArguments))
 model_args, data_args, training_args = parser.parse_args_into_dataclasses()
+transformers.set_seed(training_args.seed)
 
 logging.basicConfig(format='%(asctime)s - %(message)s',
                     datefmt='%Y-%m-%d %H:%M:%S',
@@ -44,7 +45,7 @@ beir_dataset_names = [
     # 'fever', 'quora',
 ]
 beir_dict = {
-    d: BeirDataset(dataset=d, embedder=model_args.embedder) for d in ["nfcorpus"]
+    d: BeirDataset(dataset=d, embedder=model_args.embedder) for d in beir_dataset_names
 }
 retrieval_datasets = {
     **{f"BeIR/{k}": v for k,v in beir_dict.items()}
@@ -53,6 +54,11 @@ retrieval_datasets = {
 train_dataset = MsmarcoDatasetHardNegatives(
     embedder=model_args.embedder
 )
+
+# train_dataset = None
+# trainer.evaluate_retrieval_datasets()
+
+os.environ['TOKENIZERS_PARALLELISM'] = 'false'
 
 model = Model()
 trainer = CustomTrainer(

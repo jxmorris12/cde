@@ -17,6 +17,9 @@ class CustomTrainer(transformers.Trainer):
         self.retrieval_datasets = retrieval_datasets
         self._signature_columns = [
             "idx", "query_embedding", "document_embeddings", "negative_document_embeddings"]
+    
+    def evaluate(*args, **kwargs) -> Dict[str, float]:
+        return {}
 
     def compute_loss(
         self,
@@ -80,7 +83,7 @@ class CustomTrainer(transformers.Trainer):
                 model = model.to(dtype=torch.bfloat16, device=self.args.device)
         model.eval()
         
-        reranker = RerankHelper(self.model, batch_size=128)
+        reranker = RerankHelper(self.model)
 
         # TODO cache this if it's slow
         # index_name = ""
@@ -91,7 +94,12 @@ class CustomTrainer(transformers.Trainer):
         # url = f"https://{username}:{password}@rush-compute-01.tech.cornell.edu:9200""
 
         # Rerank top-100 results using the reranker provided
-        rerank_results = reranker.rerank(eval_dataset.corpus, eval_dataset.queries, eval_dataset.bm25_results, top_k=100)
+        rerank_results = reranker.rerank(
+            eval_dataset.corpus, 
+            eval_dataset.corpus_embeddings,
+            eval_dataset.queries, 
+            eval_dataset.query_embeddings,
+            results=eval_dataset.ance_results, top_k=100)
 
         #### Evaluate your retrieval using NDCG@k, MAP@K ...
         ndcg, _map, recall, precision = EvaluateRetrieval.evaluate(eval_dataset.qrels, rerank_results, [1, 5, 10, 100])

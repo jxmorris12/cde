@@ -22,62 +22,6 @@ def get_dataset_name(d: datasets.Dataset) -> str:
     return f"{d.builder_name}.{d.config_name}[{d.split}]"
 
 
-# def inverse_cloze(
-#     input_ids: torch.Tensor, pad_token_id: int) -> Tuple[torch.Tensor, torch.Tensor]:
-#     """Creates Inverse Cloze ..."""
-
-
-def independent_crop(
-    input_ids: torch.Tensor, pad_token_id: int,
-    l1: int = 256, l2: int = 256) -> Tuple[torch.Tensor, torch.Tensor]:
-    """Returns two independent crops from input_ids.
-    
-    Args:
-        input_ids: tensor of IDs
-        pad_token_id: ID of pad tokens in input_ids
-        l1: length of span 1, cropped
-        l2: length of span 2, cropped
-    Returns:
-        span1: first crop (of length l1)
-        span2: second crop (of length l2)
-    """ 
-    # Count tokens until pad.
-    if (input_ids == pad_token_id).sum() == 0:
-        N = len(input_ids)
-    else:
-        N = (input_ids == pad_token_id).int().argmax().item()
-    
-    ####
-    ###
-    ##
-    ## Contriever:  We use the random cropping data
-    ## augmentation, with documents of 256 tokens and span 
-    ## sizes sampled between 5% and 50% of the document
-    ## length
-    ##
-    ###
-    #####
-    ####### LaPraDor: The maximum lengths set for queries and
-    ####### documents are 64 and 350...
-    #####
-    # TODO is this divide-by-two a good idea? (Don't want s1=s2 ever..)
-    nl1 = min(N//2, l1)
-    nl2 = min(N//2, l2)
-
-    s1_start = random.randint(0, N-nl1)
-    s2_start = random.randint(0, N-nl2)
-
-    s1 = input_ids[s1_start:s1_start+nl1]
-    s2 = input_ids[s2_start:s2_start+nl2]
-    # if len(s1) < l1:
-    #     p1 = torch.full(size=(l1 - len(s1),), fill_value=pad_token_id).to(s1.device)
-    #     s1 = torch.cat((s1, p1), dim=0)
-    # if len(s2) < l2:
-    #     p2 = torch.full(size=(l2 - len(s2),), fill_value=pad_token_id).to(s2.device)
-    #     s2 = torch.cat((s2, p2), dim=0)
-    return (s1, s2)
-
-
 def process_qrels_uncached(corpus: datasets.Dataset, qrels: datasets.Dataset) -> Tuple[Dict[str, List[float]], Dict[str, List[str]]]:
     qrels_idxs = collections.defaultdict(list)
     qrels_scores = collections.defaultdict(list)
@@ -169,103 +113,6 @@ def strip_extension(filename: str) -> str:
     return os.path.splitext(filename)[0]
 
 
-def compute_idf(freqs: torch.Tensor) -> torch.Tensor:
-    """ compute IDF from word-per-document frequencies """
-    # some tokens (pad) appear in every doc, so this works.
-    N = freqs.max()
-    f = torch.where(freqs == 0, N * 100, freqs)
-    idf = (
-        ((N - f + 0.5) / (f + 0.5)) + 1
-    ).log()
-    idf -= idf.min() # set non-existent token IDF to zero
-    return idf
-
-
-def zero_special_tokens_counts(
-        tokenizer: transformers.AutoTokenizer,
-        counts: torch.Tensor
-    ) -> torch.Tensor:
-
-    #######################################
-    ### Temporary: don't change counts ###
-    # return counts
-    #######################################
-    
-    vocab_size = counts.shape[-1]
-
-    all_special_ids = torch.tensor(tokenizer.all_special_ids)
-    special_ids_mask = (
-        torch.arange(vocab_size)[:, None] == all_special_ids[None, :]
-    ).any(dim=1).to(counts.device)
-    zero_counts = torch.zeros_like(counts, device=counts.device)
-    return torch.where(special_ids_mask, zero_counts, counts)
-
-def compute_token_counts(
-        tokenizer: transformers.AutoTokenizer,
-        dataset: datasets.Dataset,
-        use_cache: bool = True
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
-    """Computes histogram, with caching.
-    
-    Returns three-tuple:
-        (i) total number of tokens
-        (ii) total documents containing token
-        (iii) IDF
-    """
-    dataset_cache_file = dataset.cache_files[0]['filename']
-    cache_file = strip_extension(dataset_cache_file) + '_token_counts.p'
-
-    if not (use_cache and os.path.exists(cache_file)):
-        token_freqs, document_token_freqs = compute_token_counts_uncached(
-            tokenizer=tokenizer, dataset=dataset
-        )
-        if use_cache:
-            pickle.dump((token_freqs, document_token_freqs), open(cache_file, 'wb'))
-    else:
-        token_freqs, document_token_freqs = pickle.load(open(cache_file, 'rb'))
-    
-    # Important: normalize token counts by number of documents.
-    token_freqs = token_freqs.float() / len(dataset)
-    token_freqs = zero_special_tokens_counts(tokenizer=tokenizer, counts=token_freqs)
-
-    return token_freqs, compute_idf(document_token_freqs)
-
-
-def get_doc_counts(input_ids: torch.Tensor, vocab_size: int) -> torch.Tensor:
-    """Returns the total number occurrences (given a batch of documents in `input_ids`)
-    of each given word.
-
-    Returns:
-        counts, long torch.Tensor of shape (vocab_size,)
-    """
-    B = input_ids.shape[0]
-    f = torch.zeros((B, vocab_size), dtype=torch.long, device=input_ids.device)
-    vals = torch.ones_like(input_ids, device=input_ids.device)
-    vocab_totals = f.scatter_add(1, input_ids, vals)
-    return vocab_totals.sum(dim=0)
-
-
-def get_doc_frequencies(input_ids: torch.Tensor, vocab_size: int) -> torch.Tensor:
-    """Returns the total number of documents (given a batch of documents in `input_ids`)
-    which contain each given word.
-
-    Returns:
-        counts, long torch.Tensor of shape (vocab_size,)
-    """
-    B = input_ids.shape[0]
-    f = torch.zeros((B, vocab_size), dtype=torch.long, device=input_ids.device)
-    vals = torch.ones_like(input_ids, device=input_ids.device)
-    vocab_totals = f.scatter_add(1, input_ids, vals)
-    return vocab_totals.clamp(max=1).sum(dim=0)
-
-
-def get_doc_frequencies_slow(input_ids: torch.Tensor, vocab_size: int) -> torch.Tensor:
-    f = torch.zeros((vocab_size,), device=input_ids.device)
-    for idx in range(len(input_ids)):
-        f += input_ids[idx].bincount(minlength=vocab_size).clamp(max=1)
-    return f
-
-
 def md5_hash(t: Tuple[str]) -> str:
     return hashlib.md5('__'.join(t).encode()).hexdigest()
 
@@ -275,66 +122,6 @@ def md5_hash_kwargs(**kwargs) -> str:
     safe_kwargs = {k: str(v) for k,v in kwargs.items() if not k.startswith('_')}
     s = json.dumps(safe_kwargs, sort_keys=True)
     return hashlib.md5(s.encode()).hexdigest()
-
-
-def pad_to_same_length(t1: torch.Tensor, t2: torch.Tensor, pad_token: int) -> Tuple[torch.Tensor, torch.Tensor]:
-    assert len(t1.shape) == len(t2.shape) == 2
-    if t1.shape[1] == t2.shape[1]:
-        return (t1, t2)
-    elif t1.shape[1] < t2.shape[1]:
-        # A is the one we need to pad
-        A, B = t1, t2
-    else:
-        B, A = t1, t2
-    
-    num_pad_tokens = B.shape[1] - A.shape[1]
-    padding = torch.tensor(pad_token, dtype=A.dtype, device=A.device)[None, None]
-    padding = padding.repeat((len(A), num_pad_tokens))
-    A = torch.cat((A, padding), dim=1)
-
-    if t1.shape[1] < t2.shape[1]:
-        # A is the one we need to pad
-        return A, B
-    else:
-        return B, A
-
-
-def tokenize_dataset(
-        dataset: datasets.Dataset,
-        tokenizer: transformers.PreTrainedTokenizer,
-        max_length: int,
-        text_key: str,
-        padding_strategy: str
-    ) -> datasets.Dataset:
-    def tokenize_text(ex: Dict) -> Dict:
-        tt = tokenizer(
-            ex[text_key],
-            max_length=max_length,
-            truncation=True,
-            padding=padding_strategy,
-        )
-        for k,v in tt.items():
-            ex[f"{text_key}_{k}"] = v
-        return ex
-
-    # generate unique hash for tokenizer
-    vocab = tokenizer.vocab
-    vocab_words = tuple(sorted(vocab.keys(), key=lambda word: vocab[word]))
-    vocab_hash = md5_hash(vocab_words)
-
-    data_fingerprint = '__'.join((
-        dataset._fingerprint, str(vocab_hash), str(max_length),
-        text_key, padding_strategy
-    ))
-    data_fingerprint = md5_hash(data_fingerprint)
-    dataset = dataset.map(
-        tokenize_text,
-        new_fingerprint=data_fingerprint,
-        batched=True,
-        load_from_cache_file=True,
-    )
-    return dataset
-
 
 def download_url(url: str, save_path: str, chunk_size: int = 1024):
     """Download url with progress bar using tqdm
@@ -386,41 +173,46 @@ class RerankHelper:
     
     Template: https://github.com/beir-cellar/beir/blob/main/beir/reranking/rerank.py#L7
     """
-    def __init__(self, model, tokenizer):
+    def __init__(self, model):
         self.model = model
-        self.tokenizer = tokenizer
     
-    def _score(self, query: str, corpus: List[str]) -> float:
-        query = self.tokenizer(query, return_tensors='pt').to(device)
-        corpus = self.tokenizer(corpus, return_tensors='pt').to(device)
-        return self.model(query_embeddings=..., corpus=...)
+    def _score(self, query_embedding: str, corpus_embeddings: List[str]) -> float:
+        with torch.no_grad():
+            scores = self.model(query_embedding=query_embedding[None], document_embeddings=corpus_embeddings[None])
+        return scores.flatten().cpu().tolist()
     
     def rerank(self, 
                corpus: Dict[str, Dict[str, str]], 
+               corpus_embeddings: datasets.Dataset,
                queries: Dict[str, str],
+               query_embeddings: datasets.Dataset,
                results: Dict[str, Dict[str, float]],
                top_k: int) -> Dict[str, Dict[str, float]]:
         
         sentence_pairs, pair_ids = [], []
         rerank_scores = []
+
+        query_idx_dict = {key: j for j, key in enumerate(queries['id'])} # Map IDs to idxs
+        corpus_idx_dict = {key: j for j, key in enumerate(corpus['id'])} # Map IDs to idxs
         
         #### Starting to Rerank using cross-attention
         logging.info("Starting To Rerank Top-{}....".format(top_k))
         
-        for query_id in results:
-            corpus = []
+        for query_id in tqdm.tqdm(results, desc="evaluating dataset"):
+            # TODO: call self._score in batch :)
+            minicorpus = []
             if len(results[query_id]) > top_k:
                 for (doc_id, _) in sorted(results[query_id].items(), key=lambda item: item[1], reverse=True)[:top_k]:
                     pair_ids.append([query_id, doc_id])
-                    corpus_text = (corpus[doc_id].get("title", "") + " " + corpus[doc_id].get("text", "")).strip()
-                    corpus.append(corpus_text)
-            
+                    minicorpus.append(corpus_embeddings[corpus_idx_dict[doc_id]]["embeds"])
             else:
                 for doc_id in results[query_id]:
                     pair_ids.append([query_id, doc_id])
-                    corpus_text = (corpus[doc_id].get("title", "") + " " + corpus[doc_id].get("text", "")).strip()
-                    corpus.append(corpus_text)
-            rerank_scores.extend(self._score(queries[query_id], corpus))
+                    minicorpus.append(corpus_embeddings[corpus_idx_dict[doc_id]]["embeds"])
+            
+            query_embedding = torch.tensor(query_embeddings[query_idx_dict[query_id]]["embeds"]).to(device)
+            minicorpus_embeddings = torch.tensor(minicorpus).to(device)
+            rerank_scores.extend(self._score(query_embedding, minicorpus_embeddings))
 
         #### Reranking results
         self.rerank_results = {query_id: {} for query_id in results}
