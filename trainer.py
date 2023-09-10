@@ -94,7 +94,7 @@ class CustomTrainer(transformers.Trainer):
         # url = f"https://{username}:{password}@rush-compute-01.tech.cornell.edu:9200""
 
         # Rerank top-100 results using the reranker provided
-        rerank_results = reranker.rerank(
+        rerank_results_model, rerank_results_biencoder = reranker.rerank(
             eval_dataset.corpus, 
             eval_dataset.corpus_embeddings,
             eval_dataset.queries, 
@@ -102,12 +102,20 @@ class CustomTrainer(transformers.Trainer):
             results=eval_dataset.ance_results, top_k=100)
 
         #### Evaluate your retrieval using NDCG@k, MAP@K ...
-        ndcg, _map, recall, precision = EvaluateRetrieval.evaluate(eval_dataset.qrels, rerank_results, [1, 5, 10, 100])
+        ndcg, _map, recall, precision = EvaluateRetrieval.evaluate(eval_dataset.qrels, rerank_results_model, [1, 5, 10, 100])
+        embed_ndcg, embed_map, embed_recall, embed_precision = EvaluateRetrieval.evaluate(eval_dataset.qrels, rerank_results_biencoder, [1, 5, 10, 100])
 
-        return {
+        model_metrics = {
             **ndcg, **_map, **recall, **precision
         }
-    
+        biencoder_metrics = {
+            **embed_ndcg, **embed_map, **embed_recall, **embed_precision
+        }
+        biencoder_metrics = { f"embed/{k}": v for k,v in biencoder_metrics.items() }
+        return {
+            **model_metrics, **biencoder_metrics
+        }
+
 
     def evaluate_retrieval_datasets(self) -> Dict[str, float]:
         all_metrics = {}

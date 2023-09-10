@@ -190,7 +190,8 @@ class RerankHelper:
                top_k: int) -> Dict[str, Dict[str, float]]:
         
         sentence_pairs, pair_ids = [], []
-        rerank_scores = []
+        rerank_scores_model = []
+        rerank_scores_biencoder = []
 
         query_idx_dict = {key: j for j, key in enumerate(queries['id'])} # Map IDs to idxs
         corpus_idx_dict = {key: j for j, key in enumerate(corpus['id'])} # Map IDs to idxs
@@ -212,12 +213,18 @@ class RerankHelper:
             
             query_embedding = torch.tensor(query_embeddings[query_idx_dict[query_id]]["embeds"]).to(device)
             minicorpus_embeddings = torch.tensor(minicorpus).to(device)
-            rerank_scores.extend(self._score(query_embedding, minicorpus_embeddings))
+
+            model_score = self._score(query_embedding, minicorpus_embeddings)
+            biencoder_score = torch.nn.functional.cosine_similarity(query_embedding, minicorpus_embeddings).flatten().cpu().tolist()
+            rerank_scores_model.extend(model_score)
+            rerank_scores_biencoder.extend(biencoder_score)
 
         #### Reranking results
-        self.rerank_results = {query_id: {} for query_id in results}
-        for pair, score in zip(pair_ids, rerank_scores):
+        rerank_results_model = {query_id: {} for query_id in results}
+        rerank_results_biencoder = {query_id: {} for query_id in results}
+        for pair, model_score, biencoder_score in zip(pair_ids, rerank_scores_model, rerank_scores_biencoder):
             query_id, doc_id = pair[0], pair[1]
-            self.rerank_results[query_id][doc_id] = score
+            rerank_results_model[query_id][doc_id] = model_score
+            rerank_results_biencoder[query_id][doc_id] = biencoder_score
 
-        return self.rerank_results 
+        return (rerank_results_model, rerank_results_biencoder) 
