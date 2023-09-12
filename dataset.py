@@ -252,6 +252,7 @@ def load_beir(dataset: str, split: str) -> Tuple[datasets.Dataset, datasets.Data
 
 
 class BeirDataset(torch.utils.data.Dataset):
+    name: str
     corpus: datasets.Dataset
     queries: datasets.Dataset
     query_embeddings: datasets.Dataset
@@ -266,6 +267,7 @@ class BeirDataset(torch.utils.data.Dataset):
             embedder: str,
             split: str = "test"
         ):
+        self.name = dataset
         self.corpus, self.queries, self.qrels, self.ance_results = load_beir(dataset=dataset, split=split)
         print(f">> embedding dataset {dataset} split {split}")
         self.query_embeddings = embed_with_cache(embedder, f"{dataset}_queries" + ("" if split == "train" else f"_{split}"), [q['text'] for q in self.queries])
@@ -276,18 +278,19 @@ class BeirDataset(torch.utils.data.Dataset):
         return self.size
     
     def tokenize(self, tokenizer: transformers.PreTrainedTokenizer, max_length: int) -> None:
+        print(f"tokenizing {self.name}")
         self.corpus = tokenize_dataset(
             dataset=self.corpus,
             tokenizer=tokenizer,
             max_length=max_length,
-            text_key="text",
+            text_key="document",
             padding_strategy="do_not_pad"
         )
         self.queries = tokenize_dataset(
             dataset=self.queries,
             tokenizer=tokenizer,
             max_length=max_length,
-            text_key="text",
+            text_key="query",
             padding_strategy="do_not_pad"
         )
 
@@ -302,11 +305,10 @@ class BeirDataset(torch.utils.data.Dataset):
             if not len(ex['qrels_idxs']):
                 print('Warning: BEIR dataset trying to return example without qrels')
                 # raise ValueError('BEIR dataset trying to return example without qrels')
-        if idx < len(self.corpus):
-            ex.update({ "self.corpus_embedding": }[idx])
-
-        assert ('document_input_ids' in ex) or ('query_input_ids' in ex)
-        return ex
+        # if idx < len(self.corpus):
+        #     ex.update({ "self.corpus_embedding": }[idx])
+        # assert ('document_input_ids' in ex) or ('query_input_ids' in ex)
+        # return ex
         
         return {
             "idx": idx,

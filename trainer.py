@@ -16,7 +16,10 @@ class CustomTrainer(transformers.Trainer):
         super().__init__(*args, **kwargs)
         self.retrieval_datasets = retrieval_datasets
         self._signature_columns = [
-            "idx", "query_embedding", "document_embeddings", "negative_document_embeddings"]
+            "idx", "query_embedding", "document_embeddings", "negative_document_embeddings",
+            "document_input_ids", "document_attention_mask",
+            "query_input_ids", "query_attention_mask",
+        ]
     
     def evaluate(*args, **kwargs) -> Dict[str, float]:
         return {}

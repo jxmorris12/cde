@@ -30,6 +30,8 @@ transformers.set_seed(training_args.seed)
 logging.basicConfig(format='%(asctime)s - %(message)s',
                     datefmt='%Y-%m-%d %H:%M:%S',
                     level=logging.INFO)
+embedder = transformers.AutoModel.from_pretrained(model_args.embedder)
+embedder_tokenizer =  transformers.AutoTokenizer.from_pretrained(model_args.embedder)
 
 beir_dataset_names = [
     # these are the 5 smallest beir datasets...
@@ -51,15 +53,12 @@ retrieval_datasets = {
     **{f"BeIR/{k}": v for k,v in beir_dict.items()}
 }
 
-train_dataset = MsmarcoDatasetHardNegatives(
-    embedder=model_args.embedder
-)
-
-embedder = transformers.AutoModel.from_pretrained(model_args.embedder)
-embedder_tokenizer =  transformers.AutoTokenizer.from_pretrained(model_args.embedder)
 for k,v in retrieval_datasets.items():
     v.tokenize(tokenizer=embedder_tokenizer, max_length=model_args.max_seq_length)
 
+train_dataset = MsmarcoDatasetHardNegatives(
+    embedder=model_args.embedder
+)
 train_dataset.tokenize(tokenizer=embedder_tokenizer, max_length=model_args.max_seq_length)
 
 
