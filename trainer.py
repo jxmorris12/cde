@@ -50,7 +50,6 @@ class CustomTrainer(transformers.Trainer):
         smart_labels = torch.cat((smart_labels, zero_labels), dim=1)
 
         loss = torch.nn.functional.cross_entropy(scores, smart_labels)
-        # print(f"loss: {loss.item():.2f}")
 
         import wandb
         wandb.log({
@@ -99,7 +98,8 @@ class CustomTrainer(transformers.Trainer):
             eval_dataset.corpus_embeddings,
             eval_dataset.queries, 
             eval_dataset.query_embeddings,
-            results=eval_dataset.ance_results, top_k=100)
+            results=eval_dataset.ance_results, top_k=self.args.per_device_train_batch_size * 2
+        )
 
         #### Evaluate your retrieval using NDCG@k, MAP@K ...
         ndcg, _map, recall, precision = EvaluateRetrieval.evaluate(eval_dataset.qrels, rerank_results_model, [1, 5, 10, 100])

@@ -15,8 +15,45 @@ import torch
 import transformers
 import tqdm
 from helpers import (
-    download_url_and_unzip, download_url
+    download_url_and_unzip, download_url, md5_hash
 )
+
+def tokenize_dataset(
+        dataset: datasets.Dataset,
+        tokenizer: transformers.PreTrainedTokenizer,
+        max_length: int,
+        text_key: str,
+        padding_strategy: str
+    ) -> datasets.Dataset:
+    def tokenize_text(ex: Dict) -> Dict:
+        tt = tokenizer(
+            ex[text_key],
+            max_length=max_length,
+            truncation=True,
+            padding=padding_strategy,
+        )
+        for k,v in tt.items():
+            ex[f"{text_key}_{k}"] = v
+        ex["length"] = [len(tt) for tt in ex[f"{text_key}_input_ids"]]
+        return ex
+
+    # generate unique hash for tokenizer
+    vocab = tokenizer.vocab
+    vocab_words = tuple(sorted(vocab.keys(), key=lambda word: vocab[word]))
+    vocab_hash = md5_hash(vocab_words)
+
+    data_fingerprint = '__'.join((
+        dataset._fingerprint, str(vocab_hash), str(max_length),
+        text_key, padding_strategy
+    ))
+    data_fingerprint = md5_hash(data_fingerprint)
+    dataset = dataset.map(
+        tokenize_text,
+        new_fingerprint=data_fingerprint,
+        batched=True,
+        load_from_cache_file=True,
+    )
+    return dataset
 
 def load_msmarco_hard_negatives_uncached() -> Dict[str, Dict[str, Any]]:
     """Loads hard negative passage for MSMARCO.
@@ -237,31 +274,46 @@ class BeirDataset(torch.utils.data.Dataset):
     
     def __len__(self) -> int:
         return self.size
+    
+    def tokenize(self, tokenizer: transformers.PreTrainedTokenizer, max_length: int) -> None:
+        self.corpus = tokenize_dataset(
+            dataset=self.corpus,
+            tokenizer=tokenizer,
+            max_length=max_length,
+            text_key="text",
+            padding_strategy="do_not_pad"
+        )
+        self.queries = tokenize_dataset(
+            dataset=self.queries,
+            tokenizer=tokenizer,
+            max_length=max_length,
+            text_key="text",
+            padding_strategy="do_not_pad"
+        )
 
     def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
         """Returns example from BEIR, including query, document, and hard-negative document."""
-        raise NotImplementedError
-        # ex = {}
-        # if idx < len(self.queries):
-        #     ex.update(self.queries[idx])
-        #     q_id = self.query_ids[idx]
-        #     ex['qrels_idxs'] = self.qrels_idxs[q_id]
-        #     ex['qrels_scores'] = self.qrels_scores[q_id]
-        #     if not len(ex['qrels_idxs']):
-        #         print('Warning: BEIR dataset trying to return example without qrels')
-        #         # raise ValueError('BEIR dataset trying to return example without qrels')
-        # if idx < len(self.corpus):
-        #     ex.update({ "self.corpus_embedding": }[idx])
+        ex = {}
+        if idx < len(self.queries):
+            ex.update(self.queries[idx])
+            q_id = self.query_ids[idx]
+            ex['qrels_idxs'] = self.qrels_idxs[q_id]
+            ex['qrels_scores'] = self.qrels_scores[q_id]
+            if not len(ex['qrels_idxs']):
+                print('Warning: BEIR dataset trying to return example without qrels')
+                # raise ValueError('BEIR dataset trying to return example without qrels')
+        if idx < len(self.corpus):
+            ex.update({ "self.corpus_embedding": }[idx])
 
-        # assert ('document_input_ids' in ex) or ('query_input_ids' in ex)
-        # return ex
-        # 
-        # return {
-        #     "idx": idx,
-        #     "query_embedding": self.query_embeddings[idx]["embeds"],
-        #     "document_embeddings": self.corpus_embeddings[document_id]["embeds"],
-        #     "negative_document_embeddings": self.corpus_embeddings[neg_embedding_id]["embeds"],
-        # }
+        assert ('document_input_ids' in ex) or ('query_input_ids' in ex)
+        return ex
+        
+        return {
+            "idx": idx,
+            "query_embedding": self.query_embeddings[idx]["embeds"],
+            "document_embeddings": self.corpus_embeddings[document_id]["embeds"],
+            "negative_document_embeddings": self.corpus_embeddings[neg_embedding_id]["embeds"],
+        }
 
 
 class MsmarcoDatasetHardNegatives(BeirDataset):

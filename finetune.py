@@ -55,6 +55,14 @@ train_dataset = MsmarcoDatasetHardNegatives(
     embedder=model_args.embedder
 )
 
+embedder = transformers.AutoModel.from_pretrained(model_args.embedder)
+embedder_tokenizer =  transformers.AutoTokenizer.from_pretrained(model_args.embedder)
+for k,v in retrieval_datasets.items():
+    v.tokenize(tokenizer=embedder_tokenizer, max_length=model_args.max_seq_length)
+
+train_dataset.tokenize(tokenizer=embedder_tokenizer, max_length=model_args.max_seq_length)
+
+
 # train_dataset = None
 # trainer.evaluate_retrieval_datasets()
 
