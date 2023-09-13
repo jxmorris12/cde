@@ -54,6 +54,10 @@ class ModelArguments:
         default="sentence-transformers/gtr-t5-base",
         metadata={"help": "embedder name"}
     )
+    freeze_embedder: bool = field(
+        default=False,
+        metadata={"help": "whether to not backprop through the embedder"}
+    )
 
     def __post_init__(self):
         if self.config_overrides is not None and (self.config_name is not None or self.model_name_or_path is not None):

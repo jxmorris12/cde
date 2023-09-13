@@ -283,14 +283,14 @@ class BeirDataset(torch.utils.data.Dataset):
             dataset=self.corpus,
             tokenizer=tokenizer,
             max_length=max_length,
-            text_key="document",
+            text_key="text",
             padding_strategy="do_not_pad"
         )
         self.queries = tokenize_dataset(
             dataset=self.queries,
             tokenizer=tokenizer,
             max_length=max_length,
-            text_key="query",
+            text_key="text",
             padding_strategy="do_not_pad"
         )
 
@@ -333,32 +333,39 @@ class MsmarcoDatasetHardNegatives(BeirDataset):
         super().__init__(dataset="msmarco", split="train", embedder=embedder)
         self.hard_negatives = load_msmarco_hard_negatives()
 
-    def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
+    def __getitem__(self, query_id: int) -> Dict[str, torch.Tensor]:
         """Returns example from MSMARCO, including query, document, and hard-negative document."""
-        query_id_str = self.queries[idx]['id']
+        query_id_str = self.queries[query_id]['id']
         while query_id_str not in self.hard_negatives:
             # We don't have negative samples for a few queries in the corpus 
             # (maybe because the hard negatives were filtered out by the 
             # cross encoder?). This iterates until we find one.
             #  TODO: Figure out why some queries are missing.
-            idx = random.randint(0, len(self)-1)
-            query_id_str = self.queries[idx]['id']
+            query_id = random.randint(0, len(self)-1)
+            query_id_str = self.queries[query_id]['id']
 
         hn_dict = self.hard_negatives[query_id_str]
         
         ex = {}
-        document_id = int(hn_dict['pos'][0])
 
-        neg_embedding_id = int(random.choice(hn_dict['hard_neg']))
-        # ex['hn_document_input_ids'] = neg['text_input_ids']
-        # ex['hn_document_attention_mask'] = neg['text_attention_mask']
+        ex['query_input_ids'] = self.queries[query_id]['text_input_ids']
+        ex['query_attention_mask'] = self.queries[query_id]['text_attention_mask']
 
-        return {
-            "idx": idx,
+        pos_doc_id = int(hn_dict['pos'][0])
+        ex['document_input_ids'] = self.corpus[pos_doc_id]['text_input_ids']
+        ex['document_attention_mask'] = self.corpus[pos_doc_id]['text_attention_mask']
+
+        neg_doc_id = int(random.choice(hn_dict['hard_neg']))
+        ex['negative_document_input_ids'] = self.corpus[neg_doc_id]['text_input_ids']
+        ex['negative_document_attention_mask'] = self.corpus[neg_doc_id]['text_attention_mask']
+
+        ex.update({
+            "idx": query_id,
             "query_embedding": self.query_embeddings[idx]["embeds"],
-            "document_embeddings": self.corpus_embeddings[document_id]["embeds"],
-            "negative_document_embeddings": self.corpus_embeddings[neg_embedding_id]["embeds"],
-        }
+            "document_embeddings": self.corpus_embeddings[pos_doc_id]["embeds"],
+            "negative_document_embeddings": self.corpus_embeddings[neg_doc_id]["embeds"],
+        })
+        return ex
 
 
 if __name__ == '__main__':

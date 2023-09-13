@@ -18,11 +18,17 @@ class CustomTrainer(transformers.Trainer):
         self._signature_columns = [
             "idx", "query_embedding", "document_embeddings", "negative_document_embeddings",
             "document_input_ids", "document_attention_mask",
+            "negative_document_input_ids", "negative_document_attention_mask",
             "query_input_ids", "query_attention_mask",
         ]
     
     def evaluate(*args, **kwargs) -> Dict[str, float]:
         return {}
+
+    def forward_embedder(self, inputs: Dict[str, torch.Tensor], key: str):
+        key += "_"
+        inputs = {k.replace(key, ""): v for k,v in inputs.items() if inputs.startswith(key)}
+        return self.embedder(**inputs)
 
     def compute_loss(
         self,
@@ -32,11 +38,20 @@ class CustomTrainer(transformers.Trainer):
     ) -> Union[Tuple[torch.Tensor, Dict[str, torch.Tensor]], torch.Tensor]:
         batch_size = inputs["query_embedding"].shape[0]
 
+        if self.model.config.freeze_embedder:
+            query_embedding = inputs["query_embedding"]
+            document_embeddings = inputs["document_embeddings"]
+            negative_document_embeddings = inputs["negative_document_embeddings"]
+        else:
+            query_embedding = self.forward_encoder(inputs, key="query")
+            document_embeddings = self.forward_encoder(inputs, key="document")
+            negative_document_embeddings = self.forward_encoder(inputs, key="negative_document")
+
         all_document_embeddings = torch.cat(
-            (inputs["document_embeddings"], inputs["negative_document_embeddings"]), dim=0
+            (document_embeddings, negative_document_embeddings), dim=0
         )
         scores = self.model(
-            query_embedding=inputs["query_embedding"],
+            query_embedding=query_embedding,
             document_embeddings=all_document_embeddings[None].repeat((batch_size, 1, 1)),
         )
         labels = torch.arange(batch_size, dtype=torch.long, device=scores.device)
