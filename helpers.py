@@ -228,3 +228,23 @@ class RerankHelper:
             rerank_results_biencoder[query_id][doc_id] = biencoder_score
 
         return (rerank_results_model, rerank_results_biencoder) 
+
+
+class ModelConfig(transformers.configuration_utils.PretrainedConfig):
+    """We create a dummy configuration class that will just set properties
+    based on whatever kwargs we pass in.
+
+    When this class is initialized (see experiments.py) we pass in the
+    union of all data, model, and training args, all of which should
+    get saved to the config json.
+    """
+
+    def __init__(self, **kwargs):
+        for key, value in kwargs.items():
+            try:
+                json.dumps(value)
+                setattr(self, key, value)
+            except TypeError:
+                # value was not JSON-serializable, skip
+                continue
+        super().__init__()

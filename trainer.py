@@ -8,6 +8,16 @@ from helpers import RerankHelper
 from model import Model
 
 
+def mean_pool(
+    hidden_states: torch.Tensor, attention_mask: torch.Tensor
+) -> torch.Tensor:
+    B, S, D = hidden_states.shape
+    unmasked_outputs = hidden_states * attention_mask[..., None]
+    pooled_outputs = unmasked_outputs.sum(dim=1) / attention_mask.sum(dim=1)[:, None]
+    assert pooled_outputs.shape == (B, D)
+    return pooled_outputs
+
+
 class CustomTrainer(transformers.Trainer):
     retrieval_datasets: Dict[str, datasets.Dataset]
 
@@ -27,8 +37,13 @@ class CustomTrainer(transformers.Trainer):
 
     def forward_embedder(self, inputs: Dict[str, torch.Tensor], key: str):
         key += "_"
-        inputs = {k.replace(key, ""): v for k,v in inputs.items() if inputs.startswith(key)}
-        return self.embedder(**inputs)
+        inputs = {k.replace(key, ""): v for k,v in inputs.items() if k.startswith(key)}
+        outputs = (
+            self.model.embedder(
+                input_ids=inputs["input_ids"],
+                attention_mask=inputs["attention_mask"]).last_hidden_state
+        )
+        return mean_pool(outputs, inputs["attention_mask"])
 
     def compute_loss(
         self,
@@ -43,9 +58,9 @@ class CustomTrainer(transformers.Trainer):
             document_embeddings = inputs["document_embeddings"]
             negative_document_embeddings = inputs["negative_document_embeddings"]
         else:
-            query_embedding = self.forward_encoder(inputs, key="query")
-            document_embeddings = self.forward_encoder(inputs, key="document")
-            negative_document_embeddings = self.forward_encoder(inputs, key="negative_document")
+            query_embedding = self.forward_embedder(inputs, key="query")
+            document_embeddings = self.forward_embedder(inputs, key="document")
+            negative_document_embeddings = self.forward_embedder(inputs, key="negative_document")
 
         all_document_embeddings = torch.cat(
             (document_embeddings, negative_document_embeddings), dim=0

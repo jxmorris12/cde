@@ -2,6 +2,7 @@ from typing import Optional
 
 from dataclasses import dataclass, field
 
+import datetime
 import torch
 import transformers
 
@@ -58,6 +59,12 @@ class ModelArguments:
         default=False,
         metadata={"help": "whether to not backprop through the embedder"}
     )
+    architecture: str = field(
+        default="query_dependent",
+        metadata = {
+            "choices": ["query_dependent", "query_independent", "biencoder_extended", "biencoder"],
+        }
+    )
 
     def __post_init__(self):
         if self.config_overrides is not None and (self.config_name is not None or self.model_name_or_path is not None):
@@ -67,7 +74,7 @@ class ModelArguments:
 
 
 @dataclass
-class DataTrainingArguments:
+class DataArguments:
     """
     Arguments pertaining to what data we are going to input our model for training and eval.
     """
@@ -150,6 +157,14 @@ class TrainingArguments(transformers.TrainingArguments):
 
     save_total_limit: int = 1  # Maximum number of checkpoints to save.
 
+    exp_name: str = field(
+        default=None,
+        metadata={
+            "help": "Name for this experiment, unique string",
+            "required": "True",
+        }
+    )
+
     ##################### Experimental Settings ####################
     # exp_name: str = field(
     #     default=None,
@@ -174,3 +189,8 @@ class TrainingArguments(transformers.TrainingArguments):
             num_workers
         )  # Sets threads for hf tokenizers
         self.dataloader_num_workers = num_workers
+        today_date = datetime.date.today()
+        formatted_date = today_date.strftime("%Y-%m-%d")
+        self.exp_name = f"{formatted_date}-{self.exp_name}"
+        self.output_dir = os.path.join("saves", self.exp_name)
+        print(f"outputting model to directory: {self.output_dir}")

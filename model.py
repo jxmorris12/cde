@@ -1,10 +1,13 @@
 import torch
 import transformers
 
-class Model(torch.nn.Module):
-    def __init__(self):
-        super().__init__()
-        # TODO argparse stuff
+
+class Model(transformers.PreTrainedModel):
+    def __init__(self, config, embedder: transformers.PreTrainedModel):
+        super().__init__(config=config)
+        self.embedder = embedder
+
+        # TODO: argparse for this --v
         # self.transformer = transformers.AutoModel.from_pretrained("distilbert-base-uncased")
         self.transformer = transformers.AutoModel.from_pretrained("bert-base-uncased")
         self.transformer.embeddings.position_embeddings.weight.requires_grad = False # don't want position embeddings
@@ -39,13 +42,45 @@ class Model(torch.nn.Module):
         document_embeddings = self.corpus_projection(document_embeddings)
         assert document_embeddings.shape == (batch_size, corpus_size, self.hidden_size)
 
+        if self.config.architecture == "query_dependent":
+            inputs_embeds = torch.cat((query_embedding, document_embeddings), dim=1)
+            output = self.transformer(
+                inputs_embeds=inputs_embeds,
+                attention_mask=torch.ones((batch_size, self.n_sequence + corpus_size), dtype=torch.long, device=query_embedding.device),
+            )
+            output_vectors = output.last_hidden_state[:, self.n_sequence:, :]
+            query_output_vectors = output.last_hidden_state[:, :self.n_sequence, :].mean(dim=1)
+            scores = torch.bmm(output_vectors, query_output_vectors[:,:, None])
+            scores = scores.squeeze(dim=2)
+        elif self.config.architecture == "query_independent":
+            output = self.transformer(
+                inputs_embeds=document_embeddings,
+                attention_mask=torch.ones((batch_size, corpus_size), dtype=torch.long, device=query_embedding.device),
+            )
+            output_vectors = output.last_hidden_state
+            query_embedding = query_embedding.mean(dim=1) # Mean along sequence length (it's really just a projection then.)
+            assert query_embedding.shape == (batch_size, hidden_dim)
+            scores = torch.bmm(output_vectors, query_embedding[:,:, None])
+            scores = scores.squeeze(dim=2) # TODO: verify via test.
+        elif self.config.architecture == "biencoder_extended":
+            inputs_embeds = document_embeddings
+            inputs_embeds = inputs_embeds.reshape((batch_size * corpus_size, 1, hidden_dim))
+            output = self.transformer(
+                inputs_embeds=inputs_embeds,
+                attention_mask=torch.ones((batch_size * corpus_size, 1), dtype=torch.long, device=query_embedding.device),
+            )
+            output_vectors = output.last_hidden_state
+            output_vectors = output_vectors.squeeze(1).reshape((batch_size, corpus_size, hidden_dim))
 
-        inputs_embeds = torch.cat((query_embedding, document_embeddings), dim=1)
-        output = self.transformer(
-            inputs_embeds=inputs_embeds,
-            attention_mask=torch.ones((batch_size, self.n_sequence + corpus_size), dtype=torch.long, device=query_embedding.device),
-        )
-        output_vectors = output.last_hidden_state[:, self.n_sequence:, :]
+            query_embedding = query_embedding.mean(dim=1) # Mean along sequence length (it's really just a projection then.)
+            assert query_embedding.shape == (batch_size, hidden_dim)
+            
+            scores = torch.bmm(output_vectors, query_embedding[:,:, None])
+            scores = scores.squeeze(dim=2)
+        elif self.config.architecture == "biencoder":
+            scores = query_embedding @ document_embeddings.T # TODO verify
+        else:
+            raise ValueError(f"unknown architecture {self.config.architecture}")
 
         # output = self.transformer(
         #     inputs_embeds=query_embedding,
@@ -55,9 +90,7 @@ class Model(torch.nn.Module):
         # )
         # output_vectors = output.last_hidden_state
 
-        query_output_vectors = output.last_hidden_state[:, :self.n_sequence, :].mean(dim=1)
-        scores = torch.bmm(output_vectors, query_output_vectors[:,:, None])
-        return scores.squeeze(2)
+        return scores
 
         # scores = self.score(output_vectors)
         # assert scores.shape == (batch_size, corpus_size, 1)

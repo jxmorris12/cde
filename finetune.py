@@ -8,29 +8,32 @@ import torch
 import transformers
 import wandb
 
+from collate import DocumentQueryCollatorWithPadding
 from dataset import BeirDataset, MsmarcoDatasetHardNegatives
+from helpers import ModelConfig
 from model import Model
-from run_args import ModelArguments, DataTrainingArguments, TrainingArguments
+from run_args import ModelArguments, DataArguments, TrainingArguments
 from trainer import CustomTrainer
 
 
 assert torch.cuda.device_count() > 0, "can't train without CUDA"
 
-wandb.init(
-    project="dataset-transformer",
-    # name=exp_name,
-    # id=kwargs_hash,
-    # resume=True,
-)
-
-parser = transformers.HfArgumentParser((ModelArguments, DataTrainingArguments, TrainingArguments))
+parser = transformers.HfArgumentParser((ModelArguments, DataArguments, TrainingArguments))
 model_args, data_args, training_args = parser.parse_args_into_dataclasses()
 transformers.set_seed(training_args.seed)
+
+wandb_run_id = training_args.output_dir.replace("saves/", "")
+wandb.init(
+    project="dataset-transformer",
+    name=wandb_run_id,
+    id=wandb_run_id,
+    resume=True,
+)
 
 logging.basicConfig(format='%(asctime)s - %(message)s',
                     datefmt='%Y-%m-%d %H:%M:%S',
                     level=logging.INFO)
-embedder = transformers.AutoModel.from_pretrained(model_args.embedder)
+embedder = transformers.AutoModel.from_pretrained(model_args.embedder).encoder
 embedder_tokenizer =  transformers.AutoTokenizer.from_pretrained(model_args.embedder)
 
 beir_dataset_names = [
@@ -41,6 +44,7 @@ beir_dataset_names = [
     'scifact',
     'fiqa',
     ########
+    'msmarco', # this is the *real* eval set...
     # 'trec-covid',
     # Other ones are certainly too big for repeated eval
     # 'webis-touche2020',
@@ -67,8 +71,15 @@ train_dataset.tokenize(tokenizer=embedder_tokenizer, max_length=model_args.max_s
 
 os.environ['TOKENIZERS_PARALLELISM'] = 'false'
 
-model = Model()
+model_config = ModelConfig(**vars(model_args))
+model = Model(config=model_config, embedder=embedder)
+collator = DocumentQueryCollatorWithPadding(
+    tokenizer=embedder_tokenizer,
+    padding='longest',
+    return_tensors='pt'
+)
 trainer = CustomTrainer(
+    data_collator=collator,
     model=model,
     args=training_args,
     train_dataset=train_dataset,

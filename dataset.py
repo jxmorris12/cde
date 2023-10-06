@@ -361,7 +361,7 @@ class MsmarcoDatasetHardNegatives(BeirDataset):
 
         ex.update({
             "idx": query_id,
-            "query_embedding": self.query_embeddings[idx]["embeds"],
+            "query_embedding": self.query_embeddings[query_id]["embeds"],
             "document_embeddings": self.corpus_embeddings[pos_doc_id]["embeds"],
             "negative_document_embeddings": self.corpus_embeddings[neg_doc_id]["embeds"],
         })
