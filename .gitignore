@@ -1,4 +1,6 @@
 __pycache__/
 datasets/
+logs/
 saves/
+slurm-scripts/
 wandb/

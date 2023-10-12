@@ -132,13 +132,6 @@ class TrainingArguments(transformers.TrainingArguments):
         default="saves",
         metadata={"help": "Output directory for training saves"}
     )
-    steps_per_epoch: int = field(
-        default=500_000, 
-        metadata={
-            "required": False,
-            "help": "Size of pseudo-training set."
-        },
-    )
     num_train_epochs: float = field(
         default=100.0, 
         metadata={

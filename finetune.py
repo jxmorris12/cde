@@ -22,12 +22,12 @@ parser = transformers.HfArgumentParser((ModelArguments, DataArguments, TrainingA
 model_args, data_args, training_args = parser.parse_args_into_dataclasses()
 transformers.set_seed(training_args.seed)
 
-wandb_run_id = training_args.output_dir.replace("saves/", "")
+wandb_run_id = training_args.exp_name
+print("starting wandb run with name", wandb_run_id)
 wandb.init(
     project="dataset-transformer",
     name=wandb_run_id,
-    id=wandb_run_id,
-    resume=True,
+    # resume=True,
 )
 
 logging.basicConfig(format='%(asctime)s - %(message)s',
@@ -69,7 +69,12 @@ train_dataset.tokenize(tokenizer=embedder_tokenizer, max_length=model_args.max_s
 # train_dataset = None
 # trainer.evaluate_retrieval_datasets()
 
-os.environ['TOKENIZERS_PARALLELISM'] = 'false'
+# Allow W&B to start slowly.
+os.environ["WANDB__SERVICE_WAIT"] = "300"
+os.environ["_WANDB_STARTUP_DEBUG"] = "true"
+
+# Prevent deadlocks...
+# os.environ['TOKENIZERS_PARALLELISM'] = 'false'
 
 model_config = ModelConfig(**vars(model_args))
 model = Model(config=model_config, embedder=embedder)

@@ -11,6 +11,7 @@ BASE_PYTHON_CMD = """
 python finetune.py --per_device_train_batch_size 64 \
     --learning_rate 2e-5 \
     --lr_scheduler_type constant_with_warmup \
+    --num_train_epochs 100 \
     --warmup_steps 25000 \
     --bf16=1 \
     --embedder sentence-transformers/gtr-t5-base \
@@ -35,14 +36,13 @@ def run_cmd(cmd: str, job_desc: str):
             job_name,
             slurm_kwargs={
                 "partition": "rush",
+                #"partition": "gpu",
                 "gres": "gpu:a6000:1",
-                # "gres": "gpu:1",
                 # "constraint": "a40|3090|a6000|a5000|a100-40",
                 "ntasks": 1,
                 "cpus-per-task": 4,
                 "mem": "100G",
                 "time": "168:00:00",  # 168 hours --> 1 week
-                # "time": "504:00:00",  # 504 hours --> 3 weeks
             },
             slurm_flags=[
                 "requeue",
@@ -57,11 +57,13 @@ def run_cmd(cmd: str, job_desc: str):
     print("\n\n")
 
 
+# NAME_STR = ""
+NAME_STR = "tst-4-"
 
 now = datetime.now()
 date_str = now.strftime("%Y-%m-%d")
 
 for arch in ["query_dependent", "query_independent", "biencoder_extended", "biencoder"]:
-    exp_name = date_str + "-" + arch
+    exp_name = NAME_STR + arch
     cmd = BASE_PYTHON_CMD.format(ARCH=arch, EXP_NAME=exp_name)
     run_cmd(cmd=cmd, job_desc=exp_name)
