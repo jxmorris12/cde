@@ -67,7 +67,7 @@ class CustomTrainer(transformers.Trainer):
         # of multiplying the cosine similarity score by 20 for
         # better optimization (Thakur et al., 2021)."
         # 
-        scores *= 20  # TODO argparse: self.args.contrastive_temperature.exp()
+        # scores *= 20  # TODO argparse: self.args.contrastive_temperature.exp()
         diagonal_idxs = torch.arange(batch_size, device=e1.device)
         loss = torch.nn.functional.cross_entropy(
             scores, diagonal_idxs, label_smoothing=0.0
@@ -83,6 +83,7 @@ class CustomTrainer(transformers.Trainer):
         wandb.log({
             "train/acc_emb": original_acc.item(),
             "train/acc": new_acc.item(),
+            "corpus_size": corpus_size,
         })
 
         # print(f"acc: {original_acc.item()*100:.1f} / now: {new_acc.item()*100:.1f}")

@@ -344,12 +344,15 @@ class MsmarcoDatasetHardNegatives(BeirDataset):
     size: int
     column_names: List[str] = ["idx", "query_embedding", "document_embeddings", "negative_document_embeddings"]
     hard_negatives: Optional[Dict[str, Any]]
+    num_hard_negatives: int
     def __init__(
             self,
-            embedder: str
+            embedder: str,
+            num_hard_negatives: int,
         ):
         super().__init__(dataset="msmarco", split="train", embedder=embedder)
         self.hard_negatives = load_msmarco_hard_negatives()
+        self.num_hard_negatives = num_hard_negatives
 
     def __getitem__(self, query_id: int) -> Dict[str, torch.Tensor]:
         """Returns example from MSMARCO, including query, document, and hard-negative document."""
@@ -373,9 +376,17 @@ class MsmarcoDatasetHardNegatives(BeirDataset):
         ex['document_input_ids'] = self.corpus[pos_doc_id]['text_input_ids']
         ex['document_attention_mask'] = self.corpus[pos_doc_id]['text_attention_mask']
 
-        neg_doc_id = int(random.choice(hn_dict['hard_neg']))
-        ex['negative_document_input_ids'] = self.corpus[neg_doc_id]['text_input_ids']
-        ex['negative_document_attention_mask'] = self.corpus[neg_doc_id]['text_attention_mask']
+        negative_document_input_ids = []
+        negative_document_attention_mask = []
+        for neg_doc_id in map(int, random.choices(hn_dict['hard_neg'], k=self.num_hard_negatives)):
+            negative_document_input_ids.append(
+                self.corpus[neg_doc_id]['text_input_ids']
+            )
+            negative_document_attention_mask.append(
+                self.corpus[neg_doc_id]['text_attention_mask']
+            )
+        ex['negative_document_input_ids'] = negative_document_input_ids
+        ex['negative_document_attention_mask'] = negative_document_attention_mask
 
         ex.update({
             "idx": query_id,

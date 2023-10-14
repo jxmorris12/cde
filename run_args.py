@@ -55,6 +55,10 @@ class ModelArguments:
         default="sentence-transformers/gtr-t5-base",
         metadata={"help": "embedder name"}
     )
+    backbone: str = field(
+        default="bert-base-uncased",
+        metadata={"help": "backbone model name"}
+    )
     freeze_embedder: bool = field(
         default=False,
         metadata={"help": "whether to not backprop through the embedder"}
@@ -81,6 +85,9 @@ class DataArguments:
 
     dataset_name: Optional[str] = field(
         default="BeIR/nq", metadata={"help": "The name of the dataset to use (via the datasets library)."}
+    )
+    num_hard_negatives: int = field(
+        default=1, metadata={"help": "num hard negatives to use during training"}
     )
     dataset_config_name: Optional[str] = field(
         default="corpus", metadata={"help": "The configuration name of the dataset to use (via the datasets library)."}
@@ -177,10 +184,9 @@ class TrainingArguments(transformers.TrainingArguments):
     def __post_init__(self):
         super().__post_init__()
         ############################################################################
-        # num_workers =  0
+        num_workers = int(len(os.sched_getaffinity(0)) / torch.cuda.device_count())
         # self.report_to = []
         ############################################################################
-        num_workers = int(len(os.sched_getaffinity(0)) / torch.cuda.device_count())
         os.environ["RAYON_RS_NUM_CPUS"] = str(
             num_workers
         )  # Sets threads for hf tokenizers

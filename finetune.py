@@ -60,7 +60,8 @@ beir_dataset_names = [
 #     v.tokenize(tokenizer=embedder_tokenizer, max_length=model_args.max_seq_length)
 
 train_dataset = MsmarcoDatasetHardNegatives(
-    embedder=model_args.embedder
+    embedder=model_args.embedder,
+    num_hard_negatives=data_args.num_hard_negatives,
 )
 train_dataset.tokenize(tokenizer=embedder_tokenizer, max_length=model_args.max_seq_length)
 
@@ -76,7 +77,8 @@ os.environ["_WANDB_STARTUP_DEBUG"] = "true"
 # os.environ['TOKENIZERS_PARALLELISM'] = 'false'
 
 model_config = ModelConfig(**vars(model_args))
-model = Model(config=model_config, embedder=embedder)
+backbone = transformers.AutoModel.from_pretrained(model_args.backbone)
+model = Model(config=model_config, embedder=embedder, backbone=backbone)
 collator = DocumentQueryCollatorWithPadding(
     tokenizer=embedder_tokenizer,
     padding='longest',

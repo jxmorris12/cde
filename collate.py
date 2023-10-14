@@ -62,7 +62,10 @@ class DocumentQueryCollatorWithPadding(transformers.DataCollatorWithPadding):
             if len(doc_ex):
                 document_batch.append(doc_ex)
             if len(hn_doc_ex):
-                hn_document_batch.append(hn_doc_ex)
+                # handle multiple hard negatives
+                n = len(next(iter(hn_doc_ex.values())))
+                for i in range(n):
+                    hn_document_batch.append({k: v[i] for k,v in hn_doc_ex.items() })
             if len(query_ex):
                 query_batch.append(query_ex)
         
