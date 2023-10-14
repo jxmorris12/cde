@@ -1,4 +1,5 @@
 from typing import Any, Dict, List, Optional, Tuple
+import glob
 import gzip
 import json
 import logging
@@ -17,6 +18,14 @@ import tqdm
 from helpers import (
     download_url_and_unzip, download_url, md5_hash
 )
+
+def datasets_fast_load_from_disk(cache_path) -> datasets.Dataset:
+    # files = glob.glob(os.path.join(cache_path, "*.arrow"))
+    # files_tqdm = tqdm.tqdm(files, desc=f"loading from {cache_path}", leave=False, colour="#FFC0CB")
+    # datasets_list = [datasets.Dataset.from_file(file) for file in files_tqdm]
+    # return datasets.concatenate_datasets(datasets_list)
+    return datasets.load_from_disk(cache_path)
+
 
 def tokenize_dataset(
         dataset: datasets.Dataset,
@@ -185,6 +194,7 @@ def load_beir_uncached(dataset: str, split: str) -> Tuple[datasets.Dataset, data
 
 
 def embed_with_cache(embedder: str, cache_name: str, texts: List[str]) -> datasets.Dataset:
+    print("embed_with_cache ...")
     embedder_cache_path = embedder.replace('/', '__')
     # cache_folder = datasets.config.HF_DATASETS_CACHE
     cache_folder = "/scratch/jxm3"
@@ -194,11 +204,12 @@ def embed_with_cache(embedder: str, cache_name: str, texts: List[str]) -> datase
 
     # texts = texts[:1000]
 
-    print("saving/loading embeddings at path:", cache_path)
 
     if os.path.exists(cache_path):
-        return datasets.load_from_disk(cache_path)
+        print("[embed_with_cache] Loading embeddings at path:", cache_path)
+        return datasets_fast_load_from_disk(cache_path)
 
+    print("[embed_with_cache] computing embeddings to save at path:", cache_path)
     from sentence_transformers import SentenceTransformer
     model = SentenceTransformer(embedder)
     model.max_seq_length = 512
@@ -232,9 +243,9 @@ def load_beir(dataset: str, split: str) -> Tuple[datasets.Dataset, datasets.Data
 
     if os.path.exists(corpus_path) and os.path.exists(queries_path) and os.path.exists(qrels_path) and os.path.exists(ance_path):
         logging.info(f"Loading {dataset} split %s corpus from path %s", split, corpus_path)
-        corpus = datasets.load_from_disk(corpus_path)
+        corpus = datasets_fast_load_from_disk(corpus_path)
         logging.info(f"Loading {dataset} split %s queries from path %s", split, queries_path)
-        queries = datasets.load_from_disk(queries_path)
+        queries = datasets_fast_load_from_disk(queries_path)
         logging.info(f"Loading {dataset} split %s qrels from path %s", split, qrels_path)
         qrels = pickle.load(open(qrels_path, 'rb'))
         logging.info(f"Loading {dataset} split %s ance results from path %s", split, ance_path)
@@ -270,8 +281,15 @@ class BeirDataset(torch.utils.data.Dataset):
         self.name = dataset
         self.corpus, self.queries, self.qrels, self.ance_results = load_beir(dataset=dataset, split=split)
         print(f">> embedding dataset {dataset} split {split}")
-        self.query_embeddings = embed_with_cache(embedder, f"{dataset}_queries" + ("" if split == "train" else f"_{split}"), [q['text'] for q in self.queries])
-        self.corpus_embeddings = embed_with_cache(embedder, f"{dataset}_corpus" + ("" if split == "train" else f"_{split}"), [c['text'] for c in self.corpus])
+        self.query_embeddings = embed_with_cache(
+            embedder, f"{dataset}_queries" + ("" if split == "train" else f"_{split}"), 
+            self.queries["text"],
+        )
+        self.corpus_embeddings = embed_with_cache(
+            embedder, 
+            f"{dataset}_corpus" + ("" if split == "train" else f"_{split}"), 
+            self.corpus["text"],
+        )
         self.size = len(self.queries)
     
     def __len__(self) -> int:
@@ -279,15 +297,15 @@ class BeirDataset(torch.utils.data.Dataset):
     
     def tokenize(self, tokenizer: transformers.PreTrainedTokenizer, max_length: int) -> None:
         print(f"tokenizing {self.name}")
-        self.corpus = tokenize_dataset(
-            dataset=self.corpus,
+        self.queries = tokenize_dataset(
+            dataset=self.queries,
             tokenizer=tokenizer,
             max_length=max_length,
             text_key="text",
             padding_strategy="do_not_pad"
         )
-        self.queries = tokenize_dataset(
-            dataset=self.queries,
+        self.corpus = tokenize_dataset(
+            dataset=self.corpus,
             tokenizer=tokenizer,
             max_length=max_length,
             text_key="text",

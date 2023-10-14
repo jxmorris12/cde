@@ -50,15 +50,14 @@ beir_dataset_names = [
     # 'webis-touche2020',
     # 'fever', 'quora',
 ]
-beir_dict = {
-    d: BeirDataset(dataset=d, embedder=model_args.embedder) for d in beir_dataset_names
-}
-retrieval_datasets = {
-    **{f"BeIR/{k}": v for k,v in beir_dict.items()}
-}
-
-for k,v in retrieval_datasets.items():
-    v.tokenize(tokenizer=embedder_tokenizer, max_length=model_args.max_seq_length)
+# beir_dict = {
+#     d: BeirDataset(dataset=d, embedder=model_args.embedder) for d in beir_dataset_names
+# }
+# retrieval_datasets = {
+#     **{f"BeIR/{k}": v for k,v in beir_dict.items()}
+# }
+# for k,v in retrieval_datasets.items():
+#     v.tokenize(tokenizer=embedder_tokenizer, max_length=model_args.max_seq_length)
 
 train_dataset = MsmarcoDatasetHardNegatives(
     embedder=model_args.embedder
@@ -89,7 +88,8 @@ trainer = CustomTrainer(
     args=training_args,
     train_dataset=train_dataset,
     eval_dataset=None,
-    retrieval_datasets=retrieval_datasets,
+    # retrieval_datasets=retrieval_datasets,
+    retrieval_datasets={},
 )
 trainer.train()
 

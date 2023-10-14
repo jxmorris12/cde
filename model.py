@@ -2,6 +2,16 @@ import torch
 import transformers
 
 
+def mean_pool(
+    hidden_states: torch.Tensor, attention_mask: torch.Tensor
+) -> torch.Tensor:
+    B, S, D = hidden_states.shape
+    unmasked_outputs = hidden_states * attention_mask[..., None]
+    pooled_outputs = unmasked_outputs.sum(dim=1) / attention_mask.sum(dim=1)[:, None]
+    assert pooled_outputs.shape == (B, D)
+    return pooled_outputs
+
+
 class Model(transformers.PreTrainedModel):
     def __init__(self, config, embedder: transformers.PreTrainedModel):
         super().__init__(config=config)
@@ -32,8 +42,23 @@ class Model(transformers.PreTrainedModel):
             torch.nn.ReLU(),
             torch.nn.Linear(self.hidden_size, self.hidden_size)
         )
+    
+    def forward_embedder(
+            self,
+            input_ids: torch.Tensor,
+            attention_mask: torch.Tensor,
+            embedding: torch.Tensor = None,
+    ) -> torch.Tensor:
+        outputs = (
+            self.embedder(
+                input_ids=input_ids,
+                attention_mask=attention_mask).last_hidden_state
+        )
+        return mean_pool(outputs, attention_mask)
+
 
     def forward(self, query_embedding: torch.Tensor, document_embeddings: torch.Tensor) -> torch.Tensor:
+        batch_size = query_embedding.shape[0]
         batch_size, corpus_size, hidden_dim = document_embeddings.shape
         query_embedding = self.query_projection(query_embedding)
         query_embedding = query_embedding.reshape((batch_size, self.n_sequence, self.hidden_size))

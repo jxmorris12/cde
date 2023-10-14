@@ -147,6 +147,9 @@ class TrainingArguments(transformers.TrainingArguments):
         default=None, metadata={"help": "Whether or not to log to Weights & Biases."}
     )
     report_to: str = "wandb"
+    max_batch_size_fits_in_memory: int = field(
+        default=64,  metadata={"help": "Max batch size for contrastive learning"}
+    )
 
     save_total_limit: int = 1  # Maximum number of checkpoints to save.
 
