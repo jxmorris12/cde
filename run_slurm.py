@@ -7,15 +7,24 @@ from slurmpy import Slurm
 
 ACTUALLY_RUN_COMMAND = True
 
+
+# Total batch size for contrastive loss:
+#   >> per_device_train_batch_size * (1 + num_hard_negatives)
 BASE_PYTHON_CMD = """
-python finetune.py --per_device_train_batch_size 64 \
-    --learning_rate 2e-5 \
+python finetune.py \
+    --logging_steps 250 \
+    --per_device_train_batch_size 64 \
+    --num_hard_negatives 16 \
+    --max_batch_size_fits_in_memory 256 \
+    --learning_rate 1e-4 \
     --lr_scheduler_type constant_with_warmup \
-    --num_train_epochs 100 \
-    --warmup_steps 25000 \
+    --num_train_epochs 20 \
+    --warmup_steps 50000 \
     --bf16=1 \
-    --embedder sentence-transformers/gtr-t5-base \
-    --eval_steps=25000 \
+    --use_wandb 1 \
+    --embedder "sentence-transformers/gtr-t5-base" \
+    --backbone "bert-base-uncased" \
+    --eval_steps=10000 \
     --evaluation_strategy steps \
     --architecture {ARCH} \
     --exp_name {EXP_NAME}
@@ -36,13 +45,13 @@ def run_cmd(cmd: str, job_desc: str):
             job_name,
             slurm_kwargs={
                 "partition": "rush",
-                #"partition": "gpu",
+                # "partition": "gpu",
                 "gres": "gpu:a6000:1",
                 # "constraint": "a40|3090|a6000|a5000|a100-40",
                 "ntasks": 1,
                 "cpus-per-task": 4,
                 "mem": "100G",
-                "time": "168:00:00",  # 168 hours --> 1 week
+                "time": "336:00:00",  # 336 hours --> 2 weeks
             },
             slurm_flags=[
                 "requeue",
@@ -58,7 +67,7 @@ def run_cmd(cmd: str, job_desc: str):
 
 
 # NAME_STR = ""
-NAME_STR = "tst-4-"
+NAME_STR = "more-hard-negatives-16"
 
 now = datetime.now()
 date_str = now.strftime("%Y-%m-%d")

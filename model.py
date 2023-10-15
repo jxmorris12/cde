@@ -48,6 +48,10 @@ class Model(transformers.PreTrainedModel):
             torch.nn.ReLU(),
             torch.nn.Linear(self.hidden_size, self.hidden_size)
         )
+
+        # whether to share hard negatives between queries.
+        # TODO argparse for this.
+        self.share_hard_negatives = False
     
     def forward_embedder(
             self,
@@ -66,13 +70,28 @@ class Model(transformers.PreTrainedModel):
     def forward(self, query_embedding: torch.Tensor, document_embeddings: torch.Tensor) -> torch.Tensor:
         batch_size = query_embedding.shape[0]
         input_query_embedding = query_embedding # save for biencoder
-        batch_size, corpus_size, hidden_dim = document_embeddings.shape
         query_embedding = self.query_projection(query_embedding)
         query_embedding = query_embedding.reshape((batch_size, self.n_sequence, self.hidden_size))
         assert query_embedding.shape == (batch_size, self.n_sequence, self.hidden_size)
 
         document_embeddings = self.corpus_projection(document_embeddings)
-        assert document_embeddings.shape == (batch_size, corpus_size, self.hidden_size)
+        if self.share_hard_negatives:
+            document_embeddings = document_embeddings.repeat((batch_size, 1, 1))
+        else:
+            inbatch_document_embeddings = document_embeddings[:batch_size, :]
+            inbatch_document_embeddings = (
+                inbatch_document_embeddings[:, None, :]
+                    .repeat((1, batch_size, 1))
+            )
+            hn_document_embeddings = (
+                document_embeddings[batch_size:, :].reshape((batch_size, -1, self.hidden_size))
+            )
+            document_embeddings = torch.cat((
+                inbatch_document_embeddings, hn_document_embeddings
+            ), dim=1)
+        
+        _, corpus_size, hidden_dim = document_embeddings.shape
+        assert _ == batch_size
 
         if self.config.architecture == "query_dependent":
             inputs_embeds = torch.cat((query_embedding, document_embeddings), dim=1)
@@ -92,8 +111,7 @@ class Model(transformers.PreTrainedModel):
             output_vectors = output.last_hidden_state
             query_embedding = query_embedding.mean(dim=1) # Mean along sequence length (it's really just a projection then.)
             assert query_embedding.shape == (batch_size, hidden_dim)
-            scores = torch.bmm(output_vectors, query_embedding[:,:, None])
-            scores = scores.squeeze(dim=2) # TODO: verify via test.
+            scores = torch.einsum('bd,bcd->bc', query_embedding, output_vectors)
         elif self.config.architecture == "biencoder_extended":
             inputs_embeds = document_embeddings
             inputs_embeds = inputs_embeds.reshape((batch_size * corpus_size, 1, hidden_dim))
@@ -107,8 +125,7 @@ class Model(transformers.PreTrainedModel):
             query_embedding = query_embedding.mean(dim=1) # Mean along sequence length (it's really just a projection then.)
             assert query_embedding.shape == (batch_size, hidden_dim)
             
-            scores = torch.bmm(output_vectors, query_embedding[:,:, None])
-            scores = scores.squeeze(dim=2)
+            scores = torch.einsum('bd,bcd->bc', query_embedding, output_vectors)
         elif self.config.architecture == "biencoder":
             scores = torch.einsum('bd,bcd->bc', input_query_embedding, document_embeddings)
         else:

@@ -150,8 +150,8 @@ class TrainingArguments(transformers.TrainingArguments):
         default=2e-5,
         metadata={"help": "The initial learning rate for AdamW on the backbone model."}
     )
-    use_wandb: Optional[bool] = field(
-        default=None, metadata={"help": "Whether or not to log to Weights & Biases."}
+    use_wandb: bool = field(
+        default=False, metadata={"help": "Whether or not to log to Weights & Biases."}
     )
     report_to: str = "wandb"
     max_batch_size_fits_in_memory: int = field(
@@ -183,9 +183,16 @@ class TrainingArguments(transformers.TrainingArguments):
 
     def __post_init__(self):
         super().__post_init__()
+
+
+        if self.use_wandb:
+            self.report_to = ["wandb"] if (self.local_rank <= 0) else []
+        else:
+            self.report_to = []
+            print("disabling wandb.")
+            os.environ["WANDB_MODE"] = "disabled"
         ############################################################################
         num_workers = int(len(os.sched_getaffinity(0)) / torch.cuda.device_count())
-        # self.report_to = []
         ############################################################################
         os.environ["RAYON_RS_NUM_CPUS"] = str(
             num_workers

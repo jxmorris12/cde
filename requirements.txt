@@ -1,0 +1,11 @@
+git+https://github.com/luyug/GradCache
+
+accelerate
+datasets
+evaluate
+numpy
+pytrec_eval
+tokenizers
+torch
+tqdm
+transformers

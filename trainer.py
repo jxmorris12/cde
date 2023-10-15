@@ -29,6 +29,7 @@ class CustomTrainer(transformers.Trainer):
             "negative_document_input_ids", "negative_document_attention_mask",
             "query_input_ids", "query_attention_mask",
         ]
+        print(f"initializing GradCache with chunk_size={self.args.max_batch_size_fits_in_memory}.")
         self.gc = grad_cache.GradCache(
             models=[self.model.forward_embedder, self.model.forward_embedder],
             chunk_sizes=self.args.max_batch_size_fits_in_memory,
@@ -55,9 +56,6 @@ class CustomTrainer(transformers.Trainer):
         batch_size = len(e1)
         corpus_size = len(e2)
 
-        # Repeat document vectors across the corpus
-        e2 = e2.repeat((batch_size, 1, 1))
-
         scores = self.model(
             query_embedding=e1,
             document_embeddings=e2,
@@ -69,6 +67,7 @@ class CustomTrainer(transformers.Trainer):
         # 
         # scores *= 20  # TODO argparse: self.args.contrastive_temperature.exp()
         diagonal_idxs = torch.arange(batch_size, device=e1.device)
+        import pdb; pdb.set_trace()
         loss = torch.nn.functional.cross_entropy(
             scores, diagonal_idxs, label_smoothing=0.0
         )
@@ -77,8 +76,8 @@ class CustomTrainer(transformers.Trainer):
         
         labels = torch.arange(batch_size, dtype=torch.long, device=scores.device)
         original_acc = ((
-            torch.nn.functional.cosine_similarity(e1, e2[0,:,None], dim=2)
-        ).argmax(0) == labels).float().mean()
+            torch.nn.functional.cosine_similarity(e1[:, None], e2[None, :], dim=2)
+        ).argmax(1) == labels).float().mean()
         new_acc = (scores.argmax(1) == labels).float().mean()
         wandb.log({
             "train/acc_emb": original_acc.item(),
