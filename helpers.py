@@ -176,9 +176,12 @@ class RerankHelper:
     def __init__(self, model):
         self.model = model
     
-    def _score(self, query_embedding: str, corpus_embeddings: List[str]) -> float:
+    def _score(self, query_embedding: torch.Tensor, corpus_embeddings: torch.Tensor) -> float:
         with torch.no_grad():
-            scores = self.model(query_embedding=query_embedding[None], document_embeddings=corpus_embeddings[None])
+            scores = self.model(
+                query_embedding=query_embedding[None], 
+                document_embeddings=corpus_embeddings
+            )
         return scores.flatten().cpu().tolist()
     
     def rerank(self, 

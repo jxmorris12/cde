@@ -18,6 +18,13 @@ from trainer import CustomTrainer
 
 assert torch.cuda.device_count() > 0, "can't train without CUDA"
 
+# Allow W&B to start slowly.
+os.environ["WANDB__SERVICE_WAIT"] = "300"
+os.environ["_WANDB_STARTUP_DEBUG"] = "true"
+
+# Prevent deadlocks...
+# os.environ['TOKENIZERS_PARALLELISM'] = 'false'
+
 parser = transformers.HfArgumentParser((ModelArguments, DataArguments, TrainingArguments))
 model_args, data_args, training_args = parser.parse_args_into_dataclasses()
 transformers.set_seed(training_args.seed)
@@ -65,17 +72,6 @@ train_dataset = MsmarcoDatasetHardNegatives(
 )
 train_dataset.tokenize(tokenizer=embedder_tokenizer, max_length=model_args.max_seq_length)
 
-
-# train_dataset = None
-# trainer.evaluate_retrieval_datasets()
-
-# Allow W&B to start slowly.
-os.environ["WANDB__SERVICE_WAIT"] = "300"
-os.environ["_WANDB_STARTUP_DEBUG"] = "true"
-
-# Prevent deadlocks...
-# os.environ['TOKENIZERS_PARALLELISM'] = 'false'
-
 model_config = ModelConfig(**vars(model_args))
 backbone = transformers.AutoModel.from_pretrained(model_args.backbone)
 model = Model(config=model_config, embedder=embedder, backbone=backbone)
@@ -93,5 +89,7 @@ trainer = CustomTrainer(
     eval_dataset=None,
     retrieval_datasets=retrieval_datasets,
 )
+trainer.evaluate_retrieval_datasets()
+
 trainer.train()
 

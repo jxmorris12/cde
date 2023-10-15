@@ -68,6 +68,14 @@ class Model(transformers.PreTrainedModel):
 
 
     def forward(self, query_embedding: torch.Tensor, document_embeddings: torch.Tensor) -> torch.Tensor:
+        """
+        query_embedding (float torch.Tensor) - shape (batch_size, embedding_dim)
+        document_embeddings (float torch.Tensor) - shape (corpus_size, embedding_dim)
+            where the corpus_size >= batch_size and is structured like this:
+                [d1, d2, d3, hn1_1, hn1_2, hn2_1, hn2_2, hn3_1, hn3_2]
+                for a corpus with three documents and two hard negatives per document
+        """
+        
         batch_size = query_embedding.shape[0]
         input_query_embedding = query_embedding # save for biencoder
         query_embedding = self.query_projection(query_embedding)
