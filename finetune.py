@@ -18,6 +18,9 @@ from trainer import CustomTrainer
 
 assert torch.cuda.device_count() > 0, "can't train without CUDA"
 
+# Helps with debugging.
+torch.autograd.set_detect_anomaly(True)
+
 # Allow W&B to start slowly.
 os.environ["WANDB__SERVICE_WAIT"] = "300"
 os.environ["_WANDB_STARTUP_DEBUG"] = "true"
@@ -89,7 +92,5 @@ trainer = CustomTrainer(
     eval_dataset=None,
     retrieval_datasets=retrieval_datasets,
 )
-trainer.evaluate_retrieval_datasets()
-
 trainer.train()
 

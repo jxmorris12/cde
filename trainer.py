@@ -4,12 +4,13 @@ import datasets
 import torch
 import transformers
 
-import grad_cache
 import wandb
 
+from gradcache import GradCache
 from dataset import BeirDataset
 from helpers import RerankHelper
 from model import Model
+
 
 def inputs_for_key(inputs: Dict[str, torch.Tensor], key: str):
     key += "_"
@@ -30,18 +31,29 @@ class CustomTrainer(transformers.Trainer):
             "query_input_ids", "query_attention_mask",
         ]
         print(f"initializing GradCache with chunk_size={self.args.max_batch_size_fits_in_memory}.")
-        self.gc = grad_cache.GradCache(
+        
+        self.use_gc = self.args.use_gc # whether to use gradcache
+        self.gc = None # lazily initialized during training
+    
+    def evaluate(*args, **kwargs) -> Dict[str, float]:
+        return {}
+
+    def create_optimizer(self, *args, **kwargs):
+        super().create_optimizer(*args, **kwargs)
+        self.gc = GradCache(
             models=[self.model.forward_embedder, self.model.forward_embedder],
+            optimizer=self.optimizer,
             chunk_sizes=self.args.max_batch_size_fits_in_memory,
             loss_fn=self._contrastive_loss, 
             fp16=self.args.fp16,
             scaler=self.scaler if self.args.fp16 else None,
+            backward_fn=self.accelerator.backward,
         )
     
-    def evaluate(*args, **kwargs) -> Dict[str, float]:
-        return {}
-    
     def training_step(self, model: torch.nn.Module, inputs: Dict[str, Union[torch.Tensor, Any]]) -> torch.Tensor:
+        if not self.use_gc:
+            return super().training_step(model=model, inputs=inputs)
+
         # Overriding from trainer so that we can disable backward()
         # in favor of the gradcache backward()
         model.train()
@@ -53,13 +65,11 @@ class CustomTrainer(transformers.Trainer):
         return loss.detach() / self.args.gradient_accumulation_steps
 
     def _contrastive_loss(self, e1: torch.Tensor, e2: torch.Tensor) -> torch.Tensor:
-        batch_size = len(e1)
-        corpus_size = len(e2)
-
         scores = self.model(
             query_embedding=e1,
             document_embeddings=e2,
         )
+        batch_size, corpus_size = scores.shape
         # This multiply-by-20 thing is used in BeIR and LaPRador:
         # "When calculating the loss, we apply a re-scaling trick
         # of multiplying the cosine similarity score by 20 for
@@ -120,7 +130,13 @@ class CustomTrainer(transformers.Trainer):
         }
         # print("query_inputs >>", {k: v.shape for k,v in query_inputs.items()})
         # print("all_document_inputs >>", {k: v.shape for k,v in all_document_inputs.items()})
-        return self.gc(query_inputs, all_document_inputs, no_sync_except_last=False)
+
+        if self.use_gc:
+            return self.gc(query_inputs, all_document_inputs, no_sync_except_last=False)
+        else:
+            e1 = self.model.forward_embedder(**query_inputs)
+            e2 = self.model.forward_embedder(**all_document_inputs)
+            return self._contrastive_loss(e1, e2)
     
     # Custom retrieval evalution code
     def _retrieval_evaluate(
