@@ -194,7 +194,6 @@ def load_beir_uncached(dataset: str, split: str) -> Tuple[datasets.Dataset, data
 
 
 def embed_with_cache(embedder: str, cache_name: str, texts: List[str]) -> datasets.Dataset:
-    print("embed_with_cache ...")
     embedder_cache_path = embedder.replace('/', '__')
     # cache_folder = datasets.config.HF_DATASETS_CACHE
     cache_folder = "/scratch/jxm3"
@@ -296,7 +295,6 @@ class BeirDataset(torch.utils.data.Dataset):
         return self.size
     
     def tokenize(self, tokenizer: transformers.PreTrainedTokenizer, max_length: int) -> None:
-        print(f"tokenizing {self.name}")
         self.queries = tokenize_dataset(
             dataset=self.queries,
             tokenizer=tokenizer,

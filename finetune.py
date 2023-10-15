@@ -82,7 +82,8 @@ model = Model(config=model_config, embedder=embedder, backbone=backbone)
 collator = DocumentQueryCollatorWithPadding(
     tokenizer=embedder_tokenizer,
     padding='longest',
-    return_tensors='pt'
+    return_tensors='pt',
+    max_length=model_args.max_seq_length,
 )
 trainer = CustomTrainer(
     data_collator=collator,

@@ -36,6 +36,7 @@ def cut_padding(batch: Dict[str, torch.Tensor], pad_token: int) -> Dict[str, tor
     batch['attention_mask'] = batch['attention_mask'][:, :padding_start]
     return batch
 
+
 class DocumentQueryCollatorWithPadding(transformers.DataCollatorWithPadding):
     tokenizer: transformers.PreTrainedTokenizerBase
     padding: Union[bool, str] = True
@@ -79,8 +80,7 @@ class DocumentQueryCollatorWithPadding(transformers.DataCollatorWithPadding):
                 except TypeError:
                     # TypeError: expected Tensor as element 0 in argument 0, but got list
                     # pad everything with -1s
-                    max_length = max(map(len, v))
-                    pad_func = functools.partial(pad_tensor_to_length, length=max_length, value=-1)
+                    pad_func = functools.partial(pad_tensor_to_length, length=self.max_length, value=-1)
                     other_features[k] = torch.stack(list(map(pad_func, v)))
         
         # pad stuff
@@ -89,14 +89,14 @@ class DocumentQueryCollatorWithPadding(transformers.DataCollatorWithPadding):
 
         # tokenize documents.
         if len(document_batch):
+            dd = document_batch
             document_batch: Dict[str, torch.Tensor] = self.tokenizer.pad(
                 document_batch,
                 padding=self.padding,
                 max_length=self.max_length,
-                pad_to_multiple_of=self.pad_to_multiple_of,
+                pad_to_multiple_of=self.max_length,
                 return_tensors=self.return_tensors,
             )
-            document_batch = cut_padding(document_batch, self.tokenizer.pad_token_id)
             ex.update({f'document_{k}': v for k,v in document_batch.items()})
         
         # tokenize hard negative documents.
@@ -105,10 +105,9 @@ class DocumentQueryCollatorWithPadding(transformers.DataCollatorWithPadding):
                 hn_document_batch,
                 padding=self.padding,
                 max_length=self.max_length,
-                pad_to_multiple_of=self.pad_to_multiple_of,
+                pad_to_multiple_of=self.max_length,
                 return_tensors=self.return_tensors,
             )
-            hn_document_batch = cut_padding(hn_document_batch, self.tokenizer.pad_token_id)
             ex.update({f'negative_document_{k}': v for k,v in hn_document_batch.items()})
 
         # tokenize queries.

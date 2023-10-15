@@ -67,7 +67,6 @@ class CustomTrainer(transformers.Trainer):
         # 
         # scores *= 20  # TODO argparse: self.args.contrastive_temperature.exp()
         diagonal_idxs = torch.arange(batch_size, device=e1.device)
-        import pdb; pdb.set_trace()
         loss = torch.nn.functional.cross_entropy(
             scores, diagonal_idxs, label_smoothing=0.0
         )

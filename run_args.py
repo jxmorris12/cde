@@ -193,6 +193,7 @@ class TrainingArguments(transformers.TrainingArguments):
             os.environ["WANDB_MODE"] = "disabled"
         ############################################################################
         num_workers = int(len(os.sched_getaffinity(0)) / torch.cuda.device_count())
+        num_workers = 0
         ############################################################################
         os.environ["RAYON_RS_NUM_CPUS"] = str(
             num_workers
