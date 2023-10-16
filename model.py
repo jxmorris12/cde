@@ -159,4 +159,8 @@ class Model(transformers.PreTrainedModel):
             # document_embeddings /= input_document_embeddings.norm(p=2, dim=-1, keepdim=True)
             scores = torch.einsum('bd,bcd->bc', input_query_embedding, input_document_embeddings)
         else:
-            ra
+            raise ValueError(f"unknown architecture {self.config.architecture}")
+
+
+        assert scores.shape == (batch_size, corpus_size), f"got invalid scores of shape {scores.shape}"
+        return scores
