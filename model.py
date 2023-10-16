@@ -56,7 +56,7 @@ class Model(transformers.PreTrainedModel):
 
         # whether to share hard negatives between queries.
         # TODO argparse for this.
-        self.share_hard_negatives = True
+        self.share_hard_negatives = False
     
     def forward_embedder(
             self,
@@ -111,6 +111,12 @@ class Model(transformers.PreTrainedModel):
         _, corpus_size, hidden_dim = document_embeddings.shape
         assert _ == batch_size
 
+        
+        # TODO: we shouldn't need to apply the below constraint if we property disable backbone
+        # model positionality.
+        backbone_max_seq_length = self.backbone.config.max_position_embeddings
+        assert batch_size + (2 * self.n_sequence) < backbone_max_seq_length, "too many hard negatives for backbone model"
+
         soft_prompt = torch.ones((1, self.hidden_size), device=query_embedding.device, dtype=torch.float32)
         soft_prompt = self.prompt_projection(soft_prompt).reshape((1, self.n_sequence, self.hidden_size))
         if self.config.architecture == "query_dependent":
@@ -153,8 +159,4 @@ class Model(transformers.PreTrainedModel):
             # document_embeddings /= input_document_embeddings.norm(p=2, dim=-1, keepdim=True)
             scores = torch.einsum('bd,bcd->bc', input_query_embedding, input_document_embeddings)
         else:
-            raise ValueError(f"unknown architecture {self.config.architecture}")
-
-
-        assert scores.shape == (batch_size, corpus_size), f"got invalid scores of shape {scores.shape}"
-        return scores
+            ra
