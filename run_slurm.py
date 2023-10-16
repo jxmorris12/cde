@@ -12,14 +12,15 @@ ACTUALLY_RUN_COMMAND = True
 #   >> per_device_train_batch_size * (1 + num_hard_negatives)
 BASE_PYTHON_CMD = """
 python finetune.py \
-    --logging_steps 250 \
-    --per_device_train_batch_size 64 \
-    --num_hard_negatives 16 \
+    --logging_steps 100 \
+    --per_device_train_batch_size 8 \
+    --num_hard_negatives 32 \
+    --use_gc 0 \
     --max_batch_size_fits_in_memory 256 \
-    --learning_rate 1e-4 \
+    --learning_rate 1e-5 \
     --lr_scheduler_type constant_with_warmup \
     --num_train_epochs 20 \
-    --warmup_steps 50000 \
+    --warmup_steps 5000 \
     --bf16=1 \
     --use_wandb 1 \
     --embedder "sentence-transformers/gtr-t5-base" \

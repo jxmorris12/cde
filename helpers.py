@@ -173,8 +173,9 @@ class RerankHelper:
     
     Template: https://github.com/beir-cellar/beir/blob/main/beir/reranking/rerank.py#L7
     """
-    def __init__(self, model):
+    def __init__(self, model, tokenizer):
         self.model = model
+        self.tokenizer = tokenizer
     
     def _score(self, query_embedding: torch.Tensor, corpus_embeddings: torch.Tensor) -> float:
         with torch.no_grad():
@@ -203,21 +204,41 @@ class RerankHelper:
         logging.info("Starting To Rerank Top-{}....".format(top_k))
         
         for query_id in tqdm.tqdm(results, desc="evaluating dataset"):
-            # TODO: call self._score in batch :)
+            # TODO do this in batch!
+            query_text = queries[query_idx_dict[query_id]]["text"]
             minicorpus = []
+            minicorpus_text = []
             if len(results[query_id]) > top_k:
                 for (doc_id, _) in sorted(results[query_id].items(), key=lambda item: item[1], reverse=True)[:top_k]:
                     pair_ids.append([query_id, doc_id])
                     minicorpus.append(corpus_embeddings[corpus_idx_dict[doc_id]]["embeds"])
+                    minicorpus_text.append(corpus[corpus_idx_dict[doc_id]]["text"])
             else:
                 for doc_id in results[query_id]:
                     pair_ids.append([query_id, doc_id])
                     minicorpus.append(corpus_embeddings[corpus_idx_dict[doc_id]]["embeds"])
+                    minicorpus_text.append(corpus[corpus_idx_dict[doc_id]]["text"])
+
+            query_inputs = self.tokenizer(
+                [query_text],
+                padding=True,
+                max_length=self.model.config.max_seq_length,
+                return_tensors="pt",
+            ).to(device)
+            document_inputs = self.tokenizer(
+                minicorpus_text,
+                padding=True,
+                max_length=self.model.config.max_seq_length,
+                return_tensors="pt",
+            ).to(device)
+            with torch.no_grad():
+                e1 = self.model.forward_embedder(**query_inputs)
+                e2 = self.model.forward_embedder(**document_inputs)
+                model_score = self._score(e1, e2)
             
             query_embedding = torch.tensor(query_embeddings[query_idx_dict[query_id]]["embeds"]).to(device)
             minicorpus_embeddings = torch.tensor(minicorpus).to(device)
 
-            model_score = self._score(query_embedding, minicorpus_embeddings)
             biencoder_score = torch.nn.functional.cosine_similarity(query_embedding, minicorpus_embeddings).flatten().cpu().tolist()
             rerank_scores_model.extend(model_score)
             rerank_scores_biencoder.extend(biencoder_score)

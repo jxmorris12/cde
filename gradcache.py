@@ -39,7 +39,7 @@ class GradCache:
 
     def __init__(
         self,
-        models: List[nn.Module],
+        model: nn.Module,
         chunk_sizes: Union[int, List[int]],
         optimizer: torch.optim.Optimizer,
         loss_fn: Callable[..., Tensor],
@@ -51,7 +51,7 @@ class GradCache:
     ):
         """
         Initialize the Gradient Cache class instance.
-        :param models: A list of all encoder models to be updated by the current cache.
+        :param model: Single model with `forward_embedder` func
         :param chunk_sizes: An integer indicating chunk size. Or a list of integers of chunk size for each model.
         :param loss_fn: A loss function that takes arbitrary numbers of representation tensors and
         arbitrary numbers of keyword arguments as input. It should not in any case modify the input tensors' relations
@@ -64,11 +64,12 @@ class GradCache:
         :param scaler: A GradScaler object for automatic mixed precision training.
         :[added] param backward_fn: The `manual_backward` function of pytorch lightning trainer when automatic_optimization is disabled.
         """
-        self.models = models
+        self.model = model
+        self.models = [model.forward_embedder, model.forward_embedder]
         self.optimizer = optimizer
 
         if isinstance(chunk_sizes, int):
-            self.chunk_sizes = [chunk_sizes for _ in range(len(models))]
+            self.chunk_sizes = [chunk_sizes for _ in range(len(self.models))]
         else:
             self.chunk_sizes = chunk_sizes
 
@@ -198,17 +199,6 @@ class GradCache:
         else:
             return model_out
 
-    def compute_loss(self, *reps: Tensor, **loss_kwargs) -> Tensor:
-        """
-        Compute the loss based on the representation tensors. The tensors should be ordered same as the list of models
-        registered in this GradCache class instance.
-        :param reps: Representations for computing the loss.
-        :param loss_kwargs: Keyword arguments input to the loss function.
-        :return: the loss tensor.
-        """
-        loss = self.loss_fn(*reps, **loss_kwargs)
-        return loss
-
     def forward_no_grad(
         self,
         model: nn.Module,
@@ -243,11 +233,18 @@ class GradCache:
         """
         reps = [r.detach().requires_grad_() for r in reps]
         with autocast() if self.fp16 else nullcontext():
-            loss = self.compute_loss(*reps, **loss_kwargs)
+            loss = self.loss_fn(*reps, **loss_kwargs)
 
         self.backward_fn(loss)  # [modified]
+
+        # print("** printing grads **")
+        # grad_params = []
+        # for n,p in self.model.named_parameters(): 
+        #     if p.grad is not None: grad_params.append(n)
+        # print(grad_params)
+        
         self.optimizer.step()
-        self.optimizer.zero_grad()
+        self.model.zero_grad()
 
         cache = [r.grad for r in reps]
 

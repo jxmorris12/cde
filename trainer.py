@@ -21,7 +21,9 @@ class CustomTrainer(transformers.Trainer):
     retrieval_datasets: Dict[str, datasets.Dataset]
 
     def __init__(self, *args,
-                 retrieval_datasets: Dict[str, datasets.Dataset], **kwargs):
+                 embedder_tokenizer: transformers.PreTrainedTokenizer,
+                 retrieval_datasets: Dict[str, datasets.Dataset], **kwargs
+                ):
         super().__init__(*args, **kwargs)
         self.retrieval_datasets = retrieval_datasets
         self._signature_columns = [
@@ -29,9 +31,8 @@ class CustomTrainer(transformers.Trainer):
             "document_input_ids", "document_attention_mask",
             "negative_document_input_ids", "negative_document_attention_mask",
             "query_input_ids", "query_attention_mask",
-        ]
-        print(f"initializing GradCache with chunk_size={self.args.max_batch_size_fits_in_memory}.")
-        
+        ]       
+        self.embedder_tokenizer = embedder_tokenizer 
         self.use_gc = self.args.use_gc # whether to use gradcache
         self.gc = None # lazily initialized during training
     
@@ -40,16 +41,21 @@ class CustomTrainer(transformers.Trainer):
 
     def create_optimizer(self, *args, **kwargs):
         super().create_optimizer(*args, **kwargs)
-        self.gc = GradCache(
-            models=[self.model.forward_embedder, self.model.forward_embedder],
-            optimizer=self.optimizer,
-            chunk_sizes=self.args.max_batch_size_fits_in_memory,
-            loss_fn=self._contrastive_loss, 
-            fp16=self.args.fp16,
-            scaler=self.scaler if self.args.fp16 else None,
-            backward_fn=self.accelerator.backward,
-        )
-    
+
+        if self.use_gc:
+            print(f"initializing GradCache with chunk_size={self.args.max_batch_size_fits_in_memory}.")
+            self.gc = GradCache(
+                model=self.model,
+                optimizer=self.optimizer,
+                chunk_sizes=self.args.max_batch_size_fits_in_memory,
+                loss_fn=self._contrastive_loss, 
+                fp16=self.args.fp16,
+                scaler=self.scaler if self.args.fp16 else None,
+                backward_fn=self.accelerator.backward,
+            )
+        else:
+            self.gc = None
+        
     def training_step(self, model: torch.nn.Module, inputs: Dict[str, Union[torch.Tensor, Any]]) -> torch.Tensor:
         if not self.use_gc:
             return super().training_step(model=model, inputs=inputs)
@@ -76,14 +82,13 @@ class CustomTrainer(transformers.Trainer):
         # better optimization (Thakur et al., 2021)."
         # 
         # scores *= 20  # TODO argparse: self.args.contrastive_temperature.exp()
-        diagonal_idxs = torch.arange(batch_size, device=e1.device)
+        labels = torch.arange(batch_size, device=e1.device)
         loss = torch.nn.functional.cross_entropy(
-            scores, diagonal_idxs, label_smoothing=0.0
+            scores, labels, label_smoothing=0.0
         )
         if (loss.isnan()):
             raise RuntimeError("Loss is nan!")
         
-        labels = torch.arange(batch_size, dtype=torch.long, device=scores.device)
         original_acc = ((
             torch.nn.functional.cosine_similarity(e1[:, None], e2[None, :], dim=2)
         ).argmax(1) == labels).float().mean()
@@ -160,7 +165,7 @@ class CustomTrainer(transformers.Trainer):
                 model = model.to(dtype=torch.bfloat16, device=self.args.device)
         model.eval()
         
-        reranker = RerankHelper(self.model)
+        reranker = RerankHelper(model=self.model, tokenizer=self.embedder_tokenizer)
 
         # TODO cache this if it's slow
         # index_name = ""

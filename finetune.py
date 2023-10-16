@@ -31,15 +31,6 @@ os.environ["_WANDB_STARTUP_DEBUG"] = "true"
 parser = transformers.HfArgumentParser((ModelArguments, DataArguments, TrainingArguments))
 model_args, data_args, training_args = parser.parse_args_into_dataclasses()
 transformers.set_seed(training_args.seed)
-
-wandb_run_id = training_args.exp_name
-print("starting wandb run with name", wandb_run_id)
-wandb.init(
-    project="dataset-transformer",
-    name=wandb_run_id,
-    # resume=True,
-)
-
 logging.basicConfig(format='%(asctime)s - %(message)s',
                     datefmt='%Y-%m-%d %H:%M:%S',
                     level=logging.INFO)
@@ -55,7 +46,7 @@ beir_dataset_names = [
     'fiqa',
     ########
     # 'msmarco', # this is the *real* eval set...
-    'trec-covid',
+    # 'trec-covid',
     # Other ones are certainly too big for repeated eval
     # 'webis-touche2020',
     # 'fever', 'quora',
@@ -78,6 +69,14 @@ train_dataset.tokenize(tokenizer=embedder_tokenizer, max_length=model_args.max_s
 model_config = ModelConfig(**vars(model_args))
 backbone = transformers.AutoModel.from_pretrained(model_args.backbone)
 model = Model(config=model_config, embedder=embedder, backbone=backbone)
+wandb_run_id = training_args.exp_name
+print("starting wandb run with name", wandb_run_id)
+wandb.init(
+    project="dataset-transformer",
+    name=wandb_run_id,
+    # resume=True,
+)
+wandb.watch(model)
 collator = DocumentQueryCollatorWithPadding(
     tokenizer=embedder_tokenizer,
     padding='longest',
@@ -90,7 +89,9 @@ trainer = CustomTrainer(
     args=training_args,
     train_dataset=train_dataset,
     eval_dataset=None,
+    embedder_tokenizer=embedder_tokenizer,
     retrieval_datasets=retrieval_datasets,
 )
+# trainer.evaluate_retrieval_datasets()
 trainer.train()
 
