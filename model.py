@@ -110,7 +110,6 @@ class Model(transformers.PreTrainedModel):
         document_embeddings = self.corpus_projection(document_embeddings)
         _, corpus_size, hidden_dim = document_embeddings.shape
         assert _ == batch_size
-
         
         # TODO: we shouldn't need to apply the below constraint if we property disable backbone
         # model positionality.

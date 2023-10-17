@@ -181,7 +181,8 @@ class CustomTrainer(transformers.Trainer):
             eval_dataset.corpus_embeddings,
             eval_dataset.queries, 
             eval_dataset.query_embeddings,
-            results=eval_dataset.ance_results, top_k=self.args.per_device_train_batch_size * 2
+            results=eval_dataset.ance_results, 
+            top_k=self.args.eval_rerank_topk
         )
 
         #### Evaluate your retrieval using NDCG@k, MAP@K ...

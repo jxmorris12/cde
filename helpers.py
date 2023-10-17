@@ -180,7 +180,7 @@ class RerankHelper:
     def _score(self, query_embedding: torch.Tensor, corpus_embeddings: torch.Tensor) -> float:
         with torch.no_grad():
             scores = self.model(
-                query_embedding=query_embedding[None], 
+                query_embedding=query_embedding, 
                 document_embeddings=corpus_embeddings
             )
         return scores.flatten().cpu().tolist()
@@ -222,12 +222,14 @@ class RerankHelper:
             query_inputs = self.tokenizer(
                 [query_text],
                 padding=True,
+                truncation=True,
                 max_length=self.model.config.max_seq_length,
                 return_tensors="pt",
             ).to(device)
             document_inputs = self.tokenizer(
                 minicorpus_text,
                 padding=True,
+                truncation=True,
                 max_length=self.model.config.max_seq_length,
                 return_tensors="pt",
             ).to(device)

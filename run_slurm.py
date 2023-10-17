@@ -13,11 +13,11 @@ ACTUALLY_RUN_COMMAND = True
 BASE_PYTHON_CMD = """
 python finetune.py \
     --logging_steps 100 \
-    --per_device_train_batch_size 8 \
-    --num_hard_negatives 32 \
-    --use_gc 0 \
+    --per_device_train_batch_size 32 \
+    --num_hard_negatives 16 \
+    --use_gc 1 \
     --max_batch_size_fits_in_memory 256 \
-    --learning_rate 1e-5 \
+    --learning_rate 2e-5 \
     --lr_scheduler_type constant_with_warmup \
     --num_train_epochs 20 \
     --warmup_steps 5000 \
@@ -25,7 +25,7 @@ python finetune.py \
     --use_wandb 1 \
     --embedder "sentence-transformers/gtr-t5-base" \
     --backbone "bert-base-uncased" \
-    --eval_steps=10000 \
+    --eval_steps=5000 \
     --evaluation_strategy steps \
     --architecture {ARCH} \
     --exp_name {EXP_NAME}
@@ -51,7 +51,7 @@ def run_cmd(cmd: str, job_desc: str):
                 # "constraint": "a40|3090|a6000|a5000|a100-40",
                 "ntasks": 1,
                 "cpus-per-task": 4,
-                "mem": "100G",
+                "mem": "64G",
                 "time": "336:00:00",  # 336 hours --> 2 weeks
             },
             slurm_flags=[
