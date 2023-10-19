@@ -114,7 +114,7 @@ class Model(transformers.PreTrainedModel):
         # TODO: we shouldn't need to apply the below constraint if we property disable backbone
         # model positionality.
         backbone_max_seq_length = self.backbone.config.max_position_embeddings
-        assert batch_size + (2 * self.n_sequence) < backbone_max_seq_length, "too many hard negatives for backbone model"
+        assert batch_size + (2 * self.n_sequence + corpus_size) < backbone_max_seq_length, "too many hard negatives for backbone model"
 
         soft_prompt = torch.ones((1, self.hidden_size), device=query_embedding.device, dtype=torch.float32)
         soft_prompt = self.prompt_projection(soft_prompt).reshape((1, self.n_sequence, self.hidden_size))
@@ -134,12 +134,15 @@ class Model(transformers.PreTrainedModel):
             
             inputs_embeds = document_embeddings
             inputs_embeds = torch.cat((soft_prompt, inputs_embeds), dim=1)
+            print("inputs_embeds.shape:", inputs_embeds.shape, "//", self.n_sequence, corpus_size)
             output = self.backbone(
                 inputs_embeds=inputs_embeds,
                 attention_mask=torch.ones((batch_size, self.n_sequence + corpus_size), dtype=torch.long, device=query_embedding.device),
             )
             output_vectors = output.last_hidden_state[:, self.n_sequence:, :]
-            scores = torch.einsum('bd,bcd->bc', input_query_embedding, output_vectors)
+
+            query_embedding = query_embedding[:, 0, :]
+            scores = torch.einsum('bd,bcd->bc', query_embedding, output_vectors)
         elif self.config.architecture == "biencoder_extended":
             soft_prompt = soft_prompt.repeat((batch_size * corpus_size, 1, 1))
             inputs_embeds = document_embeddings
@@ -151,7 +154,9 @@ class Model(transformers.PreTrainedModel):
             )
             output_vectors = output.last_hidden_state[:, self.n_sequence:, :]
             output_vectors = output_vectors.reshape((batch_size, corpus_size, hidden_dim))
-            scores = torch.einsum('bd,bcd->bc', input_query_embedding, output_vectors)
+            
+            query_embedding = query_embedding[:, 0, :]
+            scores = torch.einsum('bd,bcd->bc', query_embedding, output_vectors)
         elif self.config.architecture == "biencoder":
             # here we just throw away the projections
             # input_query_embedding /= input_query_embedding.norm(p=2, dim=-1, keepdim=True)

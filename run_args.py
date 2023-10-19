@@ -53,7 +53,11 @@ class ModelArguments:
     )
     embedder: str = field(
         default="sentence-transformers/gtr-t5-base",
-        metadata={"help": "embedder name"}
+        metadata={"help": "embedder name for the model"}
+    )
+    embedder_rerank: str = field(
+        default="sentence-transformers/gtr-t5-base",
+        metadata={"help": "embedder name for reranking"}
     )
     backbone: str = field(
         default="bert-base-uncased",

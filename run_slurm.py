@@ -14,17 +14,17 @@ BASE_PYTHON_CMD = """
 python finetune.py \
     --logging_steps 100 \
     --per_device_train_batch_size 32 \
-    --num_hard_negatives 16 \
+    --num_hard_negatives 32 \
     --use_gc 1 \
-    --max_batch_size_fits_in_memory 256 \
+    --max_batch_size_fits_in_memory 512 \
     --learning_rate 2e-5 \
     --lr_scheduler_type constant_with_warmup \
     --num_train_epochs 20 \
-    --warmup_steps 5000 \
+    --warmup_steps 20000 \
     --bf16=1 \
     --use_wandb 1 \
-    --embedder "sentence-transformers/gtr-t5-base" \
-    --backbone "bert-base-uncased" \
+    --embedder "sentence-transformers/msmarco-distilbert-base-tas-b" \
+    --backbone "distilbert-base-uncased" \
     --eval_steps=5000 \
     --evaluation_strategy steps \
     --architecture {ARCH} \
