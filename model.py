@@ -2,6 +2,15 @@ import torch
 import transformers
 
 
+def disable_dropout(model: torch.nn.Module):
+    dropout_modules = [m for m in model.modules() if isinstance(m, torch.nn.Dropout)]
+    for m in dropout_modules:
+        m.p = 0.0
+    print(
+        f"Disabled {len(dropout_modules)} dropout modules from model type {type(model)}"
+    )
+
+
 def mean_pool(
     hidden_states: torch.Tensor, attention_mask: torch.Tensor
 ) -> torch.Tensor:
@@ -57,6 +66,10 @@ class Model(transformers.PreTrainedModel):
         # whether to share hard negatives between queries.
         # TODO argparse for this.
         self.share_hard_negatives = False
+
+        self.gamma = config.gamma
+        if config.disable_dropout:
+            disable_dropout(self)
     
     def forward_embedder(
             self,
@@ -123,12 +136,12 @@ class Model(transformers.PreTrainedModel):
             inputs_embeds = torch.cat((soft_prompt, query_embedding, document_embeddings), dim=1)
             output = self.backbone(
                 inputs_embeds=inputs_embeds,
-                attention_mask=torch.ones((batch_size, (2 * self.n_sequence) + corpus_size), dtype=torch.long, device=query_embedding.device),
+                # attention_mask=torch.ones((batch_size, (2 * self.n_sequence) + corpus_size), dtype=torch.long, device=query_embedding.device),
             )
             output_vectors = output.last_hidden_state[:, (2*self.n_sequence):, :]
+            output_vectors = (document_embeddings * self.gamma) + (output_vectors * (1 - self.gamma))
             query_output_vectors = output.last_hidden_state[:, (self.n_sequence):(2*self.n_sequence), :].mean(dim=1)
-            scores = torch.bmm(output_vectors, query_output_vectors[:, :, None])
-            scores = scores.squeeze(dim=2)
+            scores = torch.einsum('bd,bcd->bc', query_output_vectors, output_vectors)
         elif self.config.architecture == "query_independent":
             soft_prompt = soft_prompt.repeat((batch_size, 1, 1))
             
@@ -137,9 +150,10 @@ class Model(transformers.PreTrainedModel):
             print("inputs_embeds.shape:", inputs_embeds.shape, "//", self.n_sequence, corpus_size)
             output = self.backbone(
                 inputs_embeds=inputs_embeds,
-                attention_mask=torch.ones((batch_size, self.n_sequence + corpus_size), dtype=torch.long, device=query_embedding.device),
+                # attention_mask=torch.ones((batch_size, self.n_sequence + corpus_size), dtype=torch.long, device=query_embedding.device),
             )
             output_vectors = output.last_hidden_state[:, self.n_sequence:, :]
+            output_vectors = (document_embeddings * self.gamma) + (output_vectors * (1 - self.gamma))
 
             query_embedding = query_embedding[:, 0, :]
             scores = torch.einsum('bd,bcd->bc', query_embedding, output_vectors)
@@ -150,10 +164,11 @@ class Model(transformers.PreTrainedModel):
             inputs_embeds = torch.cat((soft_prompt, inputs_embeds), dim=1)
             output = self.backbone(
                 inputs_embeds=inputs_embeds,
-                attention_mask=torch.ones((batch_size * corpus_size, 1), dtype=torch.long, device=query_embedding.device),
+                # attention_mask=torch.ones((batch_size * corpus_size, 1), dtype=torch.long, device=query_embedding.device),
             )
             output_vectors = output.last_hidden_state[:, self.n_sequence:, :]
             output_vectors = output_vectors.reshape((batch_size, corpus_size, hidden_dim))
+            output_vectors = (document_embeddings * self.gamma) + (output_vectors * (1 - self.gamma))
             
             query_embedding = query_embedding[:, 0, :]
             scores = torch.einsum('bd,bcd->bc', query_embedding, output_vectors)

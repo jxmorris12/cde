@@ -23,6 +23,10 @@ class ModelArguments:
             )
         },
     )
+    disable_dropout: bool = field(
+        default=False,
+        metadata={"help": "set model dropout rate to zero"}
+    )
     config_name: Optional[str] = field(
         default=None, metadata={"help": "Pretrained config name or path if not the same as model_name"}
     )
@@ -71,6 +75,14 @@ class ModelArguments:
         default="query_dependent",
         metadata = {
             "choices": ["query_dependent", "query_independent", "biencoder_extended", "biencoder"],
+        }
+    )
+    gamma: float = field(
+        default=0.0,
+        metadata={
+            "help": ("weight (between 0 and 1) for residual term in document embeddings. "
+                "0.0 means no residual, 1.0 means to ignore the second transformer block output."
+            )
         }
     )
 
@@ -171,7 +183,6 @@ class TrainingArguments(transformers.TrainingArguments):
         default=100,
          metadata={"help": "Number of reranked examples during eval"}
     )
-
     save_total_limit: int = 1  # Maximum number of checkpoints to save.
 
     exp_name: str = field(

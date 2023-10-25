@@ -28,7 +28,10 @@ python finetune.py \
     --eval_steps=5000 \
     --evaluation_strategy steps \
     --architecture {ARCH} \
-    --exp_name {EXP_NAME}
+    --exp_name {EXP_NAME} \
+    --eval_rerank_topk 64 \
+    --disable_dropout=1 \
+    --gamma=0.5
 """
 
 
@@ -68,11 +71,12 @@ def run_cmd(cmd: str, job_desc: str):
 
 
 # NAME_STR = ""
-NAME_STR = "more-hard-negatives-16"
+NAME_STR = "tasb-2"
 
 now = datetime.now()
 date_str = now.strftime("%Y-%m-%d")
 
+# for arch in ["query_independent"]: # 
 for arch in ["query_dependent", "query_independent", "biencoder_extended", "biencoder"]:
     exp_name = NAME_STR + arch
     cmd = BASE_PYTHON_CMD.format(ARCH=arch, EXP_NAME=exp_name)

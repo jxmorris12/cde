@@ -98,9 +98,6 @@ class CustomTrainer(transformers.Trainer):
             "train/acc": new_acc.item(),
             "corpus_size": corpus_size,
         })
-
-        print("corpus_size =", corpus_size)
-
         # print(f"acc: {original_acc.item()*100:.1f} / now: {new_acc.item()*100:.1f}")
         # TODO restore this :)
         # smart_labels = (inputs["idx"][:, None] == inputs["idx"]).float()
