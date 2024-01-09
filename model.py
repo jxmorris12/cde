@@ -31,6 +31,11 @@ class Model(transformers.PreTrainedModel):
             backbone: transformers.PreTrainedModel
         ):
         super().__init__(config=config)
+
+        if config.limit_layers:
+            print(f"Limiting layers to {config.limit_layers}")
+            embedder.transformer.layer = embedder.transformer.layer[:config.limit_layers]
+            backbone.transformer.layer = backbone.transformer.layer[:config.limit_layers]
         self.embedder = embedder
 
         # TODO make this a little nicer. (Not every model has 'embeddings...')
@@ -45,6 +50,11 @@ class Model(transformers.PreTrainedModel):
 
         embedding_dim = 768
         self.hidden_size = self.backbone.config.hidden_size
+
+        # self.true_document_embeddings = torch.nn.Embedding(
+        #     # 'True' or 'False'
+        #     (2, embedding_dim)
+        # )
 
         self.n_sequence = 16
         self.prompt_projection = torch.nn.Sequential(
@@ -119,12 +129,13 @@ class Model(transformers.PreTrainedModel):
                 pos_document_embeddings, hn_document_embeddings
             ), dim=1)
         
-        input_document_embeddings = document_embeddings # save for biencoder
-        document_embeddings = self.corpus_projection(document_embeddings)
         _, corpus_size, hidden_dim = document_embeddings.shape
         assert _ == batch_size
         
-        # TODO: we shouldn't need to apply the below constraint if we property disable backbone
+        input_document_embeddings = document_embeddings # save for biencoder
+        document_embeddings = self.corpus_projection(document_embeddings)
+        
+        # NOTE: we shouldn't need to apply the below constraint if we properly disable backbone
         # model positionality.
         backbone_max_seq_length = self.backbone.config.max_position_embeddings
         assert batch_size + (2 * self.n_sequence + corpus_size) < backbone_max_seq_length, "too many hard negatives for backbone model"
@@ -136,7 +147,6 @@ class Model(transformers.PreTrainedModel):
             inputs_embeds = torch.cat((soft_prompt, query_embedding, document_embeddings), dim=1)
             output = self.backbone(
                 inputs_embeds=inputs_embeds,
-                # attention_mask=torch.ones((batch_size, (2 * self.n_sequence) + corpus_size), dtype=torch.long, device=query_embedding.device),
             )
             output_vectors = output.last_hidden_state[:, (2*self.n_sequence):, :]
             output_vectors = (document_embeddings * self.gamma) + (output_vectors * (1 - self.gamma))
@@ -147,10 +157,8 @@ class Model(transformers.PreTrainedModel):
             
             inputs_embeds = document_embeddings
             inputs_embeds = torch.cat((soft_prompt, inputs_embeds), dim=1)
-            print("inputs_embeds.shape:", inputs_embeds.shape, "//", self.n_sequence, corpus_size)
             output = self.backbone(
                 inputs_embeds=inputs_embeds,
-                # attention_mask=torch.ones((batch_size, self.n_sequence + corpus_size), dtype=torch.long, device=query_embedding.device),
             )
             output_vectors = output.last_hidden_state[:, self.n_sequence:, :]
             output_vectors = (document_embeddings * self.gamma) + (output_vectors * (1 - self.gamma))
@@ -164,7 +172,6 @@ class Model(transformers.PreTrainedModel):
             inputs_embeds = torch.cat((soft_prompt, inputs_embeds), dim=1)
             output = self.backbone(
                 inputs_embeds=inputs_embeds,
-                # attention_mask=torch.ones((batch_size * corpus_size, 1), dtype=torch.long, device=query_embedding.device),
             )
             output_vectors = output.last_hidden_state[:, self.n_sequence:, :]
             output_vectors = output_vectors.reshape((batch_size, corpus_size, hidden_dim))

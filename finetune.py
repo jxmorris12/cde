@@ -34,7 +34,7 @@ transformers.set_seed(training_args.seed)
 logging.basicConfig(format='%(asctime)s - %(message)s',
                     datefmt='%Y-%m-%d %H:%M:%S',
                     level=logging.INFO)
-embedder = transformers.AutoModel.from_pretrained(model_args.embedder) # .encoder
+embedder = transformers.AutoModel.from_pretrained(model_args.embedder)
 embedder_tokenizer =  transformers.AutoTokenizer.from_pretrained(model_args.embedder)
 
 beir_dataset_names = [
@@ -45,8 +45,10 @@ beir_dataset_names = [
     'scifact',
     'fiqa',
     ########
-    # 'msmarco', # this is the *real* eval set...
-    # 'trec-covid',
+    'msmarco', # this is the *real* eval set...
+    'trec-covid',
+    'signal1m',
+    'robust04',
     # Other ones are certainly too big for repeated eval
     # 'webis-touche2020',
     # 'fever', 'quora',
@@ -72,7 +74,7 @@ model = Model(config=model_config, embedder=embedder, backbone=backbone)
 wandb_run_id = training_args.exp_name
 print("starting wandb run with name", wandb_run_id)
 wandb.init(
-    project="dataset-transformer",
+    project="dataset-transformer-2",
     name=wandb_run_id,
     # resume=True,
 )

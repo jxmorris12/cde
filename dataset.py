@@ -201,8 +201,6 @@ def embed_with_cache(embedder: str, cache_name: str, texts: List[str]) -> datase
     os.makedirs(cache_folder, exist_ok=True)
     cache_path = os.path.join(cache_folder, cache_name) #  + "_small")
 
-    # texts = texts[:1000]
-
 
     if os.path.exists(cache_path):
         print("[embed_with_cache] Loading embeddings at path:", cache_path)
@@ -212,7 +210,7 @@ def embed_with_cache(embedder: str, cache_name: str, texts: List[str]) -> datase
     from sentence_transformers import SentenceTransformer
     model = SentenceTransformer(embedder)
     model.max_seq_length = 512
-    embeddings = model.encode(texts, show_progress_bar=True)
+    embeddings = model.encode(texts, batch_size=64,  show_progress_bar=True)
     # import numpy as np
     # embeddings = np.random.rand(len(texts), 768)
 

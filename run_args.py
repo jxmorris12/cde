@@ -85,6 +85,12 @@ class ModelArguments:
             )
         }
     )
+    limit_layers: Optional[int] = field(
+        default=None,
+        metadata={
+            "help": "If set, will load both backbone and embedder with limited number of layers"
+        }
+    )
 
     def __post_init__(self):
         if self.config_overrides is not None and (self.config_name is not None or self.model_name_or_path is not None):
@@ -126,24 +132,6 @@ class DataArguments:
             )
         },
     )
-    streaming: bool = field(default=False, metadata={"help": "Enable streaming mode"})
-    overwrite_cache: bool = field(
-        default=False, metadata={"help": "Overwrite the cached training and evaluation sets"}
-    )
-    validation_split_percentage: Optional[int] = field(
-        default=5,
-        metadata={
-            "help": "The percentage of the train set used as validation set in case there's no validation split"
-        },
-    )
-    preprocessing_num_workers: Optional[int] = field(
-        default=None,
-        metadata={"help": "The number of processes to use for the preprocessing."},
-    )
-    keep_linebreaks: bool = field(
-        default=True, metadata={"help": "Whether to keep line breaks when using TXT files or not."}
-    )
-
     def __post_init__(self):
         if self.dataset_name is None:
             raise ValueError("Need a dataset name.")
