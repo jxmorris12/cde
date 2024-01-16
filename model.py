@@ -56,7 +56,7 @@ class Model(transformers.PreTrainedModel):
         #     (2, embedding_dim)
         # )
 
-        self.n_sequence = 16
+        self.n_sequence = 1
         self.prompt_projection = torch.nn.Sequential(
             torch.nn.Linear(embedding_dim, self.hidden_size),
             torch.nn.ReLU(),
@@ -153,8 +153,7 @@ class Model(transformers.PreTrainedModel):
             query_output_vectors = output.last_hidden_state[:, (self.n_sequence):(2*self.n_sequence), :].mean(dim=1)
             scores = torch.einsum('bd,bcd->bc', query_output_vectors, output_vectors)
         elif self.config.architecture == "query_independent":
-            soft_prompt = soft_prompt.repeat((batch_size, 1, 1))
-            
+            soft_prompt = soft_prompt.repeat((batch_size, 1, 1)) 
             inputs_embeds = document_embeddings
             inputs_embeds = torch.cat((soft_prompt, inputs_embeds), dim=1)
             output = self.backbone(
@@ -162,7 +161,6 @@ class Model(transformers.PreTrainedModel):
             )
             output_vectors = output.last_hidden_state[:, self.n_sequence:, :]
             output_vectors = (document_embeddings * self.gamma) + (output_vectors * (1 - self.gamma))
-
             query_embedding = query_embedding[:, 0, :]
             scores = torch.einsum('bd,bcd->bc', query_embedding, output_vectors)
         elif self.config.architecture == "biencoder_extended":
