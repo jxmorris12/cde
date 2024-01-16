@@ -1,11 +1,17 @@
-import argparse
+from typing import Optional
+
 import json
 import os
 import random
 
+import pandas as pd
 import torch
 from transformers import AutoTokenizer
 from torch.utils.data.dataset import Dataset
+
+
+# Data is within the root folder in data/
+DATA_PATH = os.path.join(os.path.dirname(os.path.realpath(__file__)), "data")
 
 class RetrievalDataset(Dataset):
     """This is the Super Class of all the other Dataset classes. It provides general 
@@ -14,51 +20,53 @@ class RetrievalDataset(Dataset):
   
     def __init__(
         self, 
-        params: argparse.Namespace, 
+        dataset_name: str,
+        model_name: str,
+        episode_length: int,
+        token_max_length: int,
         split: str, 
         num_sample_per_author: int, 
-        is_queries=False
+        text_key: str,
+        time_key: str,
+        is_queries: bool = False,
+        sanity: Optional[int] = None,
     ):
         """Initializes the Dataset class.
 
         Args:
-            params (argparse.Namespace): Command-line parameters.
+            dataset_name (str): name of the dataset
+            model_name (str): name of model (to load its tokenizer)
+            episode_length (int): Number of windows per sampled example
+            token_max_length (int): Max number of tokens in a window
             split (str): Name of the split: train, validation, or test.
+            text_key (str)
+            time_key (str)
             num_sample_per_author (int): Number of data points to sample per author.
             is_queries (bool, optional): Whether or not we're reading in the queries.
+            sanity (int | None): if set, use only this many authors (for debugging)
         """
-        self.params = params
-        
         self.split = split
         assert self.split in ["train", "validation", "test"]
         
-        self.dataset_name = params.dataset_name
+        self.dataset_name = dataset_name
         self.num_sample_per_author = num_sample_per_author
+        self.token_max_length = token_max_length
         self.is_queries = is_queries
-        self.sanity = self.params.sanity
-        self.episode_length = self.params.episode_length
+        self.sanity = sanity
+        self.episode_length = episode_length
       
-        self.dataset_path = os.path.join(utils.data_path, self.dataset_name)
-        self.model_path = self.get_model_path()
-        self.tokenizer = AutoTokenizer.from_pretrained(self.model_path) 
+        self.dataset_path = os.path.join(DATA_PATH, self.dataset_name)
+        self.tokenizer = AutoTokenizer.from_pretrained(model_name) 
         
-        self.text_key = self.params.text_key
-        self.time_key = self.params.time_key
-
-    def get_model_path(self):
-        transformer_modelnames = {
-            "roberta": "paraphrase-distilroberta-base-v1",
-            "roberta_base": "roberta-base",
-        }
-
-        return os.path.join(utils.transformer_path, transformer_modelnames[self.params.model_type])
+        self.text_key = text_key
+        self.time_key = time_key
 
     def tokenize_text(self, all_text):
         tokenized_episode = self.tokenizer(
             all_text, 
-            padding=True if self.params.use_random_windows else "max_length", 
-            truncation=False if self.params.use_random_windows else True, 
-            max_length=None if self.params.use_random_windows else self.params.token_max_length, 
+            padding=True if self.use_random_windows else "max_length", 
+            truncation=False if self.use_random_windows else True, 
+            max_length=None if self.use_random_windows else self.token_max_length, 
             return_tensors='pt'
         )
         tokenized_episode =  self.reformat_tokenized_inputs(tokenized_episode)
@@ -88,6 +96,7 @@ class RetrievalDataset(Dataset):
         else:
             author_data = self.data.iloc[index].to_dict()
 
+        assert self.text_key in author_data, f"key '{self.text_key} missing in {author_data.keys()}"
         num_docs = len(author_data[self.text_key])
         episode_length = num_docs if num_docs < self.episode_length else self.episode_length
 
@@ -143,20 +152,6 @@ class RetrievalDataset(Dataset):
 
         return [input_ids, attention_mask]
 
-    def mask_data_bpe(self, data):
-        """Masks x% of Byte-Pair Encodings from the input. 
-        """
-        if self.params.mask_bpe_percentage > 0.0:
-            mask = torch.rand(data[0].size()) >= (1. - self.params.mask_bpe_percentage)
-
-            # This is why we won't quite get to the mask percentage asked for by the user.
-            pad_mask = ~(data[0] == self.tokenizer.pad_token_id)
-            mask *= pad_mask
-
-            data[0].masked_fill_(mask, self.tokenizer.mask_token_id)
-
-        return data
-
     def load_data(self, filename: str):
         """Loads in the data specified in `filename` and populates the necessary 
            variables for sampling the dataset.
@@ -168,11 +163,11 @@ class RetrievalDataset(Dataset):
         print("Loading {} dataset {} {} file: {}".format(
               self.dataset_name, self.split, query_file, filename))
 
-        if self.params.dataset_name in ["iur_dataset", "raw_all"]:
-            self.build_byte_count_list(filename, load_first_N=self.params.sanity)
+        if self.dataset_name in ["iur_dataset", "raw_all"]:
+            self.build_byte_count_list(filename, load_first_N=self.sanity)
             self.num_authors = len(self.byte_count_list)
         else: 
-            self.data = pd.read_json(filename, lines=True, nrows=self.params.sanity)
+            self.data = pd.read_json(filename, lines=True, nrows=self.sanity)
             self.num_authors = len(self.data)
         
     def build_byte_count_list(self, filename: str, load_first_N: int):
@@ -193,6 +188,7 @@ class RetrievalDataset(Dataset):
                 line = fhandle.readline()
                 i += 1
 
+        assert len(byte_count_list) > 0, "got empty byte count list"
         self.byte_count_list = byte_count_list
 
     def read_line(self, fhandle, index):
@@ -223,12 +219,29 @@ class RedditDataset(RetrievalDataset):
     """
     def __init__(
         self, 
-        params: argparse.Namespace, 
+        model_name: str,
+        episode_length: int,
+        token_max_length: int,
         split: str, 
         num_sample_per_author: int, 
-        is_queries=True
+        dataset_name: str = "raw_all",
+        text_key: str = "syms",
+        time_key: str = "hour",
+        is_queries: bool = True,
+        sanity: Optional[int] = None,
     ):
-        super().__init__(params, split, num_sample_per_author, is_queries)
+        super().__init__(
+            dataset_name=dataset_name, 
+            model_name=model_name,
+            episode_length=episode_length,
+            token_max_length=token_max_length,
+            split=split, 
+            text_key=text_key,
+            time_key=time_key,
+            num_sample_per_author=num_sample_per_author, 
+            is_queries=is_queries,
+            sanity=sanity
+        )
 
         # There are two Reddit datasets available, each with their own files:
         dataset_files = {
@@ -244,12 +257,13 @@ class RedditDataset(RetrievalDataset):
             },
         }
 
-        self.dataset_path = os.path.exists(os.path.join(utils.data_path, self.dataset_name))
-        idx = 0 if is_queries or self.params.sanity else 1
+        self.dataset_path = os.path.join(DATA_PATH, dataset_name)
+        assert os.path.exists(self.dataset_path), f"couldn't find dataset at path: {self.dataset_path}"
+        idx = 0 if is_queries or self.sanity else 1
         split = "train" if self.sanity else split
-        filename = dataset_files[self.params.dataset_name][split][idx]
+        filename = dataset_files[self.dataset_name][split][idx]
 
-        self.filename = os.path.join(self.dataset_path, filename) + self.params.suffix
+        self.filename = os.path.join(self.dataset_path, filename)
         self.load_data(self.filename)
         self.is_test = split != "train"
         self.use_random_windows = False
@@ -273,13 +287,18 @@ class RedditDataset(RetrievalDataset):
         data = self.tokenize_text(text)
         if self.use_random_windows:
             data = self.sample_random_window(data)
-        data = [d.reshape(self.num_sample_per_author, -1, self.params.token_max_length) for d in data]
-
-        self.mask_data_bpe(data)
+        data = [d.reshape(self.num_sample_per_author, -1, self.token_max_length) for d in data]
 
         return data, author
 
 if __name__ == '__main__':
-    dataset = RedditDataset()
+    dataset = RedditDataset(
+        model_name="bert-base-uncased",
+        split="train",
+        episode_length=1,
+        token_max_length=32,
+        num_sample_per_author=2,
+        sanity=1000,
+    )
     print(dataset[0])
     print(len(dataset))
