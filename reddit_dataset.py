@@ -1,13 +1,15 @@
-from typing import Optional
+from typing import Dict, List, Optional, Tuple
 
+import collections
 import json
 import os
 import random
 
 import pandas as pd
 import torch
-from transformers import AutoTokenizer
 from torch.utils.data.dataset import Dataset
+import tqdm
+from transformers import AutoTokenizer
 
 
 # Data is within the root folder in data/
@@ -61,6 +63,8 @@ class RetrievalDataset(Dataset):
         self.text_key = text_key
         self.time_key = time_key
 
+        self.min_char_length = 30
+
     def tokenize_text(self, all_text):
         tokenized_episode = self.tokenizer(
             all_text, 
@@ -108,13 +112,12 @@ class RetrievalDataset(Dataset):
             start_index = random.randint(0, maxval)
     
         episode = {k: v[start_index: start_index + episode_length] 
-                   for k, v in author_data.items() if isinstance(v, list) and len(v) > 0}
+                   for k, v in author_data.items() if isinstance(v, list) and len(v) >= self.min_char_length}
 
         if self.sanity or "author_id" not in author_data:
             episode["author_id"] = index
         else:            
-            episode["author_id"] = author_data["author_id"] 
-            
+            episode["author_id"] = author_data["author_id"]             
         return episode
     
     def sample_random_window(self, data, window_length=32):
@@ -267,6 +270,21 @@ class RedditDataset(RetrievalDataset):
         self.load_data(self.filename)
         self.is_test = split != "train"
         self.use_random_windows = False
+        self.min_posts_per_subreddit = 100
+        self.subreddits = self.process_subreddits()
+
+    def process_subreddits(self) -> Dict[str, List[Tuple[int, int]]]:
+        self.fhandle = open(self.filename, "r")
+        subreddits = collections.defaultdict(list)
+        for author_idx in tqdm.tqdm(range(len(self)), desc='counting subreddits'):
+            author_data = self.read_line(self.fhandle, author_idx)
+            for subreddit_idx, subreddit_name in enumerate(author_data['action_type']):
+                text = author_data[self.text_key][subreddit_idx]
+                if len(text) < self.min_char_length: continue
+                subreddits[subreddit_name].append([author_idx, subreddit_idx])
+        return { 
+            k: v for k,v in subreddits.items() if len(v) > self.min_posts_per_subreddit 
+        }
         
     def __getitem__(
         self, 
@@ -298,7 +316,8 @@ if __name__ == '__main__':
         episode_length=1,
         token_max_length=32,
         num_sample_per_author=2,
-        sanity=1000,
+        sanity=None,
     )
     print(dataset[0])
     print(len(dataset))
+    breakpoint()
