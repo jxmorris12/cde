@@ -4,6 +4,7 @@ import collections
 import dataclasses
 import json
 import hashlib
+import itertools
 import logging
 import os
 import pickle
@@ -281,6 +282,9 @@ def independent_crop(
     l1: int = 256, l2: int = 256) -> Tuple[torch.Tensor, torch.Tensor]:
     """Returns two independent crops from input_ids.
     
+    Assumes input_ids has a beginning and end token, like 
+        [101, ..., 102, 0, 0, 0].
+
     Args:
         input_ids: tensor of IDs
         pad_token_id: ID of pad tokens in input_ids
@@ -313,15 +317,15 @@ def independent_crop(
     nl1 = min(N//2, l1)
     nl2 = min(N//2, l2)
 
-    s1_start = random.randint(0, N-nl1)
-    s2_start = random.randint(0, N-nl2)
+    s1_start = random.randint(1, N-nl1)
+    s2_start = random.randint(1, N-nl2)
 
-    s1 = input_ids[s1_start:s1_start+nl1]
-    s2 = input_ids[s2_start:s2_start+nl2]
-    # if len(s1) < l1:
-    #     p1 = torch.full(size=(l1 - len(s1),), fill_value=pad_token_id).to(s1.device)
-    #     s1 = torch.cat((s1, p1), dim=0)
-    # if len(s2) < l2:
-    #     p2 = torch.full(size=(l2 - len(s2),), fill_value=pad_token_id).to(s2.device)
-    #     s2 = torch.cat((s2, p2), dim=0)
+    s1_idxs = itertools.chain(
+        [0], range(s1_start, s1_start+nl1), [N-1]
+    )
+    s1 = input_ids[torch.tensor(list(s1_idxs))]
+    s2_idxs = itertools.chain(
+        [0], range(s2_start, s2_start+nl2), [N-1]
+    )
+    s2 = input_ids[torch.tensor(list(s2_idxs))]
     return (s1, s2)

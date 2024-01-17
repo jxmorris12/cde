@@ -196,8 +196,6 @@ class TrainingArguments(transformers.TrainingArguments):
 
     def __post_init__(self):
         super().__post_init__()
-
-
         if self.use_wandb:
             self.report_to = ["wandb"] if (self.local_rank <= 0) else []
         else:
@@ -206,7 +204,7 @@ class TrainingArguments(transformers.TrainingArguments):
             os.environ["WANDB_MODE"] = "disabled"
         ############################################################################
         num_workers = int(len(os.sched_getaffinity(0)) / torch.cuda.device_count())
-        # num_workers = 0 # For debugging
+        num_workers = 0 # For debugging
         ############################################################################
         os.environ["RAYON_RS_NUM_CPUS"] = str(
             num_workers

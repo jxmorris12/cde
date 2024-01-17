@@ -99,13 +99,6 @@ class CustomTrainer(transformers.Trainer):
             "train/acc": new_acc.item(),
             "batch_size": batch_size,
         })
-        # print(f"acc: {original_acc.item()*100:.1f} / now: {new_acc.item()*100:.1f}")
-        # TODO restore this :)
-        # smart_labels = (inputs["idx"][:, None] == inputs["idx"]).float()
-        # smart_labels /= smart_labels.sum(dim=1)
-        # zero_labels = torch.zeros((batch_size, len(inputs["negative_document_embedding"])), dtype=torch.float32, device=scores.device)
-        # smart_labels = torch.cat((smart_labels, zero_labels), dim=1)
-                
         return loss
 
     def compute_loss(
@@ -118,7 +111,6 @@ class CustomTrainer(transformers.Trainer):
         document_inputs = inputs_for_key(inputs, key="document")
         negative_document_inputs = inputs_for_key(inputs, key="negative_document")
         dataset_inputs = inputs_for_key(inputs, key="dataset")
-
 
         document_inputs["dataset_input_ids"] = dataset_inputs["input_ids"]
         document_inputs["dataset_attention_mask"] = dataset_inputs["attention_mask"]
