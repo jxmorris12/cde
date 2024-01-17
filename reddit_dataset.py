@@ -4,8 +4,10 @@ import collections
 import json
 import io
 import os
+import pickle
 import random
 
+import datasets
 import pandas as pd
 import torch
 from torch.utils.data.dataset import Dataset
@@ -27,7 +29,6 @@ class RetrievalDataset(Dataset):
         model_name: str,
         token_max_length: int,
         split: str, 
-        num_sample_per_author: int, 
         text_key: str,
         time_key: str,
         is_queries: bool = False,
@@ -42,7 +43,6 @@ class RetrievalDataset(Dataset):
             split (str): Name of the split: train, validation, or test.
             text_key (str)
             time_key (str)
-            num_sample_per_author (int): Number of data points to sample per author.
             is_queries (bool, optional): Whether or not we're reading in the queries.
             sanity (int | None): if set, use only this many authors (for debugging)
         """
@@ -50,7 +50,6 @@ class RetrievalDataset(Dataset):
         assert self.split in ["train", "validation", "test"]
         
         self.dataset_name = dataset_name
-        self.num_sample_per_author = num_sample_per_author
         self.token_max_length = token_max_length
         self.is_queries = is_queries
         self.sanity = sanity
@@ -188,13 +187,11 @@ class RedditDataset(RetrievalDataset):
         model_name: str,
         token_max_length: int,
         split: str, 
-        num_sample_per_author: int, 
         dataset_name: str = "raw_all",
         text_key: str = "syms",
         time_key: str = "hour",
         is_queries: bool = True,
         sanity: Optional[int] = None,
-        group_by_subreddit: bool = False,
     ):
         super().__init__(
             dataset_name=dataset_name, 
@@ -203,7 +200,6 @@ class RedditDataset(RetrievalDataset):
             split=split, 
             text_key=text_key,
             time_key=time_key,
-            num_sample_per_author=num_sample_per_author, 
             is_queries=is_queries,
             sanity=sanity
         )
@@ -256,7 +252,7 @@ class RedditDataset(RetrievalDataset):
     def __getitem__(
         self, 
         index: int
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> torch.Tensor:
         self.fhandle = open(self.filename, "r")
         
         A = [] # left side of unsupervised contrastive
@@ -264,31 +260,51 @@ class RedditDataset(RetrievalDataset):
         subreddit_key = self.subreddit_keys[index]
         for author_idx, document_idx in self.subreddits[subreddit_key]:
             text = self._get_doc(self.fhandle, author_idx, document_idx)
-            data = self.tokenize_text(text)
-            input_ids_A, _ = self.sample_random_window(data, window_length=self.token_max_length)
-            while True:
-                input_ids_B, _ = self.sample_random_window(data, window_length=self.token_max_length)
-                if not (input_ids_B == input_ids_A).all():
-                    break
+            input_ids_A, _ = self.tokenize_text(text)
             A.append(input_ids_A)
-            B.append(input_ids_B)
         
-        A = torch.cat(A, dim=0)
-        B = torch.cat(B, dim=0)
-        return A, B
+        return torch.cat(A, dim=0)
 
     def __len__(self):
         return len(self.subreddits)
 
 if __name__ == '__main__':
+    data_folder = "data/full"
+    os.makedirs(data_folder, exist_ok=True)
+    output_file = "test.dataset"
     dataset = RedditDataset(
-        model_name="bert-base-uncased",
+        model_name="bert-base-uncased", # Used for tokenization (TODO argparse)
         split="train",
-        token_max_length=256,
-        num_sample_per_author=2,
-        sanity=10_000,
+        token_max_length=256, # TODO argparse ...
+        sanity=None,  # TODO argparse ...
     )
     print(dataset[0])
     print(len(dataset))
     print({k: len(v) for k,v in sorted(dataset.subreddits.items(), key=lambda item: len(item[1]))})
-    breakpoint()
+
+    # Creating full dataset
+    output_dataset = None
+    total = 0
+    subreddit_idxs = {}
+    for subreddit_idx in tqdm.trange(len(dataset)):
+        batch_input_ids = dataset[subreddit_idx]
+        batch = {
+            "input_ids": batch_input_ids,
+            "subreddit_idx": [subreddit_idx] * len(batch_input_ids),
+        }
+        # Also track a mapping of which idxs are in which dataset
+        subreddit_idxs[subreddit_idx] = (
+            [id + total for id in range(len(batch_input_ids))]
+        )
+        total += len(batch_input_ids)
+        batch_dataset = datasets.Dataset.from_dict(batch)
+        if output_dataset is None:
+            output_dataset = batch_dataset
+        else:
+            output_dataset = datasets.concatenate_datasets(
+                (output_dataset, batch_dataset)
+            )
+    # Save to disk
+    output_dataset.save_to_disk(os.path.join(data_folder, output_file))
+    pickle.dump(subreddit_idxs, open(os.path.join(data_folder, "subreddit_idxs.p"), "wb"))
+    pickle.dump(dataset.subreddit_keys, open(os.path.join(data_folder, "subreddit_keys.p"), "wb"))
