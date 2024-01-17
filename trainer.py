@@ -125,6 +125,14 @@ class CustomTrainer(transformers.Trainer):
         query_inputs = inputs_for_key(inputs, key="query")
         document_inputs = inputs_for_key(inputs, key="document")
         negative_document_inputs = inputs_for_key(inputs, key="negative_document")
+        dataset_inputs = inputs_for_key(inputs, key="dataset")
+
+
+        document_inputs["dataset_input_ids"] = dataset_inputs["input_ids"]
+        document_inputs["dataset_attention_mask"] = dataset_inputs["attention_mask"]
+
+        query_inputs["dataset_input_ids"] = dataset_inputs["input_ids"]
+        query_inputs["dataset_attention_mask"] = dataset_inputs["attention_mask"]
 
         all_document_inputs = {
             k: (
@@ -136,7 +144,7 @@ class CustomTrainer(transformers.Trainer):
         # print("all_document_inputs >>", {k: v.shape for k,v in all_document_inputs.items()})
 
         if self.use_gc:
-            return self.gc(query_inputs, all_document_inputs, no_sync_except_last=False)
+            return self.gc(query_inputs, all_document_inputs, dataset_inputs, no_sync_except_last=False)
         else:
             e1 = self.model.forward_embedder(**query_inputs)
             e2 = self.model.forward_embedder(**all_document_inputs)

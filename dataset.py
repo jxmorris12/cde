@@ -9,21 +9,17 @@ import random
 
 import beir.datasets.data_loader
 import datasets
-import numpy as np
 import pickle
 import random
 import torch
 import transformers
+import torch.multiprocessing as mp
 import tqdm
 from helpers import (
-    download_url_and_unzip, download_url, md5_hash
+    download_url_and_unzip, download_url, independent_crop, md5_hash
 )
 
 def datasets_fast_load_from_disk(cache_path) -> datasets.Dataset:
-    # files = glob.glob(os.path.join(cache_path, "*.arrow"))
-    # files_tqdm = tqdm.tqdm(files, desc=f"loading from {cache_path}", leave=False, colour="#FFC0CB")
-    # datasets_list = [datasets.Dataset.from_file(file) for file in files_tqdm]
-    # return datasets.concatenate_datasets(datasets_list)
     return datasets.load_from_disk(cache_path)
 
 
@@ -211,8 +207,6 @@ def embed_with_cache(embedder: str, cache_name: str, texts: List[str]) -> datase
     model = SentenceTransformer(embedder)
     model.max_seq_length = 512
     embeddings = model.encode(texts, batch_size=64,  show_progress_bar=True)
-    # import numpy as np
-    # embeddings = np.random.rand(len(texts), 768)
 
     datasets_list = []
     max_dataset_size = 1_000_000
@@ -391,6 +385,70 @@ class MsmarcoDatasetHardNegatives(BeirDataset):
             "negative_document_embeddings": self.corpus_embeddings[neg_doc_id]["embeds"],
         })
         return ex
+
+
+class RedditDataset(torch.utils.data.Dataset):
+    current_dataset_idx: mp.Value = mp.Value('i', 0)
+    # current_dataset_random_offset: mp.Value = mp.Value('i', 0)
+
+    def __init__(self, data_folder: str = "/home/jxm3/research/retrieval/tti3/data/sanity"):
+        print(f"Loading Reddit data from path: {data_folder}")
+        self.dataset = datasets.load_from_disk(os.path.join(data_folder, "test.dataset"))
+        self.subreddit_idxs = pickle.load(open(os.path.join(data_folder, "subreddit_idxs.p"), "rb"))
+        self.subreddit_keys = pickle.load(open(os.path.join(data_folder, "subreddit_keys.p"), "rb"))
+        assert len(self.subreddit_idxs) == len(self.subreddit_keys)
+
+        print(f"Loaded {len(self.dataset)} datapoints from {len(self.subreddit_keys)} subreddits")
+
+        for key in self.subreddit_idxs.keys():
+            random.shuffle(self.subreddit_idxs[key])
+        
+        self.pad_token_id = 0 # TODO: Set dynamically based on appropriate tokenizer.
+    
+    def tokenize(self, tokenizer: transformers.PreTrainedTokenizer, max_length: int) -> None:
+        # reddit data comes pre-tokenized
+        pass
+
+    def __len__(self):
+        return len(self.dataset) # TODO: Maybe len(self.subreddit_keys) makes more sense?
+
+    def reset_dataset_idx(self) -> int:
+        num_datasets = len(self.subreddit_keys)
+        dataset_idx = random.randint(0, num_datasets - 1)
+        self.current_dataset_idx.value = dataset_idx
+        # num_datapoints_in_dataset = len(self.dataset_idxs[dataset_idx])
+        # # For each datapoint we get from the dataset, we also get one random datapoint.
+        # self.current_dataset_random_offset.value = random.randint(0, num_datapoints_in_dataset - 1)
+    
+    def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]: 
+        # TODO allow other dataset sampling strategies from T0 paper.
+        dataset_idx = self.current_dataset_idx.value
+
+        i1 = random.choice(self.subreddit_idxs[dataset_idx])
+        i2 = random.choice(self.subreddit_idxs[dataset_idx])
+
+        ex1 = self.dataset[i1]
+        ex2 = self.dataset[i2]
+
+        query_input_ids, document_input_ids = independent_crop(
+            ex1["input_ids"],
+            pad_token_id=self.pad_token_id,
+            l1=256,
+            l2=256,
+        )
+
+        dataset_input_ids = ex2["input_ids"]
+        return {
+            'dataset_input_ids': dataset_input_ids,
+            'dataset_attention_mask': (query_input_ids != self.pad_token_id).int(),
+            ######################################################################
+            'query_input_ids': query_input_ids,
+            'query_attention_mask': (query_input_ids != self.pad_token_id).int(),
+            ######################################################################
+            'document_input_ids': document_input_ids,
+            'document_attention_mask': (document_input_ids != self.pad_token_id).int(),
+            ######################################################################
+        }
 
 
 if __name__ == '__main__':

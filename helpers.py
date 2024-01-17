@@ -274,3 +274,54 @@ class ModelConfig(transformers.configuration_utils.PretrainedConfig):
                 # value was not JSON-serializable, skip
                 continue
         super().__init__()
+
+
+def independent_crop(
+    input_ids: torch.Tensor, pad_token_id: int,
+    l1: int = 256, l2: int = 256) -> Tuple[torch.Tensor, torch.Tensor]:
+    """Returns two independent crops from input_ids.
+    
+    Args:
+        input_ids: tensor of IDs
+        pad_token_id: ID of pad tokens in input_ids
+        l1: length of span 1, cropped
+        l2: length of span 2, cropped
+    Returns:
+        span1: first crop (of length l1)
+        span2: second crop (of length l2)
+    """ 
+    # Count tokens until pad.
+    if (input_ids == pad_token_id).sum() == 0:
+        N = len(input_ids)
+    else:
+        N = (input_ids == pad_token_id).int().argmax().item()
+    
+    ####
+    ###
+    ##
+    ## Contriever:  We use the random cropping data
+    ## augmentation, with documents of 256 tokens and span 
+    ## sizes sampled between 5% and 50% of the document
+    ## length
+    ##
+    ###
+    #####
+    ####### LaPraDor: The maximum lengths set for queries and
+    ####### documents are 64 and 350...
+    #####
+    # TODO is this divide-by-two a good idea? (Don't want s1=s2 ever..)
+    nl1 = min(N//2, l1)
+    nl2 = min(N//2, l2)
+
+    s1_start = random.randint(0, N-nl1)
+    s2_start = random.randint(0, N-nl2)
+
+    s1 = input_ids[s1_start:s1_start+nl1]
+    s2 = input_ids[s2_start:s2_start+nl2]
+    # if len(s1) < l1:
+    #     p1 = torch.full(size=(l1 - len(s1),), fill_value=pad_token_id).to(s1.device)
+    #     s1 = torch.cat((s1, p1), dim=0)
+    # if len(s2) < l2:
+    #     p2 = torch.full(size=(l2 - len(s2),), fill_value=pad_token_id).to(s2.device)
+    #     s2 = torch.cat((s2, p2), dim=0)
+    return (s1, s2)

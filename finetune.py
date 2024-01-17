@@ -9,7 +9,7 @@ import transformers
 import wandb
 
 from collate import DocumentQueryCollatorWithPadding
-from dataset import BeirDataset, MsmarcoDatasetHardNegatives
+from dataset import BeirDataset, RedditDataset
 from helpers import ModelConfig
 from model import Model
 from run_args import ModelArguments, DataArguments, TrainingArguments
@@ -53,28 +53,27 @@ beir_dataset_names = [
     # 'webis-touche2020',
     # 'fever', 'quora',
 ]
-beir_dict = {
-    d: BeirDataset(dataset=d, embedder=model_args.embedder_rerank) for d in beir_dataset_names
-}
+beir_dict = {} # TMP
+# beir_dict = {
+#     d: BeirDataset(dataset=d, embedder=model_args.embedder_rerank) for d in beir_dataset_names
+# }
 retrieval_datasets = {
     **{f"BeIR/{k}": v for k,v in beir_dict.items()}
 }
 for k,v in retrieval_datasets.items():
     v.tokenize(tokenizer=embedder_tokenizer, max_length=model_args.max_seq_length)
 
-train_dataset = MsmarcoDatasetHardNegatives(
-    embedder=model_args.embedder_rerank,
-    num_hard_negatives=data_args.num_hard_negatives,
-)
+train_dataset = RedditDataset()
 train_dataset.tokenize(tokenizer=embedder_tokenizer, max_length=model_args.max_seq_length)
 
 model_config = ModelConfig(**vars(model_args))
-backbone = transformers.AutoModel.from_pretrained(model_args.backbone)
-model = Model(config=model_config, embedder=embedder, backbone=backbone)
+dataset_embedder = transformers.AutoModel.from_pretrained(model_args.dataset_embedder)
+dataset_backbone = transformers.AutoModel.from_pretrained(model_args.dataset_backbone)
+model = Model(config=model_config, embedder=embedder, dataset_embedder=dataset_embedder, dataset_backbone=dataset_backbone)
 wandb_run_id = training_args.exp_name
 print("starting wandb run with name", wandb_run_id)
 wandb.init(
-    project="dataset-transformer-2",
+    project="dataset-transformer-reddit",
     name=wandb_run_id,
     # resume=True,
 )

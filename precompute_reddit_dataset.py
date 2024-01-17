@@ -60,7 +60,7 @@ class RetrievalDataset(Dataset):
         self.text_key = text_key
         self.time_key = time_key
 
-        self.min_char_length = 30
+        self.min_char_length = 80
 
     def tokenize_text(self, all_text) -> Tuple[torch.Tensor, torch.Tensor]:
         tokenized_text = self.tokenizer(
@@ -228,48 +228,16 @@ class RedditDataset(RetrievalDataset):
         self.load_data(self.filename)
         self.is_test = split != "train"
         self.use_random_windows = False
-        self.min_posts_per_subreddit = 100
-        self.subreddits = self.process_subreddits()
-        self.subreddit_keys = list(self.subreddits.keys())
-
-    def process_subreddits(self) -> Dict[str, List[Tuple[int, int]]]:
-        self.fhandle = open(self.filename, "r")
-        subreddits = collections.defaultdict(list)
-        for author_idx in tqdm.tqdm(range(self.num_authors), desc='counting subreddits'):
-            author_data = self.read_line(self.fhandle, author_idx)
-            for subreddit_idx, subreddit_name in enumerate(author_data['action_type']):
-                text = author_data[self.text_key][subreddit_idx]
-                if len(text) < self.min_char_length: continue
-                subreddits[subreddit_name].append([author_idx, subreddit_idx])
-        return { 
-            k: v for k,v in subreddits.items() if len(v) > self.min_posts_per_subreddit 
-        }
 
     def _get_doc(self, fhandle: io.TextIOWrapper, author_idx: int, document_idx: int) -> str:
         author_data = self.read_line(self.fhandle, author_idx)
         return author_data['syms'][document_idx]
-        
-    def __getitem__(
-        self, 
-        index: int
-    ) -> torch.Tensor:
-        self.fhandle = open(self.filename, "r")
-        
-        A = [] # left side of unsupervised contrastive
-        B = [] # right side of unsupervised contrastive
-        subreddit_key = self.subreddit_keys[index]
-        for author_idx, document_idx in self.subreddits[subreddit_key]:
-            text = self._get_doc(self.fhandle, author_idx, document_idx)
-            input_ids_A, _ = self.tokenize_text(text)
-            A.append(input_ids_A)
-        
-        return torch.cat(A, dim=0)
 
     def __len__(self):
         return len(self.subreddits)
 
 if __name__ == '__main__':
-    data_folder = "data/full"
+    data_folder = "data2/"
     os.makedirs(data_folder, exist_ok=True)
     output_file = "test.dataset"
     dataset = RedditDataset(
@@ -278,33 +246,60 @@ if __name__ == '__main__':
         token_max_length=256, # TODO argparse ...
         sanity=None,  # TODO argparse ...
     )
-    print(dataset[0])
-    print(len(dataset))
-    print({k: len(v) for k,v in sorted(dataset.subreddits.items(), key=lambda item: len(item[1]))})
-
-    # Creating full dataset
+    fhandle = open(dataset.filename, "r")
     output_dataset = None
-    total = 0
-    subreddit_idxs = {}
-    for subreddit_idx in tqdm.trange(len(dataset)):
-        batch_input_ids = dataset[subreddit_idx]
-        batch = {
-            "input_ids": batch_input_ids,
-            "subreddit_idx": [subreddit_idx] * len(batch_input_ids),
-        }
-        # Also track a mapping of which idxs are in which dataset
-        subreddit_idxs[subreddit_idx] = (
-            [id + total for id in range(len(batch_input_ids))]
+    
+    texts = []
+    subreddit_idxs = []
+    total_idxs = []
+    dataset_window_size = 10_000_000 # concatenate this often
+    subreddits = collections.defaultdict(list)
+    subreddit_keys = {}
+    total_idx = 0
+    for author_idx in tqdm.tqdm(range(dataset.num_authors), desc='creating datasets'):
+        author_data = dataset.read_line(fhandle, author_idx)
+        for subreddit_idx, subreddit_name in enumerate(author_data['action_type']):
+            if subreddit_name not in subreddit_keys:
+                subreddit_keys[subreddit_name] = len(subreddit_keys)
+            text = author_data[dataset.text_key][subreddit_idx]
+            if len(text) < dataset.min_char_length: 
+                continue
+            texts.append(text)
+            subreddit_idxs.append(subreddit_keys[subreddit_name])
+            total_idxs.append(total_idx)
+            total_idx += 1
+            subreddits[subreddit_name].append([author_idx, subreddit_idx])
+            if total_idx % dataset_window_size == 0:
+                author_dataset = datasets.Dataset.from_dict({
+                    "text": texts,
+                    "subreddit_idx": subreddit_idxs,
+                    "total_idxs": total_idxs,
+                })
+                if output_dataset is None:
+                    print("> update creating global //", len(author_dataset))
+                    output_dataset = author_dataset
+                else:
+                    print("> update concatting datasets //", len(output_dataset), len(author_dataset))
+                    output_dataset = datasets.concatenate_datasets(
+                        (output_dataset, author_dataset)
+                    )
+                texts = []
+                subreddit_idxs = []
+                total_idxs = []
+    # Tokenize
+    def tokenize_ex(ex: Dict) -> Dict:
+        tt = dataset.tokenizer(
+            ex["text"], 
+            padding=True, 
+            truncation=False,
+            max_length=dataset.token_max_length, 
+            return_tensors='pt'
         )
-        total += len(batch_input_ids)
-        batch_dataset = datasets.Dataset.from_dict(batch)
-        if output_dataset is None:
-            output_dataset = batch_dataset
-        else:
-            output_dataset = datasets.concatenate_datasets(
-                (output_dataset, batch_dataset)
-            )
+        ex["input_ids"] = tt.input_ids
+        return ex
+
+    output_dataset = output_dataset.map(tokenize_ex, batch_size=1000, batched=True)
     # Save to disk
     output_dataset.save_to_disk(os.path.join(data_folder, output_file))
     pickle.dump(subreddit_idxs, open(os.path.join(data_folder, "subreddit_idxs.p"), "wb"))
-    pickle.dump(dataset.subreddit_keys, open(os.path.join(data_folder, "subreddit_keys.p"), "wb"))
+    pickle.dump(subreddit_keys, open(os.path.join(data_folder, "subreddit_keys.p"), "wb"))

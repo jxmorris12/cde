@@ -56,21 +56,25 @@ class ModelArguments:
         },
     )
     embedder: str = field(
-        default="sentence-transformers/gtr-t5-base",
+        default="distilbert-base-uncased",
         metadata={"help": "embedder name for the model"}
+    )
+    dataset_backbone: str = field(
+        default="distilbert-base-uncased",
+        metadata={"help": "backbone model name"}
+    )
+    dataset_embedder: str = field(
+        default="distilbert-base-uncased",
+        metadata={"help": "embedder name for the model that embeds random dataset instances"}
     )
     embedder_rerank: str = field(
         default="sentence-transformers/gtr-t5-base",
         metadata={"help": "embedder name for reranking"}
     )
-    backbone: str = field(
-        default="bert-base-uncased",
-        metadata={"help": "backbone model name"}
-    )
-    freeze_embedder: bool = field(
-        default=False,
-        metadata={"help": "whether to not backprop through the embedder"}
-    )
+    # freeze_embedder: bool = field(
+    #     default=False,
+    #     metadata={"help": "whether to not backprop through the embedder"}
+    # )
     architecture: str = field(
         default="query_dependent",
         metadata = {
@@ -86,9 +90,9 @@ class ModelArguments:
         }
     )
     limit_layers: Optional[int] = field(
-        default=None,
+        default=2, # None,
         metadata={
-            "help": "If set, will load both backbone and embedder with limited number of layers"
+            "help": "If set, will load backbone and embedders with limited number of layers"
         }
     )
 
