@@ -180,17 +180,6 @@ class TrainingArguments(transformers.TrainingArguments):
             "required": "True",
         }
     )
-
-    ##################### Experimental Settings ####################
-    # exp_name: str = field(
-    #     default=None,
-    #     metadata={
-    #         "required": True,
-    #         "help": "Which experiment to run",
-    #         "choices": ["prompt_tune", "fine_tune", "weighted_embeddings"],
-    #     }
-    # )
-
     def __setattr__(self, name, value):
         super(transformers.TrainingArguments, self).__setattr__(name, value)
 
@@ -204,7 +193,7 @@ class TrainingArguments(transformers.TrainingArguments):
             os.environ["WANDB_MODE"] = "disabled"
         ############################################################################
         num_workers = int(len(os.sched_getaffinity(0)) / torch.cuda.device_count())
-        num_workers = 0 # For debugging
+        # num_workers = 0 # For debugging
         ############################################################################
         os.environ["RAYON_RS_NUM_CPUS"] = str(
             num_workers
