@@ -71,10 +71,6 @@ class ModelArguments:
         default="sentence-transformers/gtr-t5-base",
         metadata={"help": "embedder name for reranking"}
     )
-    # freeze_embedder: bool = field(
-    #     default=False,
-    #     metadata={"help": "whether to not backprop through the embedder"}
-    # )
     architecture: str = field(
         default="query_dependent",
         metadata = {
@@ -210,6 +206,7 @@ class TrainingArguments(transformers.TrainingArguments):
             os.environ["WANDB_MODE"] = "disabled"
         ############################################################################
         num_workers = int(len(os.sched_getaffinity(0)) / torch.cuda.device_count())
+        # num_workers = 0 # For debugging
         ############################################################################
         os.environ["RAYON_RS_NUM_CPUS"] = str(
             num_workers

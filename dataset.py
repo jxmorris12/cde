@@ -404,6 +404,7 @@ class RedditDataset(torch.utils.data.Dataset):
             random.shuffle(self.subreddit_idxs[key])
         
         self.pad_token_id = 0 # TODO: Set dynamically based on appropriate tokenizer.
+        self.dataset.set_format("pt")
     
     def tokenize(self, tokenizer: transformers.PreTrainedTokenizer, max_length: int) -> None:
         # reddit data comes pre-tokenized
@@ -440,7 +441,7 @@ class RedditDataset(torch.utils.data.Dataset):
         dataset_input_ids = ex2["input_ids"]
         return {
             'dataset_input_ids': dataset_input_ids,
-            'dataset_attention_mask': (query_input_ids != self.pad_token_id).int(),
+            'dataset_attention_mask': (dataset_input_ids != self.pad_token_id).int(),
             ######################################################################
             'query_input_ids': query_input_ids,
             'query_attention_mask': (query_input_ids != self.pad_token_id).int(),

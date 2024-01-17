@@ -27,11 +27,12 @@ class CustomTrainer(transformers.Trainer):
         super().__init__(*args, **kwargs)
         self.retrieval_datasets = retrieval_datasets
         self._signature_columns = [
-            "idx", "query_embedding", "document_embeddings", "negative_document_embeddings",
+            "idx",
             "document_input_ids", "document_attention_mask",
             "negative_document_input_ids", "negative_document_attention_mask",
+            "dataset_input_ids", "dataset_attention_mask",
             "query_input_ids", "query_attention_mask",
-        ]       
+        ]
         self.embedder_tokenizer = embedder_tokenizer 
         self.use_gc = self.args.use_gc # whether to use gradcache
         self.gc = None # lazily initialized during training
@@ -71,17 +72,17 @@ class CustomTrainer(transformers.Trainer):
         return loss.detach() / self.args.gradient_accumulation_steps
 
     def _contrastive_loss(self, e1: torch.Tensor, e2: torch.Tensor) -> torch.Tensor:
-        scores = self.model(
-            query_embedding=e1,
-            document_embeddings=e2,
-        )
-        batch_size, corpus_size = scores.shape
+        e1 = e1 / e1.norm(p=2, dim=1, keepdim=True)
+        e2 = e2 / e2.norm(p=2, dim=1, keepdim=True)
+        scores = e1 @ e2.T
+
+        batch_size, _ = scores.shape
         # This multiply-by-20 thing is used in BeIR and LaPRador:
         # "When calculating the loss, we apply a re-scaling trick
         # of multiplying the cosine similarity score by 20 for
         # better optimization (Thakur et al., 2021)."
         # 
-        # scores *= 20  # TODO argparse: self.args.contrastive_temperature.exp()
+        scores *= 20  # TODO argparse: self.args.contrastive_temperature.exp()
         labels = torch.arange(batch_size, device=e1.device)
         loss = torch.nn.functional.cross_entropy(
             scores, labels, label_smoothing=0.0
@@ -96,13 +97,13 @@ class CustomTrainer(transformers.Trainer):
         wandb.log({
             "train/acc_emb": original_acc.item(),
             "train/acc": new_acc.item(),
-            "corpus_size": corpus_size,
+            "batch_size": batch_size,
         })
         # print(f"acc: {original_acc.item()*100:.1f} / now: {new_acc.item()*100:.1f}")
         # TODO restore this :)
         # smart_labels = (inputs["idx"][:, None] == inputs["idx"]).float()
         # smart_labels /= smart_labels.sum(dim=1)
-        # zero_labels = torch.zeros((batch_size, len(inputs["negative_document_embeddings"])), dtype=torch.float32, device=scores.device)
+        # zero_labels = torch.zeros((batch_size, len(inputs["negative_document_embedding"])), dtype=torch.float32, device=scores.device)
         # smart_labels = torch.cat((smart_labels, zero_labels), dim=1)
                 
         return loss
@@ -113,15 +114,6 @@ class CustomTrainer(transformers.Trainer):
         inputs: Dict[str, torch.Tensor],
         return_outputs: bool = False,
     ) -> Union[Tuple[torch.Tensor, Dict[str, torch.Tensor]], torch.Tensor]:
-        # refer to jack's prev implementation:
-        #       https://github.com/jxmorris12/tti/blob/master/trainer.py
-        batch_size = inputs["query_embedding"].shape[0]
-
-        # if self.model.config.freeze_embedder:
-        #     query_embedding = inputs["query_embedding"]
-        #     document_embeddings = inputs["document_embeddings"]
-        #     negative_document_embeddings = inputs["negative_document_embeddings"]
-
         query_inputs = inputs_for_key(inputs, key="query")
         document_inputs = inputs_for_key(inputs, key="document")
         negative_document_inputs = inputs_for_key(inputs, key="negative_document")
@@ -134,20 +126,23 @@ class CustomTrainer(transformers.Trainer):
         query_inputs["dataset_input_ids"] = dataset_inputs["input_ids"]
         query_inputs["dataset_attention_mask"] = dataset_inputs["attention_mask"]
 
-        all_document_inputs = {
-            k: (
-                torch.cat((document_inputs[k], negative_document_inputs[k]), dim=0)
-            )
-            for k in ["input_ids", "attention_mask"]
-        }
+        if len(negative_document_inputs):
+            all_document_inputs = {
+                k: (
+                    torch.cat((document_inputs[k], negative_document_inputs[k]), dim=0)
+                )
+                for k in ["input_ids", "attention_mask"]
+            }
+        else:
+            all_document_inputs = document_inputs
         # print("query_inputs >>", {k: v.shape for k,v in query_inputs.items()})
         # print("all_document_inputs >>", {k: v.shape for k,v in all_document_inputs.items()})
 
         if self.use_gc:
             return self.gc(query_inputs, all_document_inputs, dataset_inputs, no_sync_except_last=False)
         else:
-            e1 = self.model.forward_embedder(**query_inputs)
-            e2 = self.model.forward_embedder(**all_document_inputs)
+            e1 = self.model(**query_inputs)
+            e2 = self.model(**all_document_inputs)
             return self._contrastive_loss(e1, e2)
     
     # Custom retrieval evalution code

@@ -10,6 +10,7 @@ import transformers
 is_doc = lambda s: s.startswith('document_')
 is_hn_doc = lambda s: s.startswith('negative_document_')
 is_query = lambda s: s.startswith('query_')
+is_dataset_doc = lambda s: s.startswith('dataset_')
 
 
 def pad_tensor_to_length(the_list: List[int], length: int = 0, value: int = 0) -> List[int]:
@@ -45,12 +46,13 @@ class DocumentQueryCollatorWithPadding(transformers.DataCollatorWithPadding):
     return_tensors: str = "pt"
 
     def __call__(self, features: List[Dict[str, Any]]) -> Dict[str, Any]:
-        document_batch, query_batch, hn_document_batch = [], [], []
+        document_batch, query_batch, hn_document_batch, dataset_batch = [], [], [], []
         other_features = collections.defaultdict(list)
         for ex in features:
             doc_ex = {}
             hn_doc_ex ={}
             query_ex = {}
+            dataset_ex = {}
             for k,v in ex.items():
                 if is_doc(k):
                     doc_ex[k.replace('document_', '')] = v
@@ -58,6 +60,8 @@ class DocumentQueryCollatorWithPadding(transformers.DataCollatorWithPadding):
                     hn_doc_ex[k.replace('negative_document_', '')] = v
                 elif is_query(k):
                     query_ex[k.replace('query_', '')] = v
+                elif is_dataset_doc(k):
+                    dataset_ex[k.replace('dataset_', '')] = v
                 else:
                     other_features[k].append(v)
             if len(doc_ex):
@@ -69,6 +73,8 @@ class DocumentQueryCollatorWithPadding(transformers.DataCollatorWithPadding):
                     hn_document_batch.append({k: v[i] for k,v in hn_doc_ex.items() })
             if len(query_ex):
                 query_batch.append(query_ex)
+            if len(dataset_ex):
+                dataset_batch.append(dataset_ex)
         
         # stack other features
         for k,v in other_features.items():
@@ -121,6 +127,18 @@ class DocumentQueryCollatorWithPadding(transformers.DataCollatorWithPadding):
             )
             query_batch = cut_padding(query_batch, self.tokenizer.pad_token_id)
             ex.update({f'query_{k}': v for k,v in query_batch.items()})
+
+        # tokenize dataset-level documents.
+        if len(dataset_batch):
+            dataset_batch: Dict[str, torch.Tensor] = self.tokenizer.pad(
+                dataset_batch,
+                padding=self.padding,
+                max_length=self.max_length,
+                pad_to_multiple_of=self.pad_to_multiple_of,
+                return_tensors=self.return_tensors,
+            )
+            dataset_batch = cut_padding(dataset_batch, self.tokenizer.pad_token_id)
+            ex.update({f'dataset_{k}': v for k,v in dataset_batch.items()})
         
         return ex
         

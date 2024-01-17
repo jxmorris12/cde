@@ -40,6 +40,7 @@ class Model(transformers.PreTrainedModel):
             dataset_embedder.transformer.layer = dataset_embedder.transformer.layer[:config.limit_layers]
             dataset_backbone.transformer.layer = dataset_backbone.transformer.layer[:config.limit_layers]
         self.embedder = embedder
+        self.dataset_embedder = dataset_embedder
 
         # TODO make this a little nicer. (Not every model has 'embeddings...')
         self.dataset_backbone = dataset_backbone
@@ -64,7 +65,7 @@ class Model(transformers.PreTrainedModel):
         if config.disable_dropout:
             disable_dropout(self)
     
-    def forward_embedder(
+    def forward(
             self,
             input_ids: torch.Tensor,
             attention_mask: torch.Tensor,
@@ -72,68 +73,34 @@ class Model(transformers.PreTrainedModel):
             dataset_attention_mask: torch.Tensor,
     ) -> torch.Tensor:
         dataset_input_embeddings = mean_pool(
-            self.dataset_embedder(
+            hidden_states=self.dataset_embedder(
                 input_ids=dataset_input_ids,
                 attention_mask=dataset_attention_mask
-            )
+            ).last_hidden_state,
+            attention_mask=dataset_attention_mask,
         )
         assert len(dataset_input_embeddings.shape) == 2 # (b, d)
         dataset_input_embeddings = dataset_input_embeddings[:, None, :]
-        dataset_embedding = mean_pool(
-            self.dataset_backbone(
-                input_ids=dataset_input_embeddings
-            )
-        )
+        dataset_intermediate_embeddings = self.dataset_backbone(
+            inputs_embeds=dataset_input_embeddings
+        ).last_hidden_state
+        dataset_embedding = dataset_intermediate_embeddings[:, 0, :].mean(dim=0, keepdim=True)
         batch_size = dataset_input_ids.shape[0]
-        embeddings = (
-            self.embedder(
+        embeddings = mean_pool(
+            hidden_states=self.embedder(
                 input_ids=input_ids,
-                attention_mask=attention_mask).last_hidden_state
+                attention_mask=attention_mask).last_hidden_state,
+            attention_mask=attention_mask,
         )
         mlp_input_embeddings = torch.cat(
             (
                 dataset_embedding.repeat((batch_size, 1)),
                 embeddings
-            )
+            ),
+            dim=1
         )
         # TODO use self.gamma here
         # output_vectors = (document_embeddings * self.gamma) + (output_vectors * (1 - self.gamma))
-        return self.mlp(mlp_input_embeddings)
-
-
-    def forward(self, query_embedding: torch.Tensor, document_embeddings: torch.Tensor) -> torch.Tensor:
-        batch_size = query_embedding.shape[0]
-        query_embedding = self.query_projection(query_embedding)
-        query_embedding = query_embedding.reshape((batch_size, self.n_sequence, self.hidden_size))
-        assert query_embedding.shape == (batch_size, self.n_sequence, self.hidden_size)
-        
-        pos_document_embeddings = document_embeddings[:batch_size, :]
-        pos_document_embeddings = (
-            pos_document_embeddings[None, :, :]
-                .repeat((batch_size, 1, 1))
-        )
-        if len(document_embeddings) < batch_size:
-            # handle hard negatives
-            hn_document_embeddings = (
-                document_embeddings[batch_size:, :]
-                )
-            hn_document_embeddings = (
-                hn_document_embeddings.reshape((batch_size, -1, self.hidden_size))
-            )
-            document_embeddings = torch.cat((
-                pos_document_embeddings, hn_document_embeddings
-            ), dim=1)
-        _, corpus_size, hidden_dim = document_embeddings.shape
-        inputs_embeds = document_embeddings
-        inputs_embeds = inputs_embeds.reshape((batch_size * corpus_size, 1, hidden_dim))
-        output = self.backbone(
-            inputs_embeds=inputs_embeds,
-        )
-        output_vectors = output.last_hidden_state[:, self.n_sequence:, :]
-        output_vectors = output_vectors.reshape((batch_size, corpus_size, hidden_dim))
-        
-        query_embedding = query_embedding[:, 0, :]
-        scores = torch.einsum('bd,bcd->bc', query_embedding, output_vectors)
-
-        return scores
-        
+        outputs = self.mlp(mlp_input_embeddings)
+        assert outputs.shape == (batch_size, self.hidden_size)
+        return outputs

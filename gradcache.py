@@ -65,7 +65,7 @@ class GradCache:
         :[added] param backward_fn: The `manual_backward` function of pytorch lightning trainer when automatic_optimization is disabled.
         """
         self.model = model
-        self.models = [model.forward_embedder, model.forward_embedder]
+        self.models = [model.forward, model.forward]
         self.optimizer = optimizer
 
         if isinstance(chunk_sizes, int):
