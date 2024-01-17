@@ -2,6 +2,7 @@ from typing import Dict, List, Optional, Tuple
 
 import collections
 import json
+import io
 import os
 import random
 
@@ -24,7 +25,6 @@ class RetrievalDataset(Dataset):
         self, 
         dataset_name: str,
         model_name: str,
-        episode_length: int,
         token_max_length: int,
         split: str, 
         num_sample_per_author: int, 
@@ -38,7 +38,6 @@ class RetrievalDataset(Dataset):
         Args:
             dataset_name (str): name of the dataset
             model_name (str): name of model (to load its tokenizer)
-            episode_length (int): Number of windows per sampled example
             token_max_length (int): Max number of tokens in a window
             split (str): Name of the split: train, validation, or test.
             text_key (str)
@@ -55,7 +54,6 @@ class RetrievalDataset(Dataset):
         self.token_max_length = token_max_length
         self.is_queries = is_queries
         self.sanity = sanity
-        self.episode_length = episode_length
       
         self.dataset_path = os.path.join(DATA_PATH, self.dataset_name)
         self.tokenizer = AutoTokenizer.from_pretrained(model_name) 
@@ -65,62 +63,27 @@ class RetrievalDataset(Dataset):
 
         self.min_char_length = 30
 
-    def tokenize_text(self, all_text):
-        tokenized_episode = self.tokenizer(
+    def tokenize_text(self, all_text) -> Tuple[torch.Tensor, torch.Tensor]:
+        tokenized_text = self.tokenizer(
             all_text, 
             padding=True if self.use_random_windows else "max_length", 
             truncation=False if self.use_random_windows else True, 
             max_length=None if self.use_random_windows else self.token_max_length, 
             return_tensors='pt'
         )
-        tokenized_episode =  self.reformat_tokenized_inputs(tokenized_episode)
-        
-        return tokenized_episode
+        return self.reformat_tokenized_inputs(tokenized_text)
 
-    def reformat_tokenized_inputs(self, tokenized_episode):
+    def reformat_tokenized_inputs(self, tokenized_text) -> Tuple[torch.Tensor, torch.Tensor]:
         """Reformats the output from HugginFace Tokenizers.
         """
-        if len(tokenized_episode.keys()) == 3:
-            input_ids, _, attention_mask = tokenized_episode.values()
-            data = [input_ids, attention_mask]
+        if len(tokenized_text.keys()) == 3:
+            # removes pesky 'token_type_ids'
+            input_ids, _, attention_mask = tokenized_text.values()
         else:
-            input_ids, attention_mask = tokenized_episode.values()
-            data = [input_ids, attention_mask]
-
-        return data
-   
-    def sample_random_episode(self, index: int, is_test=False):
-        """Samples a random episode of size `episode_length`.
-
-        Args:
-            index (int): Index of the author we're sampling.
-        """
-        if hasattr(self, "fhandle"):
-            author_data = self.read_line(self.fhandle, index)
-        else:
-            author_data = self.data.iloc[index].to_dict()
-
-        assert self.text_key in author_data, f"key '{self.text_key} missing in {author_data.keys()}"
-        num_docs = len(author_data[self.text_key])
-        episode_length = num_docs if num_docs < self.episode_length else self.episode_length
-
-        maxval = num_docs - episode_length
-
-        if is_test:
-            start_index = 0
-        else:
-            start_index = random.randint(0, maxval)
+            input_ids, attention_mask = tokenized_text.values()
+        return [input_ids, attention_mask]
     
-        episode = {k: v[start_index: start_index + episode_length] 
-                   for k, v in author_data.items() if isinstance(v, list) and len(v) >= self.min_char_length}
-
-        if self.sanity or "author_id" not in author_data:
-            episode["author_id"] = index
-        else:            
-            episode["author_id"] = author_data["author_id"]             
-        return episode
-    
-    def sample_random_window(self, data, window_length=32):
+    def sample_random_window(self, data, window_length):
         """Samples a random window from the text.
         """
         input_ids, attention_mask = data
@@ -150,8 +113,8 @@ class RetrievalDataset(Dataset):
         attention_mask = torch.nn.functional.pad(attention_mask, (1, 0), 'constant', 1)
         
         # Add eos token
-        input_ids = torch.cat((input_ids, torch.where(true_lengths >= window_length, eos, pad).unsqueeze(1)), 1)
-        attention_mask = torch.cat((attention_mask, torch.where(true_lengths >= window_length, 1, 0).unsqueeze(1)), 1)
+        input_ids = torch.cat((input_ids, torch.where(true_lengths > window_length, eos, pad).unsqueeze(1)), 1)
+        attention_mask = torch.cat((attention_mask, torch.where(true_lengths > window_length, 1, 0).unsqueeze(1)), 1)
 
         return [input_ids, attention_mask]
 
@@ -223,7 +186,6 @@ class RedditDataset(RetrievalDataset):
     def __init__(
         self, 
         model_name: str,
-        episode_length: int,
         token_max_length: int,
         split: str, 
         num_sample_per_author: int, 
@@ -232,11 +194,11 @@ class RedditDataset(RetrievalDataset):
         time_key: str = "hour",
         is_queries: bool = True,
         sanity: Optional[int] = None,
+        group_by_subreddit: bool = False,
     ):
         super().__init__(
             dataset_name=dataset_name, 
             model_name=model_name,
-            episode_length=episode_length,
             token_max_length=token_max_length,
             split=split, 
             text_key=text_key,
@@ -272,11 +234,12 @@ class RedditDataset(RetrievalDataset):
         self.use_random_windows = False
         self.min_posts_per_subreddit = 100
         self.subreddits = self.process_subreddits()
+        self.subreddit_keys = list(self.subreddits.keys())
 
     def process_subreddits(self) -> Dict[str, List[Tuple[int, int]]]:
         self.fhandle = open(self.filename, "r")
         subreddits = collections.defaultdict(list)
-        for author_idx in tqdm.tqdm(range(len(self)), desc='counting subreddits'):
+        for author_idx in tqdm.tqdm(range(self.num_authors), desc='counting subreddits'):
             author_data = self.read_line(self.fhandle, author_idx)
             for subreddit_idx, subreddit_name in enumerate(author_data['action_type']):
                 text = author_data[self.text_key][subreddit_idx]
@@ -285,39 +248,47 @@ class RedditDataset(RetrievalDataset):
         return { 
             k: v for k,v in subreddits.items() if len(v) > self.min_posts_per_subreddit 
         }
+
+    def _get_doc(self, fhandle: io.TextIOWrapper, author_idx: int, document_idx: int) -> str:
+        author_data = self.read_line(self.fhandle, author_idx)
+        return author_data['syms'][document_idx]
         
     def __getitem__(
         self, 
         index: int
-    ):
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
         self.fhandle = open(self.filename, "r")
+        
+        A = [] # left side of unsupervised contrastive
+        B = [] # right side of unsupervised contrastive
+        subreddit_key = self.subreddit_keys[index]
+        for author_idx, document_idx in self.subreddits[subreddit_key]:
+            text = self._get_doc(self.fhandle, author_idx, document_idx)
+            data = self.tokenize_text(text)
+            input_ids_A, _ = self.sample_random_window(data, window_length=self.token_max_length)
+            while True:
+                input_ids_B, _ = self.sample_random_window(data, window_length=self.token_max_length)
+                if not (input_ids_B == input_ids_A).all():
+                    break
+            A.append(input_ids_A)
+            B.append(input_ids_B)
+        
+        A = torch.cat(A, dim=0)
+        B = torch.cat(B, dim=0)
+        return A, B
 
-        text = []
-        for _ in range(self.num_sample_per_author):
-            episode = self.sample_random_episode(index, is_test=self.is_test)
-            text.extend(episode["syms"])
-                
-        if self.split == "train":
-            author = torch.tensor([index for _ in range(self.num_sample_per_author)])
-        else:
-            author = torch.tensor([episode["author_id"] for _ in range(self.num_sample_per_author)])
-
-        data = self.tokenize_text(text)
-        if self.use_random_windows:
-            data = self.sample_random_window(data)
-        data = [d.reshape(self.num_sample_per_author, -1, self.token_max_length) for d in data]
-
-        return data, author
+    def __len__(self):
+        return len(self.subreddits)
 
 if __name__ == '__main__':
     dataset = RedditDataset(
         model_name="bert-base-uncased",
         split="train",
-        episode_length=1,
-        token_max_length=32,
+        token_max_length=256,
         num_sample_per_author=2,
-        sanity=None,
+        sanity=10_000,
     )
     print(dataset[0])
     print(len(dataset))
+    print({k: len(v) for k,v in sorted(dataset.subreddits.items(), key=lambda item: len(item[1]))})
     breakpoint()
