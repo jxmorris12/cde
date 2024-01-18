@@ -405,6 +405,12 @@ class RedditDataset(torch.utils.data.Dataset):
         
         self.pad_token_id = 0 # TODO: Set dynamically based on appropriate tokenizer.
         self.dataset.set_format("pt")
+
+        self.min_examples_per_subreddit = 1000 # TODO: Experiment with this.
+        original_num_subreddits = len(self.subreddit_idxs)
+        self.subreddit_idxs = { k: v for k,v in self.subreddit_idxs.items() if len(v) > self.min_examples_per_subreddit}
+        print(f"Filtered {original_num_subreddits} to {len(self.subreddit_idxs)} with min_examples_per_subreddit={self.min_examples_per_subreddit}")
+        self.reset_dataset_idx()
     
     def tokenize(self, tokenizer: transformers.PreTrainedTokenizer, max_length: int) -> None:
         # reddit data comes pre-tokenized
@@ -414,8 +420,7 @@ class RedditDataset(torch.utils.data.Dataset):
         return len(self.dataset) # TODO: Maybe len(self.subreddit_keys) makes more sense?
 
     def reset_dataset_idx(self) -> int:
-        num_datasets = len(self.subreddit_keys)
-        dataset_idx = random.randint(0, num_datasets - 1)
+        dataset_idx = random.choice(list(self.subreddit_idxs.keys()))
         self.current_dataset_idx.value = dataset_idx
         # num_datapoints_in_dataset = len(self.dataset_idxs[dataset_idx])
         # # For each datapoint we get from the dataset, we also get one random datapoint.

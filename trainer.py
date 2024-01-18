@@ -129,8 +129,8 @@ class CustomTrainer(transformers.Trainer):
         query_inputs["dataset_attention_mask"] = dataset_inputs["attention_mask"]
 
         # NEXT LINEs ARE A TEMPORARY HACK TO HIDE DATASET_LEVEL INFORMATION AND SEE WHAT HAPPENS!
-        query_inputs["dataset_input_ids"] = torch.ones_like(dataset_inputs["input_ids"], device=dataset_inputs["input_ids"].device)
-        document_inputs["dataset_input_ids"] = torch.ones_like(dataset_inputs["input_ids"], device=dataset_inputs["input_ids"].device)
+        # query_inputs["dataset_input_ids"] = torch.ones_like(dataset_inputs["input_ids"], device=dataset_inputs["input_ids"].device)
+        # document_inputs["dataset_input_ids"] = torch.ones_like(dataset_inputs["input_ids"], device=dataset_inputs["input_ids"].device)
 
         if len(negative_document_inputs):
             all_document_inputs = {
