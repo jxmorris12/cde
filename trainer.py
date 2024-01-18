@@ -57,7 +57,17 @@ class CustomTrainer(transformers.Trainer):
         else:
             self.gc = None
         
+    def get_train_dataloader(self) -> torch.utils.data.DataLoader:
+        train_dataloader = super().get_train_dataloader()
+        # Need to store current dataloader for access so we can use it
+        # to reset the current dataset index
+        self.train_dataloader = train_dataloader
+        return train_dataloader
+        
     def training_step(self, model: torch.nn.Module, inputs: Dict[str, Union[torch.Tensor, Any]]) -> torch.Tensor:
+        # Reset dataloader index
+        self.train_dataloader.dataset.reset_dataset_idx()
+
         if not self.use_gc:
             return super().training_step(model=model, inputs=inputs)
 
@@ -118,6 +128,10 @@ class CustomTrainer(transformers.Trainer):
         query_inputs["dataset_input_ids"] = dataset_inputs["input_ids"]
         query_inputs["dataset_attention_mask"] = dataset_inputs["attention_mask"]
 
+        # NEXT LINEs ARE A TEMPORARY HACK TO HIDE DATASET_LEVEL INFORMATION AND SEE WHAT HAPPENS!
+        query_inputs["dataset_input_ids"] = torch.ones_like(dataset_inputs["input_ids"], device=dataset_inputs["input_ids"].device)
+        document_inputs["dataset_input_ids"] = torch.ones_like(dataset_inputs["input_ids"], device=dataset_inputs["input_ids"].device)
+
         if len(negative_document_inputs):
             all_document_inputs = {
                 k: (
@@ -131,7 +145,7 @@ class CustomTrainer(transformers.Trainer):
         # print("all_document_inputs >>", {k: v.shape for k,v in all_document_inputs.items()})
 
         if self.use_gc:
-            return self.gc(query_inputs, all_document_inputs, dataset_inputs, no_sync_except_last=False)
+            return self.gc(query_inputs, all_document_inputs, no_sync_except_last=False)
         else:
             e1 = self.model(**query_inputs)
             e2 = self.model(**all_document_inputs)

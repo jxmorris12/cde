@@ -424,6 +424,7 @@ class RedditDataset(torch.utils.data.Dataset):
     def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]: 
         # TODO allow other dataset sampling strategies from T0 paper.
         dataset_idx = self.current_dataset_idx.value
+        # print("CURRENT DATASET:", self.subreddit_keys[dataset_idx])
 
         i1 = random.choice(self.subreddit_idxs[dataset_idx])
         i2 = random.choice(self.subreddit_idxs[dataset_idx])

@@ -8,6 +8,7 @@ import pickle
 import random
 
 import datasets
+import numpy as np
 import pandas as pd
 import torch
 from torch.utils.data.dataset import Dataset
@@ -154,13 +155,17 @@ class RetrievalDataset(Dataset):
                 i += 1
 
         assert len(byte_count_list) > 0, "got empty byte count list"
-        self.byte_count_list = byte_count_list
+        self.byte_count_list = np.array(byte_count_list)
+        self.byte_count_sum_list = self.byte_count_list.cumsum()
 
     def read_line(self, fhandle, index):
         """Reads one line from the filehandle provided. 
            Assumes that build_byte_count_list() has already been called.
         """
-        num_bytes_to_seek = sum(self.byte_count_list[:index])
+        if index == 0:
+            num_bytes_to_seek = 0
+        else:
+            num_bytes_to_seek = self.byte_count_sum_list[index-1]
         num_bytes_to_read = self.byte_count_list[index]
 
         fhandle.seek(0)
@@ -237,7 +242,7 @@ class RedditDataset(RetrievalDataset):
         return len(self.subreddits)
 
 if __name__ == '__main__':
-    data_folder = "data2/"
+    data_folder = "data3/"
     os.makedirs(data_folder, exist_ok=True)
     output_file = "test.dataset"
     dataset = RedditDataset(
@@ -249,10 +254,11 @@ if __name__ == '__main__':
     fhandle = open(dataset.filename, "r")
     output_dataset = None
     
+    os.environ["TOKENIZERS_PARALLELISM"] = "1"
+    
     texts = []
     subreddit_idxs = []
     total_idxs = []
-    dataset_window_size = 10_000_000 # concatenate this often
     subreddits = collections.defaultdict(list)
     subreddit_keys = {}
     total_idx = 0
@@ -269,36 +275,29 @@ if __name__ == '__main__':
             total_idxs.append(total_idx)
             total_idx += 1
             subreddits[subreddit_name].append([author_idx, subreddit_idx])
-            if total_idx % dataset_window_size == 0:
-                author_dataset = datasets.Dataset.from_dict({
-                    "text": texts,
-                    "subreddit_idx": subreddit_idxs,
-                    "total_idxs": total_idxs,
-                })
-                if output_dataset is None:
-                    print("> update creating global //", len(author_dataset))
-                    output_dataset = author_dataset
-                else:
-                    print("> update concatting datasets //", len(output_dataset), len(author_dataset))
-                    output_dataset = datasets.concatenate_datasets(
-                        (output_dataset, author_dataset)
-                    )
-                texts = []
-                subreddit_idxs = []
-                total_idxs = []
+
+    # Add last piece of dataset        
+    output_dataset = datasets.Dataset.from_dict({
+        "text": texts,
+        "subreddit_idx": subreddit_idxs,
+        "total_idxs": total_idxs,
+    })
+
     # Tokenize
     def tokenize_ex(ex: Dict) -> Dict:
         tt = dataset.tokenizer(
             ex["text"], 
             padding=True, 
-            truncation=False,
+            truncation=True,
             max_length=dataset.token_max_length, 
             return_tensors='pt'
         )
         ex["input_ids"] = tt.input_ids
         return ex
 
-    output_dataset = output_dataset.map(tokenize_ex, batch_size=1000, batched=True)
+    cache_file_name = os.path.join(data_folder, output_file) + ".cache"
+    print("tokenizing dataset of length:", len(output_dataset))
+    output_dataset = output_dataset.map(tokenize_ex, batch_size=1000, batched=True) # , cache_file_name=cache_file_name)
     # Save to disk
     output_dataset.save_to_disk(os.path.join(data_folder, output_file))
     pickle.dump(subreddit_idxs, open(os.path.join(data_folder, "subreddit_idxs.p"), "wb"))

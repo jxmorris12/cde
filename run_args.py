@@ -162,6 +162,14 @@ class TrainingArguments(transformers.TrainingArguments):
         default=False, metadata={"help": "Whether or not to log to Weights & Biases."}
     )
     report_to: str = "wandb"
+
+    per_device_train_batch_size: int = field(
+        default=64, metadata={"help": "Batch size per GPU/TPU core/CPU for training."}
+    )
+    per_device_eval_batch_size: int = field(
+        default=64, metadata={"help": "Batch size per GPU/TPU core/CPU for evaluation."}
+    )
+
     max_batch_size_fits_in_memory: int = field(
         default=64, 
         metadata={"help": "Max batch size for contrastive learning"}
