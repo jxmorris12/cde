@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 import glob
 import gzip
 import json
@@ -19,8 +19,60 @@ from helpers import (
     download_url_and_unzip, download_url, independent_crop, md5_hash
 )
 
-def datasets_fast_load_from_disk(cache_path) -> datasets.Dataset:
-    return datasets.load_from_disk(cache_path)
+
+def load_dataset_tables(
+    files: Iterable[str], num_workers: int = 16
+) -> Iterable[datasets.table.MemoryMappedTable]:
+    import concurrent
+    from multiprocessing import Pool
+
+    use_threads = False
+    if use_threads:
+        pool_cls = concurrent.futures.ThreadPoolExecutor
+        pool_kwargs = {"max_workers": num_workers}
+    else:
+        pool_cls = Pool
+        pool_kwargs = {"processes": num_workers}
+    
+    with pool_cls(**pool_kwargs) as pool:
+        result = list(
+            tqdm.tqdm(
+                pool.imap(datasets.table.MemoryMappedTable.from_file, files),
+                desc=f"Loading {len(files)} files with {num_workers} workers",
+                total=len(files),
+            )
+        )
+    return result
+
+
+def datasets_fast_load_from_disk(cache_path: str) -> datasets.Dataset:
+    print(f"fast_load_from_disk called with path:", cache_path)
+    dataset_info_path = os.path.join(cache_path, "dataset_info.json")
+    with open(dataset_info_path, encoding="utf-8") as dataset_info_file:
+        dataset_info = datasets.DatasetInfo.from_dict(json.load(dataset_info_file))
+
+    dataset_state_path = os.path.join(cache_path, "state.json")
+    with open(dataset_state_path, encoding="utf-8") as state_file:
+        state = json.load(state_file)
+
+    files = glob.glob(os.path.join(cache_path, "*.arrow"))
+    files = sorted(files)
+    num_workers = int(len(os.sched_getaffinity(0)) / torch.cuda.device_count())
+    ds_tables = load_dataset_tables(
+        files=files,
+        num_workers=num_workers
+    )
+    arrow_table = datasets.table.concat_tables(ds_tables)
+
+    split = state["_split"]
+    split = dataset.splits.Split(split) if split is not None else split
+
+    return datasets.Dataset(
+        arrow_table=arrow_table,
+        info=dataset_info,
+        split=split,
+        fingerprint=state["_fingerprint"],
+    )
 
 
 def tokenize_dataset(
@@ -390,11 +442,17 @@ class MsmarcoDatasetHardNegatives(BeirDataset):
 class RedditDataset(torch.utils.data.Dataset):
     current_dataset_idx: mp.Value = mp.Value('i', 0)
 
-    def __init__(self, data_folder: str = "/home/jxm3/research/retrieval/tti3/data/full"):
+    def __init__(self, data_folder: str = "/home/jxm3/research/retrieval/tti3/data/mini"):
         print(f"Loading Reddit data from path: {data_folder}")
-        self.dataset = datasets.load_from_disk(os.path.join(data_folder, "test.dataset"))
+        self.dataset = datasets_fast_load_from_disk(
+            os.path.join(
+                data_folder, "test.dataset"), 
+        )
+        print("\tloading subreddit idxs...")
         self.subreddit_idxs = pickle.load(open(os.path.join(data_folder, "subreddit_idxs.p"), "rb"))
-        self.subreddit_keys = pickle.load(open(os.path.join(data_folder, "subreddit_keys.p"), "rb"))
+        print("\tloading subreddit keys...")
+        subreddit_names = pickle.load(open(os.path.join(data_folder, "subreddit_keys.p"), "rb"))
+        self.subreddit_keys = dict(zip(subreddit_names, range(len(subreddit_names))))
         assert len(self.subreddit_idxs) == len(self.subreddit_keys)
 
         print(f"Loaded {len(self.dataset)} datapoints from {len(self.subreddit_keys)} subreddits")
@@ -419,16 +477,16 @@ class RedditDataset(torch.utils.data.Dataset):
         return len(self.dataset) # TODO: Maybe len(self.subreddit_keys) makes more sense?
 
     def reset_dataset_idx(self) -> int:
-        dataset_idx = random.choice(list(self.subreddit_idxs.keys()))
+        dataset_idx = random.choice(list(self.subreddit_keys.values()))
         self.current_dataset_idx.value = dataset_idx
     
     def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]: 
         # TODO allow other dataset sampling strategies from T0 paper.
         dataset_idx = self.current_dataset_idx.value
-        # print("CURRENT DATASET:", self.subreddit_keys[dataset_idx])
+        dataset_key = self.subreddit_keys[dataset_idx]
 
-        i1 = random.choice(self.subreddit_idxs[dataset_idx])
-        i2 = random.choice(self.subreddit_idxs[dataset_idx])
+        i1 = random.choice(self.subreddit_idxs[dataset_key])
+        i2 = random.choice(self.subreddit_idxs[dataset_key])
 
         ex1 = self.dataset[i1]
         ex2 = self.dataset[i2]

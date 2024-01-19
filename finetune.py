@@ -9,7 +9,7 @@ import transformers
 import wandb
 
 from collate import DocumentQueryCollatorWithPadding
-from dataset import BeirDataset, RedditDataset
+from dataset import BeirDataset, load_reddit_train_and_val
 from helpers import ModelConfig
 from model import Model
 from run_args import ModelArguments, DataArguments, TrainingArguments

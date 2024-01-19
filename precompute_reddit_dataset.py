@@ -242,7 +242,7 @@ class RedditDataset(RetrievalDataset):
         return len(self.subreddits)
 
 if __name__ == '__main__':
-    data_folder = "data4/"
+    data_folder = "data/full"
     os.makedirs(data_folder, exist_ok=True)
     output_file = "test.dataset"
     dataset = RedditDataset(
@@ -265,11 +265,11 @@ if __name__ == '__main__':
     for author_idx in tqdm.tqdm(range(dataset.num_authors), desc='creating datasets'):
         author_data = dataset.read_line(fhandle, author_idx)
         for subreddit_idx, subreddit_name in enumerate(author_data['action_type']):
-            if subreddit_name not in subreddit_keys:
-                subreddit_keys[subreddit_name] = len(subreddit_keys)
             text = author_data[dataset.text_key][subreddit_idx]
             if len(text) < dataset.min_char_length: 
                 continue
+            if subreddit_name not in subreddit_keys:
+                subreddit_keys[subreddit_name] = len(subreddit_keys)
             texts.append(text)
             subreddit_idxs.append(subreddit_keys[subreddit_name])
             total_idxs.append(total_idx)
@@ -301,7 +301,8 @@ if __name__ == '__main__':
         tokenize_ex, batch_size=1000, batched=True, cache_file_name=cache_file_name
     )
     # Save to disk
-    print("saving dataset of length:", len(output_dataset))
+    assert len(subreddits.keys()) == len(subreddit_keys)
+    print("saving dataset of length:", len(output_dataset), "with", len(subreddits), "subreddits")
     output_dataset.save_to_disk(os.path.join(data_folder, output_file))
-    pickle.dump(subreddit_idxs, open(os.path.join(data_folder, "subreddit_idxs.p"), "wb"))
+    pickle.dump(subreddits, open(os.path.join(data_folder, "subreddit_idxs.p"), "wb"))
     pickle.dump(subreddit_keys, open(os.path.join(data_folder, "subreddit_keys.p"), "wb"))
