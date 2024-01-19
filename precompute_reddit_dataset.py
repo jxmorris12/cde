@@ -242,13 +242,13 @@ class RedditDataset(RetrievalDataset):
         return len(self.subreddits)
 
 if __name__ == '__main__':
-    data_folder = "data3/"
+    data_folder = "data4/"
     os.makedirs(data_folder, exist_ok=True)
     output_file = "test.dataset"
     dataset = RedditDataset(
         model_name="bert-base-uncased", # Used for tokenization (TODO argparse)
         split="train",
-        token_max_length=256, # TODO argparse ...
+        token_max_length=128, # TODO argparse ...
         sanity=None,  # TODO argparse ...
     )
     fhandle = open(dataset.filename, "r")
@@ -297,8 +297,11 @@ if __name__ == '__main__':
 
     cache_file_name = os.path.join(data_folder, output_file) + ".cache"
     print("tokenizing dataset of length:", len(output_dataset))
-    output_dataset = output_dataset.map(tokenize_ex, batch_size=1000, batched=True) # , cache_file_name=cache_file_name)
+    output_dataset = output_dataset.map(
+        tokenize_ex, batch_size=1000, batched=True, cache_file_name=cache_file_name
+    )
     # Save to disk
+    print("saving dataset of length:", len(output_dataset))
     output_dataset.save_to_disk(os.path.join(data_folder, output_file))
     pickle.dump(subreddit_idxs, open(os.path.join(data_folder, "subreddit_idxs.p"), "wb"))
     pickle.dump(subreddit_keys, open(os.path.join(data_folder, "subreddit_keys.p"), "wb"))

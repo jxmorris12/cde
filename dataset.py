@@ -389,9 +389,8 @@ class MsmarcoDatasetHardNegatives(BeirDataset):
 
 class RedditDataset(torch.utils.data.Dataset):
     current_dataset_idx: mp.Value = mp.Value('i', 0)
-    # current_dataset_random_offset: mp.Value = mp.Value('i', 0)
 
-    def __init__(self, data_folder: str = "/home/jxm3/research/retrieval/tti3/data/sanity"):
+    def __init__(self, data_folder: str = "/home/jxm3/research/retrieval/tti3/data/full"):
         print(f"Loading Reddit data from path: {data_folder}")
         self.dataset = datasets.load_from_disk(os.path.join(data_folder, "test.dataset"))
         self.subreddit_idxs = pickle.load(open(os.path.join(data_folder, "subreddit_idxs.p"), "rb"))
@@ -422,9 +421,6 @@ class RedditDataset(torch.utils.data.Dataset):
     def reset_dataset_idx(self) -> int:
         dataset_idx = random.choice(list(self.subreddit_idxs.keys()))
         self.current_dataset_idx.value = dataset_idx
-        # num_datapoints_in_dataset = len(self.dataset_idxs[dataset_idx])
-        # # For each datapoint we get from the dataset, we also get one random datapoint.
-        # self.current_dataset_random_offset.value = random.randint(0, num_datapoints_in_dataset - 1)
     
     def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]: 
         # TODO allow other dataset sampling strategies from T0 paper.
@@ -446,6 +442,8 @@ class RedditDataset(torch.utils.data.Dataset):
 
         dataset_input_ids = ex2["input_ids"]
         return {
+            'idx': i1,
+            ######################################################################
             'dataset_input_ids': dataset_input_ids,
             'dataset_attention_mask': (dataset_input_ids != self.pad_token_id).int(),
             ######################################################################
@@ -456,6 +454,19 @@ class RedditDataset(torch.utils.data.Dataset):
             'document_attention_mask': (document_input_ids != self.pad_token_id).int(),
             ######################################################################
         }
+
+def load_reddit_train_and_val(perc: float = 0.9) -> Tuple[
+    torch.utils.data.Dataset, torch.utils.data.Dataset]:
+    train = RedditDataset()
+    val = RedditDataset()
+    subreddit_idxs = list(train.subreddit_idxs.keys())
+    random.shuffle(subreddit_idxs)
+    N = round(len(subreddit_idxs) * perc)
+    train_idxs = subreddit_idxs[:N]
+    val_idxs = subreddit_idxs[N:]
+    train.subreddit_idxs = {k: v for k,v in train.subreddit_idxs.items() if k in train_idxs}
+    val.subreddit_idxs = {k: v for k,v in train.subreddit_idxs.items() if k in val_idxs}
+    return train, val
 
 
 if __name__ == '__main__':

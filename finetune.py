@@ -63,7 +63,7 @@ retrieval_datasets = {
 for k,v in retrieval_datasets.items():
     v.tokenize(tokenizer=embedder_tokenizer, max_length=model_args.max_seq_length)
 
-train_dataset = RedditDataset()
+train_dataset, eval_dataset = load_reddit_train_and_val()
 train_dataset.tokenize(tokenizer=embedder_tokenizer, max_length=model_args.max_seq_length)
 
 model_config = ModelConfig(**vars(model_args))
@@ -89,7 +89,7 @@ trainer = CustomTrainer(
     model=model,
     args=training_args,
     train_dataset=train_dataset,
-    eval_dataset=None,
+    eval_dataset=eval_dataset,
     embedder_tokenizer=embedder_tokenizer,
     retrieval_datasets=retrieval_datasets,
 )

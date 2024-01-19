@@ -81,7 +81,7 @@ class CustomTrainer(transformers.Trainer):
             loss = loss.mean()
         return loss.detach() / self.args.gradient_accumulation_steps
 
-    def _contrastive_loss(self, e1: torch.Tensor, e2: torch.Tensor) -> torch.Tensor:
+    def _contrastive_loss(self, e1: torch.Tensor, e2: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
         e1 = e1 / e1.norm(p=2, dim=1, keepdim=True)
         e2 = e2 / e2.norm(p=2, dim=1, keepdim=True)
         scores = e1 @ e2.T
@@ -93,7 +93,6 @@ class CustomTrainer(transformers.Trainer):
         # better optimization (Thakur et al., 2021)."
         # 
         scores *= 20  # TODO argparse: self.args.contrastive_temperature.exp()
-        labels = torch.arange(batch_size, device=e1.device)
         loss = torch.nn.functional.cross_entropy(
             scores, labels, label_smoothing=0.0
         )
@@ -143,13 +142,16 @@ class CustomTrainer(transformers.Trainer):
             all_document_inputs = document_inputs
         # print("query_inputs >>", {k: v.shape for k,v in query_inputs.items()})
         # print("all_document_inputs >>", {k: v.shape for k,v in all_document_inputs.items()})
+        idx1 = query_inputs["idx"]
+        idx2 = document_inputs["idx"]
+        labels = (idx1[:,None] == idx2).all(2).type(torch.float32)
 
         if self.use_gc:
-            return self.gc(query_inputs, all_document_inputs, no_sync_except_last=False)
+            return self.gc(query_inputs, all_document_inputs, labels=labels, no_sync_except_last=False)
         else:
             e1 = self.model(**query_inputs)
             e2 = self.model(**all_document_inputs)
-            return self._contrastive_loss(e1, e2)
+            return self._contrastive_loss(e1, e2, labels=labels)
     
     # Custom retrieval evalution code
     def _retrieval_evaluate(
