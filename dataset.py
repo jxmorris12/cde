@@ -441,7 +441,7 @@ class MsmarcoDatasetHardNegatives(BeirDataset):
 
 class RedditDataset(torch.utils.data.Dataset):
 
-    def __init__(self, data_folder: str = "/home/jxm3/research/retrieval/tti3/data/mini"):
+    def __init__(self, data_folder: str = "/home/jxm3/research/retrieval/tti3/data/full"):
         self.current_dataset_idx: mp.Value = mp.Value('i', 0)
         print(f"Loading Reddit data from path: {data_folder}")
         self.dataset = datasets_fast_load_from_disk(
@@ -463,9 +463,10 @@ class RedditDataset(torch.utils.data.Dataset):
         self.pad_token_id = 0 # TODO: Set dynamically based on appropriate tokenizer.
         self.dataset.set_format("pt")
 
-        # self.min_examples_per_subreddit = 512 # TODO: Experiment with this.
-        # original_num_subreddits = len(self.subreddit_idxs)
-        # print(f"Filtered {original_num_subreddits} to {len(self.subreddit_idxs)} with min_examples_per_subreddit={self.min_examples_per_subreddit}")
+        original_num_subreddits = len(self.subreddit_idxs)
+        self.min_examples_per_subreddit = 512 # TODO: Experiment with this.
+        self.subreddit_idxs = { k: v for k,v in self.subreddit_idxs.items() if len(v) > self.min_examples_per_subreddit }
+        print(f"Filtered {original_num_subreddits} to {len(self.subreddit_idxs)} with min_examples_per_subreddit={self.min_examples_per_subreddit}")
         self.reset_dataset_idx()
     
     def tokenize(self, tokenizer: transformers.PreTrainedTokenizer, max_length: int) -> None:
@@ -489,8 +490,6 @@ class RedditDataset(torch.utils.data.Dataset):
 
         ex1 = self.dataset[i1]
         ex2 = self.dataset[i2]
-        
-        breakpoint()
 
         query_input_ids, document_input_ids = independent_crop(
             ex1["input_ids"],

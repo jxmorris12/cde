@@ -140,11 +140,11 @@ class CustomTrainer(transformers.Trainer):
             }
         else:
             all_document_inputs = document_inputs
-        # print("query_inputs >>", {k: v.shape for k,v in query_inputs.items()})
-        # print("all_document_inputs >>", {k: v.shape for k,v in all_document_inputs.items()})
         idx1 = inputs["idx"]
         idx2 = inputs["idx"]
-        labels = (idx1[:,None] == idx2).all(2).type(torch.float32)
+        # print("unique idxs:", len(set(idx1.tolist())))
+        labels = (idx1[:, None] == idx2[None, :]).float()
+        labels /= labels.sum(dim=1)
 
         if self.use_gc:
             return self.gc(query_inputs, all_document_inputs, labels=labels, no_sync_except_last=False)
