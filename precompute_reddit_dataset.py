@@ -242,14 +242,14 @@ class RedditDataset(RetrievalDataset):
         return len(self.subreddits)
 
 if __name__ == '__main__':
-    data_folder = "data/full"
+    data_folder = "data/mini"
     os.makedirs(data_folder, exist_ok=True)
     output_file = "test.dataset"
     dataset = RedditDataset(
         model_name="bert-base-uncased", # Used for tokenization (TODO argparse)
         split="train",
         token_max_length=128, # TODO argparse ...
-        sanity=None,  # TODO argparse ...
+        sanity=20_000,  # TODO argparse ...
     )
     fhandle = open(dataset.filename, "r")
     output_dataset = None
@@ -273,8 +273,8 @@ if __name__ == '__main__':
             texts.append(text)
             subreddit_idxs.append(subreddit_keys[subreddit_name])
             total_idxs.append(total_idx)
+            subreddits[subreddit_keys[subreddit_name]].append(total_idx)
             total_idx += 1
-            subreddits[subreddit_name].append([author_idx, subreddit_idx])
 
     # Add last piece of dataset        
     output_dataset = datasets.Dataset.from_dict({
@@ -295,7 +295,7 @@ if __name__ == '__main__':
         ex["input_ids"] = tt.input_ids
         return ex
 
-    cache_file_name = os.path.join(data_folder, output_file) + ".cache"
+    cache_file_name = os.path.join(data_folder, output_file) + f"{len(output_dataset)}.cache"
     print("tokenizing dataset of length:", len(output_dataset))
     output_dataset = output_dataset.map(
         tokenize_ex, batch_size=1000, batched=True, cache_file_name=cache_file_name

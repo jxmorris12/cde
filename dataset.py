@@ -440,9 +440,9 @@ class MsmarcoDatasetHardNegatives(BeirDataset):
 
 
 class RedditDataset(torch.utils.data.Dataset):
-    current_dataset_idx: mp.Value = mp.Value('i', 0)
 
     def __init__(self, data_folder: str = "/home/jxm3/research/retrieval/tti3/data/mini"):
+        self.current_dataset_idx: mp.Value = mp.Value('i', 0)
         print(f"Loading Reddit data from path: {data_folder}")
         self.dataset = datasets_fast_load_from_disk(
             os.path.join(
@@ -452,21 +452,20 @@ class RedditDataset(torch.utils.data.Dataset):
         self.subreddit_idxs = pickle.load(open(os.path.join(data_folder, "subreddit_idxs.p"), "rb"))
         print("\tloading subreddit keys...")
         subreddit_names = pickle.load(open(os.path.join(data_folder, "subreddit_keys.p"), "rb"))
-        self.subreddit_keys = dict(zip(subreddit_names, range(len(subreddit_names))))
+        self.subreddit_keys = dict(zip(range(len(subreddit_names)), subreddit_names))
         assert len(self.subreddit_idxs) == len(self.subreddit_keys)
 
         print(f"Loaded {len(self.dataset)} datapoints from {len(self.subreddit_keys)} subreddits")
 
-        for key in self.subreddit_idxs.keys():
-            random.shuffle(self.subreddit_idxs[key])
+        # for key in self.subreddit_idxs.keys():
+            # random.shuffle(self.subreddit_idxs[key])
         
         self.pad_token_id = 0 # TODO: Set dynamically based on appropriate tokenizer.
         self.dataset.set_format("pt")
 
-        self.min_examples_per_subreddit = 1000 # TODO: Experiment with this.
-        original_num_subreddits = len(self.subreddit_idxs)
-        self.subreddit_idxs = { k: v for k,v in self.subreddit_idxs.items() if len(v) > self.min_examples_per_subreddit}
-        print(f"Filtered {original_num_subreddits} to {len(self.subreddit_idxs)} with min_examples_per_subreddit={self.min_examples_per_subreddit}")
+        # self.min_examples_per_subreddit = 512 # TODO: Experiment with this.
+        # original_num_subreddits = len(self.subreddit_idxs)
+        # print(f"Filtered {original_num_subreddits} to {len(self.subreddit_idxs)} with min_examples_per_subreddit={self.min_examples_per_subreddit}")
         self.reset_dataset_idx()
     
     def tokenize(self, tokenizer: transformers.PreTrainedTokenizer, max_length: int) -> None:
@@ -477,19 +476,21 @@ class RedditDataset(torch.utils.data.Dataset):
         return len(self.dataset) # TODO: Maybe len(self.subreddit_keys) makes more sense?
 
     def reset_dataset_idx(self) -> int:
-        dataset_idx = random.choice(list(self.subreddit_keys.values()))
+        dataset_idx = random.choice(list(self.subreddit_keys.keys()))
         self.current_dataset_idx.value = dataset_idx
     
     def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]: 
         # TODO allow other dataset sampling strategies from T0 paper.
         dataset_idx = self.current_dataset_idx.value
-        dataset_key = self.subreddit_keys[dataset_idx]
+        # dataset_key = self.subreddit_keys[dataset_idx]
 
-        i1 = random.choice(self.subreddit_idxs[dataset_key])
-        i2 = random.choice(self.subreddit_idxs[dataset_key])
+        i1 = random.choice(self.subreddit_idxs[dataset_idx])
+        i2 = random.choice(self.subreddit_idxs[dataset_idx])
 
         ex1 = self.dataset[i1]
         ex2 = self.dataset[i2]
+        
+        breakpoint()
 
         query_input_ids, document_input_ids = independent_crop(
             ex1["input_ids"],
@@ -517,13 +518,19 @@ def load_reddit_train_and_val(perc: float = 0.9) -> Tuple[
     torch.utils.data.Dataset, torch.utils.data.Dataset]:
     train = RedditDataset()
     val = RedditDataset()
-    subreddit_idxs = list(train.subreddit_idxs.keys())
-    random.shuffle(subreddit_idxs)
-    N = round(len(subreddit_idxs) * perc)
-    train_idxs = subreddit_idxs[:N]
-    val_idxs = subreddit_idxs[N:]
-    train.subreddit_idxs = {k: v for k,v in train.subreddit_idxs.items() if k in train_idxs}
-    val.subreddit_idxs = {k: v for k,v in train.subreddit_idxs.items() if k in val_idxs}
+    subreddit_names = list(train.subreddit_idxs.keys())
+    random.shuffle(subreddit_names)
+    N = round(len(subreddit_names) * perc)
+    train_subreddits = set(subreddit_names[:N])
+    val_subreddits = set(subreddit_names[N:])
+
+    print(f"Creating training and validation data with a {perc:.2f}/{1-perc:.2f} split")
+    train.subreddit_idxs = { k: v for k,v in train.subreddit_idxs.items() if k in train_subreddits }
+    train.subreddit_keys = { k: v for k,v in train.subreddit_keys.items() if k in train_subreddits }
+    train.reset_dataset_idx()
+    val.subreddit_idxs = { k: v for k,v in val.subreddit_idxs.items() if k in val_subreddits }
+    val.subreddit_keys = { k: v for k,v in val.subreddit_keys.items() if k in val_subreddits }
+    val.reset_dataset_idx()
     return train, val
 
 

@@ -142,8 +142,8 @@ class CustomTrainer(transformers.Trainer):
             all_document_inputs = document_inputs
         # print("query_inputs >>", {k: v.shape for k,v in query_inputs.items()})
         # print("all_document_inputs >>", {k: v.shape for k,v in all_document_inputs.items()})
-        idx1 = query_inputs["idx"]
-        idx2 = document_inputs["idx"]
+        idx1 = inputs["idx"]
+        idx2 = inputs["idx"]
         labels = (idx1[:,None] == idx2).all(2).type(torch.float32)
 
         if self.use_gc:
