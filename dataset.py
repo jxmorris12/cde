@@ -69,6 +69,7 @@ def datasets_fast_load_from_disk(cache_path: str) -> datasets.Dataset:
     split = state["_split"]
     split = dataset.splits.Split(split) if split is not None else split
 
+    # print("returning dataset")
     return datasets.Dataset(
         arrow_table=arrow_table,
         info=dataset_info,
