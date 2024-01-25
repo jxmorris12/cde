@@ -3,6 +3,7 @@ data/
 datasets
 datasets/
 logs/
+notebooks/
 saves/
 slurm-scripts/
 wandb/

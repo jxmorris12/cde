@@ -1,4 +1,4 @@
-from typing import Any, Dict, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import datasets
 import torch
@@ -37,8 +37,8 @@ class CustomTrainer(transformers.Trainer):
         self.use_gc = self.args.use_gc # whether to use gradcache
         self.gc = None # lazily initialized during training
     
-    def evaluate(*args, **kwargs) -> Dict[str, float]:
-        return {}
+    # def evaluate(*args, **kwargs) -> Dict[str, float]:
+    #     return {}
 
     def create_optimizer(self, *args, **kwargs):
         super().create_optimizer(*args, **kwargs)
@@ -102,13 +102,31 @@ class CustomTrainer(transformers.Trainer):
         original_acc = ((
             torch.nn.functional.cosine_similarity(e1[:, None], e2[None, :], dim=2)
         ).argmax(1) == labels).float().mean()
-        new_acc = (scores.argmax(1) == labels).float().mean()
+        new_acc = (scores.argmax(1) == labels.argmax(1)).float().mean()
         wandb.log({
             "train/acc_emb": original_acc.item(),
             "train/acc": new_acc.item(),
             "batch_size": batch_size,
         })
         return loss
+    
+    def prediction_step(
+        self,
+        model: torch.nn.Module,
+        inputs: Dict[str, Union[torch.Tensor, Any]],
+        prediction_loss_only: bool,
+        ignore_keys: Optional[List[str]] = None,
+    ) -> Tuple[Optional[torch.Tensor], Optional[torch.Tensor], Optional[torch.Tensor]]:
+        """
+        Perform an evaluation step on `model` using `inputs`. Called during self.evalaute()
+        """
+        inputs = {key: value.to(self.args.device) for key, value in inputs.items()}
+        with torch.no_grad():
+            loss = self.compute_loss(model=model, inputs=inputs)
+
+        logits, labels = None, None
+        return loss, logits, labels
+
 
     def compute_loss(
         self,
@@ -128,8 +146,8 @@ class CustomTrainer(transformers.Trainer):
         query_inputs["dataset_attention_mask"] = dataset_inputs["attention_mask"]
 
         # NEXT LINEs ARE A TEMPORARY HACK TO HIDE DATASET_LEVEL INFORMATION AND SEE WHAT HAPPENS!
-        # query_inputs["dataset_input_ids"] = torch.ones_like(dataset_inputs["input_ids"], device=dataset_inputs["input_ids"].device)
-        # document_inputs["dataset_input_ids"] = torch.ones_like(dataset_inputs["input_ids"], device=dataset_inputs["input_ids"].device)
+        query_inputs["dataset_input_ids"] = torch.ones_like(dataset_inputs["input_ids"], device=dataset_inputs["input_ids"].device)
+        document_inputs["dataset_input_ids"] = torch.ones_like(dataset_inputs["input_ids"], device=dataset_inputs["input_ids"].device)
 
         if len(negative_document_inputs):
             all_document_inputs = {

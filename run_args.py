@@ -169,6 +169,7 @@ class TrainingArguments(transformers.TrainingArguments):
     per_device_eval_batch_size: int = field(
         default=64, metadata={"help": "Batch size per GPU/TPU core/CPU for evaluation."}
     )
+    evaluation_strategy: str = "steps"
 
     max_batch_size_fits_in_memory: int = field(
         default=64, 

@@ -242,14 +242,17 @@ class RedditDataset(RetrievalDataset):
         return len(self.subreddits)
 
 if __name__ == '__main__':
-    data_folder = "data/mini"
+    # suffix, N = ("full", None)
+    suffix, N = ("mini", 20_000)
+
+    data_folder = f"data/{suffix}"
     os.makedirs(data_folder, exist_ok=True)
     output_file = "test.dataset"
     dataset = RedditDataset(
         model_name="bert-base-uncased", # Used for tokenization (TODO argparse)
         split="train",
         token_max_length=128, # TODO argparse ...
-        sanity=20_000,  # TODO argparse ...
+        sanity=N,  # TODO argparse ...
     )
     fhandle = open(dataset.filename, "r")
     output_dataset = None
@@ -261,20 +264,38 @@ if __name__ == '__main__':
     total_idxs = []
     subreddits = collections.defaultdict(list)
     subreddit_keys = {}
+    all_content_hash = collections.defaultdict(set)
     total_idx = 0
+    content_too_short = 0
+    content_duplicate = 0
     for author_idx in tqdm.tqdm(range(dataset.num_authors), desc='creating datasets'):
         author_data = dataset.read_line(fhandle, author_idx)
         for subreddit_idx, subreddit_name in enumerate(author_data['action_type']):
             text = author_data[dataset.text_key][subreddit_idx]
             if len(text) < dataset.min_char_length: 
+                content_too_short += 1
                 continue
             if subreddit_name not in subreddit_keys:
                 subreddit_keys[subreddit_name] = len(subreddit_keys)
+            
+            text_hash = hash(text)
+            if text_hash in all_content_hash[subreddit_name]:
+                content_duplicate += 1
+                continue
+            else:
+                all_content_hash[subreddit_name].add(text_hash)
+
             texts.append(text)
             subreddit_idxs.append(subreddit_keys[subreddit_name])
             total_idxs.append(total_idx)
             subreddits[subreddit_keys[subreddit_name]].append(total_idx)
             total_idx += 1
+    
+    # breakpoint()
+    
+    print("got", total_idx, "docs; filtered", content_duplicate, "duplicates and", content_too_short, "too-short docs")
+    
+    del all_content_hash
 
     # Add last piece of dataset        
     output_dataset = datasets.Dataset.from_dict({

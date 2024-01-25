@@ -1,11 +1,11 @@
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import collections
-import dataclasses
 import json
 import hashlib
 import itertools
 import logging
+import multiprocessing
 import os
 import pickle
 import random
@@ -21,6 +21,23 @@ import transformers
 
 def get_dataset_name(d: datasets.Dataset) -> str:
     return f"{d.builder_name}.{d.config_name}[{d.split}]"
+
+
+def get_world_size() -> int:
+    try:
+        return torch.distributed.get_world_size()
+    except (RuntimeError, ValueError):
+        return 1
+
+
+def get_num_proc() -> int:
+    world_size: int = get_world_size()
+    try:
+        # os.sched_getaffinity respects schedulers, unlike cpu_count(), but it's only available
+        # on some Unix platforms, so we support both!
+        return len(os.sched_getaffinity(0)) // world_size  # type: ignore[attr-defined]
+    except AttributeError:
+        return multiprocessing.cpu_count() // world_size
 
 
 def process_qrels_uncached(corpus: datasets.Dataset, qrels: datasets.Dataset) -> Tuple[Dict[str, List[float]], Dict[str, List[str]]]:

@@ -16,7 +16,7 @@ import transformers
 import torch.multiprocessing as mp
 import tqdm
 from helpers import (
-    download_url_and_unzip, download_url, independent_crop, md5_hash
+    download_url_and_unzip, download_url, get_num_proc, independent_crop, md5_hash
 )
 
 
@@ -26,7 +26,9 @@ def load_dataset_tables(
     import concurrent
     from multiprocessing import Pool
 
-    use_threads = False
+    num_workers = min(num_workers, len(files))
+
+    use_threads = True
     if use_threads:
         pool_cls = concurrent.futures.ThreadPoolExecutor
         pool_kwargs = {"max_workers": num_workers}
@@ -37,7 +39,7 @@ def load_dataset_tables(
     with pool_cls(**pool_kwargs) as pool:
         result = list(
             tqdm.tqdm(
-                pool.imap(datasets.table.MemoryMappedTable.from_file, files),
+                pool.map(datasets.table.MemoryMappedTable.from_file, files),
                 desc=f"Loading {len(files)} files with {num_workers} workers",
                 total=len(files),
             )
@@ -57,7 +59,7 @@ def datasets_fast_load_from_disk(cache_path: str) -> datasets.Dataset:
 
     files = glob.glob(os.path.join(cache_path, "*.arrow"))
     files = sorted(files)
-    num_workers = int(len(os.sched_getaffinity(0)) / torch.cuda.device_count())
+    num_workers = get_num_proc()
     ds_tables = load_dataset_tables(
         files=files,
         num_workers=num_workers
@@ -441,7 +443,7 @@ class MsmarcoDatasetHardNegatives(BeirDataset):
 
 class RedditDataset(torch.utils.data.Dataset):
 
-    def __init__(self, data_folder: str = "/home/jxm3/research/retrieval/tti3/data/full"):
+    def __init__(self, data_folder: str):
         self.current_dataset_idx: mp.Value = mp.Value('i', 0)
         print(f"Loading Reddit data from path: {data_folder}")
         self.dataset = datasets_fast_load_from_disk(
@@ -464,7 +466,7 @@ class RedditDataset(torch.utils.data.Dataset):
         self.dataset.set_format("pt")
 
         original_num_subreddits = len(self.subreddit_idxs)
-        self.min_examples_per_subreddit = 512 # TODO: Experiment with this.
+        self.min_examples_per_subreddit = 0 # TODO: Experiment with this.
         self.subreddit_idxs = { k: v for k,v in self.subreddit_idxs.items() if len(v) > self.min_examples_per_subreddit }
         print(f"Filtered {original_num_subreddits} to {len(self.subreddit_idxs)} with min_examples_per_subreddit={self.min_examples_per_subreddit}")
         self.reset_dataset_idx()
@@ -474,7 +476,7 @@ class RedditDataset(torch.utils.data.Dataset):
         pass
 
     def __len__(self):
-        return len(self.dataset) # TODO: Maybe len(self.subreddit_keys) makes more sense?
+        return len(self.subreddit_keys) # TODO: Maybe len(self.subreddit_keys) makes more sense?
 
     def reset_dataset_idx(self) -> int:
         dataset_idx = random.choice(list(self.subreddit_keys.keys()))
@@ -490,6 +492,8 @@ class RedditDataset(torch.utils.data.Dataset):
 
         ex1 = self.dataset[i1]
         ex2 = self.dataset[i2]
+
+        assert ex1["subreddit_idx"] == ex2["subreddit_idx"]
 
         query_input_ids, document_input_ids = independent_crop(
             ex1["input_ids"],
@@ -513,17 +517,23 @@ class RedditDataset(torch.utils.data.Dataset):
             ######################################################################
         }
 
-def load_reddit_train_and_val(perc: float = 0.9) -> Tuple[
+def load_reddit_train_and_val(
+                              data_folder: str = "/home/jxm3/research/retrieval/tti3/data/mini",
+                              perc: float = 0.9) -> Tuple[
     torch.utils.data.Dataset, torch.utils.data.Dataset]:
-    train = RedditDataset()
-    val = RedditDataset()
+    train = RedditDataset(data_folder=data_folder)
+    val = RedditDataset(data_folder=data_folder)
     subreddit_names = list(train.subreddit_idxs.keys())
-    random.shuffle(subreddit_names)
-    N = round(len(subreddit_names) * perc)
-    train_subreddits = set(subreddit_names[:N])
-    val_subreddits = set(subreddit_names[N:])
+    # shuffle with fixed seed so that order doesn't change every time
+    random.Random(42).shuffle(subreddit_names)
+    N = min(
+        1000,
+        round(1 - len(subreddit_names) * perc)
+    )
+    train_subreddits = set(subreddit_names[N:])
+    val_subreddits = set(subreddit_names[:N])
 
-    print(f"Creating training and validation data with a {perc:.2f}/{1-perc:.2f} split")
+    print(f"Creating training and validation data with a {perc:.2f}/{1-perc:.2f} split ({len(train_subreddits)}/{len(val_subreddits)})")
     train.subreddit_idxs = { k: v for k,v in train.subreddit_idxs.items() if k in train_subreddits }
     train.subreddit_keys = { k: v for k,v in train.subreddit_keys.items() if k in train_subreddits }
     train.reset_dataset_idx()
