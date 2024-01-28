@@ -1,6 +1,7 @@
 from typing import List
 
 import collections
+import concurrent.futures
 import datasets
 import openai
 import os
@@ -21,24 +22,20 @@ from dataset import RedditDataset
 output_file = "test.dataset"
 
 # Minimum number of documents per subreddit.
-MIN_N_DOCS: int = 256
+MIN_N_DOCS: int = 512
 
 # Number of passages to generate documents for.
-N_PASSAGES: int = 4
+N_PASSAGES: int = 64
 
 # Number of questions to generate per passage.
 N_QUESTIONS: int = 3
 
 
-client = openai.OpenAI(
-    # This is the default and can be omitted
-    # api_key=os.environ.get("OPENAI_API_KEY"),
-)
+client = openai.OpenAI()
 
 
 # @retry(wait=wait_fixed(2), stop=stop_after_attempt(5))
 def chat_compeletion_openai(model, messages, temperature=1, max_tokens=512):
-    return "a\nb\nc"
     response = client.chat.completions.create(
             model=model,
             messages=messages,
@@ -82,18 +79,43 @@ def main():
 
     all_questions = []
     question_idxs = collections.defaultdict(list)
-    for subreddit_key, subreddit_values in tqdm.tqdm(subreddit_lists.items(), total=len(subreddit_lists), desc="Processing data"):
+    # for subreddit_key, subreddit_values in tqdm.tqdm(subreddit_lists.items(), total=len(subreddit_lists), desc="Processing data"):
+    #     passage_idxs = random.sample(subreddit_values, N_PASSAGES)
+    #     question_idxs[subreddit_key].extend(passage_idxs)
+    #     for passage_idx in tqdm.tqdm(passage_idxs, leave=False, desc=f"Generating questions for subreddit {subreddit_key}..."):
+    #         passage = ds.dataset[passage_idx]["text"]
+    #         questions = generate_questions_from_passage(passage, n=N_QUESTIONS)
+    #         for question in questions:
+    #             all_questions.append({
+    #                 "question": question,
+    #                 "passage_idx": passage_idx,
+    #                 "subreddit_key": subreddit_key,
+    #             })
+
+    def process_subreddit(subreddit_key, subreddit_values):
         passage_idxs = random.sample(subreddit_values, N_PASSAGES)
         question_idxs[subreddit_key].extend(passage_idxs)
-        for passage_idx in tqdm.tqdm(passage_idxs, leave=False, desc=f"Generating questions for subreddit {subreddit_key}..."):
+        subreddit_questions = []
+        for passage_idx in passage_idxs:
             passage = ds.dataset[passage_idx]["text"]
             questions = generate_questions_from_passage(passage, n=N_QUESTIONS)
             for question in questions:
-                all_questions.append({
+                subreddit_questions.append({
                     "question": question,
                     "passage_idx": passage_idx,
                     "subreddit_key": subreddit_key,
                 })
+        return subreddit_questions
+
+    all_questions = []
+    question_idxs = collections.defaultdict(list)
+
+    with tqdm.tqdm(total=len(subreddit_lists), desc="Processing subreddits", colour="green") as pbar:
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            futures = [executor.submit(process_subreddit, subreddit_key, subreddit_values) for subreddit_key, subreddit_values in subreddit_lists.items()]
+            for future in concurrent.futures.as_completed(futures):
+                all_questions.extend(future.result())
+                pbar.update(1)
     
     print(f"generated {len(all_questions)} questions!")
     question_data_folder = os.path.join(data_folder, "questions")
