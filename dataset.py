@@ -28,7 +28,7 @@ def load_dataset_tables(
 
     num_workers = min(num_workers, len(files))
 
-    use_threads = True
+    use_threads = False
     if use_threads:
         pool_cls = concurrent.futures.ThreadPoolExecutor
         pool_kwargs = {"max_workers": num_workers}

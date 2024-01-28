@@ -242,8 +242,8 @@ class RedditDataset(RetrievalDataset):
         return len(self.subreddits)
 
 if __name__ == '__main__':
-    # suffix, N = ("full", None)
-    suffix, N = ("mini", 20_000)
+    suffix, N = ("full", None)
+    # suffix, N = ("mini", 20_000)
 
     data_folder = f"data/{suffix}"
     os.makedirs(data_folder, exist_ok=True)
