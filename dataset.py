@@ -442,8 +442,7 @@ class MsmarcoDatasetHardNegatives(BeirDataset):
         return ex
 
 
-class RedditDataset(torch.utils.data.Dataset):
-
+class RedditDatasetUnsupervised(torch.utils.data.Dataset):
     def __init__(self, data_folder: str):
         self.current_dataset_idx: mp.Value = mp.Value('i', 0)
         print(f"Loading Reddit data from path: {data_folder}")
@@ -504,6 +503,56 @@ class RedditDataset(torch.utils.data.Dataset):
         )
 
         dataset_input_ids = ex2["input_ids"]
+        return {
+            'idx': i1,
+            ######################################################################
+            'dataset_input_ids': dataset_input_ids,
+            'dataset_attention_mask': (dataset_input_ids != self.pad_token_id).int(),
+            ######################################################################
+            'query_input_ids': query_input_ids,
+            'query_attention_mask': (query_input_ids != self.pad_token_id).int(),
+            ######################################################################
+            'document_input_ids': document_input_ids,
+            'document_attention_mask': (document_input_ids != self.pad_token_id).int(),
+            ######################################################################
+        }
+    
+
+
+class RedditDatasetSupervised(RedditDatasetUnsupervised):
+    def __init__(self, data_folder: str,
+                 question_folder: str):
+        super().__init__(data_folder=data_folder)
+
+        # Load questions
+        self.question_idxs = pickle.load(
+            open(os.path.join(question_folder, 'question_idxs.p'), 'rb'))
+        self.question_dataset = datasets.Dataset.load_from_disk(
+            os.path.join(question_folder, 'test.dataset'))
+        self.reset_dataset_idx()
+
+    def reset_dataset_idx(self) -> int:
+        dataset_idx = random.choice(list(self.question_idxs.keys()))
+        self.current_dataset_idx.value = dataset_idx
+
+    def __len__(self):
+        return len(self.question_idxs) # TODO: Maybe len(self.subreddit_keys) makes more sense?
+    
+    def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]: 
+        # TODO allow other dataset sampling strategies from T0 paper.
+        dataset_idx = self.current_dataset_idx.value
+        # dataset_key = self.subreddit_keys[dataset_idx]
+        
+        query_id = random.choice(self.question_idxs)
+        query_ex = self.question_dataset[query_id]
+        query_input_ids = query_ex.query_input_ids
+        doc_id = query_ex.passage_id
+        document_input_ids = self.dataset[doc_id].input_ids
+
+        assert query_ex.subreddit_idx == self.dataset[doc_id].subreddit_idx
+
+        random_idx = random.choice(self.subreddit_idxs[dataset_idx])
+        dataset_input_ids = self.dataset[random_idx].input_ids
         return {
             'idx': i1,
             ######################################################################
