@@ -2,10 +2,10 @@ from typing import Dict, List
 
 import collections
 import concurrent.futures
-import datetime
 import os
 import pickle
 import random
+import time
 
 import datasets
 import openai
@@ -24,13 +24,13 @@ from dataset import RedditDataset
 output_file = "test.dataset"
 
 # Minimum number of documents per subreddit.
-MIN_N_DOCS: int = 256*4*4*4*4
+MIN_N_DOCS: int = 8192 # 256
 
 # Number of passages to generate documents for.
-N_PASSAGES: int = 1
+N_PASSAGES: int = 16 # 64 
 
 # Number of questions to generate per passage.
-N_QUESTIONS: int = 3
+N_QUESTIONS: int = 2 # 3
 
 # Number of threads that will make requests in parallel.
 N_THREADS = 128
@@ -82,7 +82,8 @@ def generate_questions_from_passage(passage: str, n: int, max_n_words: int = 100
 
 
 def main():
-    start_time = datetime.datetime.now()
+    start_time = time.time()
+
     # Number of documents to generate questions for per subreddit.
     data_folder: str = "/home/jxm3/research/retrieval/tti3/data/mini"
     # data_folder: str = "/home/jxm3/research/retrieval/tti3/data/full"
@@ -93,11 +94,9 @@ def main():
     print(f"\t Estimated number of questions: {N_PASSAGES}*{len(subreddit_lists.items())}*{N_QUESTIONS}={N_PASSAGES*len(subreddit_lists.items())*N_QUESTIONS}")
 
     all_questions = []
-    question_idxs = collections.defaultdict(list)
 
-    def process_subreddit(subreddit_key, subreddit_values):
+    def process_subreddit(subreddit_idx, subreddit_values):
         passage_idxs = random.sample(subreddit_values, N_PASSAGES)
-        question_idxs[subreddit_key].extend(passage_idxs)
         subreddit_questions = []
         for passage_idx in passage_idxs:
             passage = ds.dataset[passage_idx]["text"]
@@ -106,7 +105,7 @@ def main():
                 subreddit_questions.append({
                     "question": question,
                     "passage_idx": passage_idx,
-                    "subreddit_key": subreddit_key,
+                    "subreddit_idx": subreddit_idx,
                 })
         return subreddit_questions
 
@@ -120,12 +119,13 @@ def main():
         with multiproc_cls(
             max_workers=N_THREADS
         ) as executor:
-            futures = [executor.submit(process_subreddit, subreddit_key, subreddit_values) for subreddit_key, subreddit_values in subreddit_lists.items()]
+            futures = [executor.submit(process_subreddit, subreddit_idx, subreddit_values) for subreddit_idx, subreddit_values in subreddit_lists.items()]
             for future in concurrent.futures.as_completed(futures):
                 questions_list = future.result()
                 for q in questions_list:
                     q['question_idx'] = questions_total
-                    all_questions[q['subreddit_key']].append(questions_total)
+                    all_questions.append(q)
+                    question_idxs[q['subreddit_idx']].append(questions_total)
                 questions_total += 1
                 pbar.update(1)
 
@@ -158,10 +158,10 @@ def main():
     pickle.dump(question_idxs, open(os.path.join(question_data_folder, "question_idxs.p"), "wb"))
     print(f"wrote dataset of length {len(dataset)} and question-idx-map of length {len(question_idxs)} to {question_data_folder}")
     
-    time_difference = datetime.datetime.now() - start_time
-    time_difference_minutes = time_difference / 60
-    time_difference_hours = time_difference_minutes / 60    
-    print(f"finished in {time_difference / 60:.2f} minutes or {time_difference_hours:.1f} hours")
+    time_difference = time.time() - start_time
+    time_difference_minutes = time_difference // 60
+    time_difference_hours = time_difference_minutes // 60    
+    print(f"finished in {time_difference_minutes:.1f} minutes or {time_difference_hours:.1f} hours")
 
 if __name__ == "__main__":
     main()

@@ -1,4 +1,6 @@
 from typing import Any, Dict, Iterable, List, Optional, Tuple
+
+import copy
 import glob
 import gzip
 import json
@@ -28,7 +30,7 @@ def load_dataset_tables(
 
     num_workers = min(num_workers, len(files))
 
-    use_threads = False
+    use_threads = True
     if use_threads:
         pool_cls = concurrent.futures.ThreadPoolExecutor
         pool_kwargs = {"max_workers": num_workers}
@@ -57,7 +59,7 @@ def datasets_fast_load_from_disk(cache_path: str) -> datasets.Dataset:
     with open(dataset_state_path, encoding="utf-8") as state_file:
         state = json.load(state_file)
 
-    files = glob.glob(os.path.join(cache_path, "*.arrow"))
+    files = glob.glob(os.path.join(cache_path, "data-*.arrow"))
     files = sorted(files)
     num_workers = get_num_proc()
     ds_tables = load_dataset_tables(
@@ -67,7 +69,7 @@ def datasets_fast_load_from_disk(cache_path: str) -> datasets.Dataset:
     arrow_table = datasets.table.concat_tables(ds_tables)
 
     split = state["_split"]
-    split = dataset.splits.Split(split) if split is not None else split
+    split = datasets.splits.Split(split) if split is not None else split
 
     # print("returning dataset")
     return datasets.Dataset(
@@ -442,7 +444,7 @@ class MsmarcoDatasetHardNegatives(BeirDataset):
         return ex
 
 
-class RedditDatasetUnsupervised(torch.utils.data.Dataset):
+class RedditDataset(torch.utils.data.Dataset):
     def __init__(self, data_folder: str):
         self.current_dataset_idx: mp.Value = mp.Value('i', 0)
         print(f"Loading Reddit data from path: {data_folder}")
@@ -519,42 +521,42 @@ class RedditDatasetUnsupervised(torch.utils.data.Dataset):
     
 
 
-class RedditDatasetSupervised(RedditDatasetUnsupervised):
+class RedditDatasetWithSupervisedQuestions(RedditDataset):
     def __init__(self, data_folder: str,
                  question_folder: str):
-        super().__init__(data_folder=data_folder)
-
         # Load questions
-        self.question_idxs = pickle.load(
+        self.subreddit_questions = pickle.load(
             open(os.path.join(question_folder, 'question_idxs.p'), 'rb'))
         self.question_dataset = datasets.Dataset.load_from_disk(
             os.path.join(question_folder, 'test.dataset'))
-        self.reset_dataset_idx()
+        # self.question_dataset.set_format('pt')
+        # Now initialize (can't do this before loading questions or reset_dataset_idx will fail)
+        super().__init__(data_folder=data_folder)
 
     def reset_dataset_idx(self) -> int:
-        dataset_idx = random.choice(list(self.question_idxs.keys()))
+        dataset_idx = random.choice(list(self.subreddit_questions.keys()))
         self.current_dataset_idx.value = dataset_idx
 
     def __len__(self):
-        return len(self.question_idxs) # TODO: Maybe len(self.subreddit_keys) makes more sense?
+        return len(self.subreddit_questions) # TODO: Maybe len(self.subreddit_keys) makes more sense?
     
     def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]: 
         # TODO allow other dataset sampling strategies from T0 paper.
-        dataset_idx = self.current_dataset_idx.value
-        # dataset_key = self.subreddit_keys[dataset_idx]
-        
-        query_id = random.choice(self.question_idxs)
+        dataset_idx = self.current_dataset_idx.value        
+        query_id = random.choice(self.subreddit_questions[dataset_idx])
         query_ex = self.question_dataset[query_id]
-        query_input_ids = query_ex.query_input_ids
-        doc_id = query_ex.passage_id
-        document_input_ids = self.dataset[doc_id].input_ids
+        query_input_ids = torch.tensor(query_ex['question_input_ids'])
+        doc_id = query_ex['passage_idx']
+        document_input_ids = self.dataset[doc_id]['input_ids']
 
-        assert query_ex.subreddit_idx == self.dataset[doc_id].subreddit_idx
+        assert query_ex['subreddit_idx'] == self.dataset[doc_id]['subreddit_idx']
 
-        random_idx = random.choice(self.subreddit_idxs[dataset_idx])
-        dataset_input_ids = self.dataset[random_idx].input_ids
+        subreddit_idx = query_ex['subreddit_idx']
+        random_idx_within_subreddit = random.choice(self.subreddit_idxs[subreddit_idx])
+        dataset_input_ids = self.dataset[random_idx_within_subreddit]['input_ids']
         return {
-            'idx': i1,
+            'idx': doc_id,
+            'idx_query': query_id,
             ######################################################################
             'dataset_input_ids': dataset_input_ids,
             'dataset_attention_mask': (dataset_input_ids != self.pad_token_id).int(),
@@ -571,8 +573,18 @@ def load_reddit_train_and_val(
                               data_folder: str = "/home/jxm3/research/retrieval/tti3/data/mini",
                               perc: float = 0.9) -> Tuple[
     torch.utils.data.Dataset, torch.utils.data.Dataset]:
-    train = RedditDataset(data_folder=data_folder)
-    val = RedditDataset(data_folder=data_folder)
+
+    question_folder = os.path.join(data_folder, "questions")
+    train = RedditDatasetWithSupervisedQuestions(
+        data_folder=data_folder,
+        question_folder=question_folder,
+    )
+    print(train[0])
+    # Copy train->val to save dataloading time before split. However need to
+    # clone these values individually so that they're not tied together.
+    val = copy.copy(train)
+    train.current_dataset_idx: mp.Value = mp.Value('i', 0)
+    val.current_dataset_idx: mp.Value = mp.Value('i', 0)
     subreddit_names = list(train.subreddit_idxs.keys())
     # shuffle with fixed seed so that order doesn't change every time
     random.Random(42).shuffle(subreddit_names)
@@ -586,20 +598,28 @@ def load_reddit_train_and_val(
     print(f"Creating training and validation data with a {perc:.2f}/{1-perc:.2f} split ({len(train_subreddits)}/{len(val_subreddits)})")
     train.subreddit_idxs = { k: v for k,v in train.subreddit_idxs.items() if k in train_subreddits }
     train.subreddit_keys = { k: v for k,v in train.subreddit_keys.items() if k in train_subreddits }
+    train.subreddit_questions = { k: v for k,v in train.subreddit_questions.items() if k in train_subreddits }
     train.reset_dataset_idx()
     val.subreddit_idxs = { k: v for k,v in val.subreddit_idxs.items() if k in val_subreddits }
     val.subreddit_keys = { k: v for k,v in val.subreddit_keys.items() if k in val_subreddits }
+    val.subreddit_questions = { k: v for k,v in val.subreddit_questions.items() if k in val_subreddits }
     val.reset_dataset_idx()
     return train, val
 
 
 if __name__ == '__main__':
-    nfcorpus = BeirDataset(
-        dataset="nfcorpus",    
-        embedder="sentence-transformers/gtr-t5-base"
-    )
+    # nfcorpus = BeirDataset(
+    #     dataset="nfcorpus",    
+    #     embedder="sentence-transformers/gtr-t5-base"
+    # )
+    # dataset = MsmarcoDatasetHardNegatives(
+    #     embedder="sentence-transformers/gtr-t5-base",
+    #     num_hard_negatives=1,
+    # )
+    # print(dataset[10_001])
 
-    dataset = MsmarcoDatasetHardNegatives(
-        embedder="sentence-transformers/gtr-t5-base"
+    ds_train, ds_val = load_reddit_train_and_val(
+        data_folder="/home/jxm3/research/retrieval/tti3/data/full",
+        perc=0.9,
     )
-    print(dataset[10_001])
+    print(ds_train[0])
