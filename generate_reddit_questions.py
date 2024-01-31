@@ -27,10 +27,10 @@ output_file = "test.dataset"
 MIN_N_DOCS: int = 8192 # 256
 
 # Number of passages to generate documents for.
-N_PASSAGES: int = 16 # 64 
+N_PASSAGES: int = 32 # 64 
 
 # Number of questions to generate per passage.
-N_QUESTIONS: int = 2 # 3
+N_QUESTIONS: int = 3 # 3
 
 # Number of threads that will make requests in parallel.
 N_THREADS = 128

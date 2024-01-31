@@ -37,8 +37,9 @@ class CustomTrainer(transformers.Trainer):
         self.use_gc = self.args.use_gc # whether to use gradcache
         self.gc = None # lazily initialized during training
     
-    # def evaluate(*args, **kwargs) -> Dict[str, float]:
-    #     return {}
+    def _get_train_sampler(self) -> Optional[torch.utils.data.Sampler]:
+        # Don't sample train data; it's already randomizing itself.
+        return None
 
     def create_optimizer(self, *args, **kwargs):
         super().create_optimizer(*args, **kwargs)
@@ -120,13 +121,12 @@ class CustomTrainer(transformers.Trainer):
         """
         Perform an evaluation step on `model` using `inputs`. Called during self.evalaute()
         """
-        inputs = {key: value.to(self.args.device) for key, value in inputs.items()}
+        inputs = { key: value.to(self.args.device) for key, value in inputs.items() }
         with torch.no_grad():
             loss = self.compute_loss(model=model, inputs=inputs)
 
         logits, labels = None, None
         return loss, logits, labels
-
 
     def compute_loss(
         self,
@@ -160,15 +160,16 @@ class CustomTrainer(transformers.Trainer):
             all_document_inputs = document_inputs
         idx1 = inputs["idx"]
         idx2 = inputs["idx"]
-        # print("unique idxs:", len(set(idx1.tolist())))
         labels = (idx1[:, None] == idx2[None, :]).float()
         labels /= labels.sum(dim=1)
+
+        # breakpoint()
 
         if self.use_gc:
             return self.gc(query_inputs, all_document_inputs, labels=labels, no_sync_except_last=False)
         else:
-            e1 = self.model(**query_inputs)
-            e2 = self.model(**all_document_inputs)
+            e1 = model(**query_inputs)
+            e2 = model(**all_document_inputs)
             return self._contrastive_loss(e1, e2, labels=labels)
     
     # Custom retrieval evalution code

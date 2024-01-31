@@ -1,6 +1,7 @@
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import collections
+import glob
 import json
 import hashlib
 import itertools
@@ -346,3 +347,99 @@ def independent_crop(
     )
     s2 = input_ids[torch.tensor(list(s2_idxs))]
     return (s1, s2)
+
+def load_dataset_tables(
+    files: Iterable[str], num_workers: int = 16
+) -> Iterable[datasets.table.MemoryMappedTable]:
+    import concurrent
+    from multiprocessing import Pool
+
+    # num_workers = min(num_workers, len(files))
+    num_workers = min(32, len(files))
+
+    use_threads = True
+    if use_threads:
+        pool_cls = concurrent.futures.ThreadPoolExecutor
+        pool_kwargs = {"max_workers": num_workers}
+    else:
+        pool_cls = Pool
+        pool_kwargs = {"processes": num_workers}
+    
+    with pool_cls(**pool_kwargs) as pool:
+        result = list(
+            tqdm.tqdm(
+                pool.map(datasets.table.MemoryMappedTable.from_file, files),
+                desc=f"Loading {len(files)} files with {num_workers} workers",
+                total=len(files),
+            )
+        )
+    return result
+
+
+def datasets_fast_load_from_disk(cache_path: str) -> datasets.Dataset:
+    print(f"fast_load_from_disk called with path:", cache_path)
+    dataset_info_path = os.path.join(cache_path, "dataset_info.json")
+    with open(dataset_info_path, encoding="utf-8") as dataset_info_file:
+        dataset_info = datasets.DatasetInfo.from_dict(json.load(dataset_info_file))
+
+    dataset_state_path = os.path.join(cache_path, "state.json")
+    with open(dataset_state_path, encoding="utf-8") as state_file:
+        state = json.load(state_file)
+
+    files = glob.glob(os.path.join(cache_path, "data-*.arrow"))
+    files = sorted(files)
+    num_workers = get_num_proc()
+    ds_tables = load_dataset_tables(
+        files=files,
+        num_workers=num_workers
+    )
+    arrow_table = datasets.table.concat_tables(ds_tables)
+
+    split = state["_split"]
+    split = datasets.splits.Split(split) if split is not None else split
+
+    # print("returning dataset")
+    return datasets.Dataset(
+        arrow_table=arrow_table,
+        info=dataset_info,
+        split=split,
+        fingerprint=state["_fingerprint"],
+    )
+
+
+def tokenize_dataset(
+        dataset: datasets.Dataset,
+        tokenizer: transformers.PreTrainedTokenizer,
+        max_length: int,
+        text_key: str,
+        padding_strategy: str
+    ) -> datasets.Dataset:
+    def tokenize_text(ex: Dict) -> Dict:
+        tt = tokenizer(
+            ex[text_key],
+            max_length=max_length,
+            truncation=True,
+            padding=padding_strategy,
+        )
+        for k,v in tt.items():
+            ex[f"{text_key}_{k}"] = v
+        ex["length"] = [len(tt) for tt in ex[f"{text_key}_input_ids"]]
+        return ex
+
+    # generate unique hash for tokenizer
+    vocab = tokenizer.vocab
+    vocab_words = tuple(sorted(vocab.keys(), key=lambda word: vocab[word]))
+    vocab_hash = md5_hash(vocab_words)
+
+    data_fingerprint = '__'.join((
+        dataset._fingerprint, str(vocab_hash), str(max_length),
+        text_key, padding_strategy
+    ))
+    data_fingerprint = md5_hash(data_fingerprint)
+    dataset = dataset.map(
+        tokenize_text,
+        new_fingerprint=data_fingerprint,
+        batched=True,
+        load_from_cache_file=True,
+    )
+    return dataset

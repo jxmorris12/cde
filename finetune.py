@@ -63,7 +63,11 @@ retrieval_datasets = {
 for k,v in retrieval_datasets.items():
     v.tokenize(tokenizer=embedder_tokenizer, max_length=model_args.max_seq_length)
 
-train_dataset, eval_dataset = load_reddit_train_and_val()
+train_dataset, eval_dataset = load_reddit_train_and_val(
+    data_folder="/home/jxm3/research/retrieval/tti3/data/full",
+    batch_size=training_args.per_device_train_batch_size,
+    perc=0.92,
+)
 train_dataset.tokenize(tokenizer=embedder_tokenizer, max_length=model_args.max_seq_length)
 
 model_config = ModelConfig(**vars(model_args))

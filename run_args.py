@@ -208,6 +208,7 @@ class TrainingArguments(transformers.TrainingArguments):
             num_workers
         )  # Sets threads for hf tokenizers
         self.dataloader_num_workers = num_workers
+        self.dataloader_persistent_workers = True
         today_date = datetime.date.today()
         formatted_date = today_date.strftime("%Y-%m-%d")
         self.exp_name = f"{formatted_date}-{self.exp_name}"
