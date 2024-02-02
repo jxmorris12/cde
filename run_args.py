@@ -77,16 +77,8 @@ class ModelArguments:
             "choices": ["query_dependent", "query_independent", "biencoder_extended", "biencoder"],
         }
     )
-    gamma: float = field(
-        default=0.0,
-        metadata={
-            "help": ("weight (between 0 and 1) for residual term in document embeddings. "
-                "0.0 means no residual, 1.0 means to ignore the second transformer block output."
-            )
-        }
-    )
     limit_layers: Optional[int] = field(
-        default=2, # None,
+        default=None,
         metadata={
             "help": "If set, will load backbone and embedders with limited number of layers"
         }
@@ -138,6 +130,10 @@ class DataArguments:
 
 @dataclass
 class TrainingArguments(transformers.TrainingArguments):
+    use_fake_dataset_info: bool = field(
+        default=False,
+        metadata={"help": "whether to use fake info for dataset (as opposed to our method)"}
+    )
     # https://github.com/huggingface/transformers/blob/e82c1cb78e178519060b9391214727be75a218ca/src/transformers/training_args.py#L121
     output_dir: str = field(
         default="saves",
@@ -189,6 +185,13 @@ class TrainingArguments(transformers.TrainingArguments):
             "required": "True",
         }
     )
+    lr_scheduler_type: str = "constant_with_warmup"
+    warmup_steps: int = field(
+        default=2_000,
+        metadata={
+            "help": "Linear warmup over warmup_steps."
+        }
+    )
     def __setattr__(self, name, value):
         super(transformers.TrainingArguments, self).__setattr__(name, value)
 
@@ -208,7 +211,7 @@ class TrainingArguments(transformers.TrainingArguments):
             num_workers
         )  # Sets threads for hf tokenizers
         self.dataloader_num_workers = num_workers
-        self.dataloader_persistent_workers = True
+        self.dataloader_persistent_workers = (num_workers > 0)
         today_date = datetime.date.today()
         formatted_date = today_date.strftime("%Y-%m-%d")
         self.exp_name = f"{formatted_date}-{self.exp_name}"

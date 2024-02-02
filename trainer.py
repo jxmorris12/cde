@@ -82,9 +82,9 @@ class CustomTrainer(transformers.Trainer):
             loss = loss.mean()
         return loss.detach() / self.args.gradient_accumulation_steps
 
-    def _contrastive_loss(self, e1: torch.Tensor, e2: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
-        e1 = e1 / e1.norm(p=2, dim=1, keepdim=True)
-        e2 = e2 / e2.norm(p=2, dim=1, keepdim=True)
+    def _contrastive_loss(self, e1: torch.Tensor, e2: torch.Tensor, idx: torch.Tensor) -> torch.Tensor:
+        e1 = e1 / e1.norm(p=2, dim=1, keepdim=True) # Query
+        e2 = e2 / e2.norm(p=2, dim=1, keepdim=True) # Document
         scores = e1 @ e2.T
 
         batch_size, _ = scores.shape
@@ -93,20 +93,24 @@ class CustomTrainer(transformers.Trainer):
         # of multiplying the cosine similarity score by 20 for
         # better optimization (Thakur et al., 2021)."
         # 
-        scores *= 20  # TODO argparse: self.args.contrastive_temperature.exp()
+        one_hot_labels = (idx[:, None] == idx[None, :]).float()
+        labels = one_hot_labels / one_hot_labels.sum(dim=1)
+
+        scores *= 50  # TODO argparse: self.args.contrastive_temperature.exp()
         loss = torch.nn.functional.cross_entropy(
             scores, labels, label_smoothing=0.0
         )
         if (loss.isnan()):
             raise RuntimeError("Loss is nan!")
         
-        original_acc = ((
-            torch.nn.functional.cosine_similarity(e1[:, None], e2[None, :], dim=2)
-        ).argmax(1) == labels).float().mean()
-        new_acc = (scores.argmax(1) == labels.argmax(1)).float().mean()
+        pred_labels = one_hot_labels[torch.arange(len(one_hot_labels)), scores.argmax(dim=1)]
+        acc = pred_labels.float().mean()
+
         wandb.log({
-            "train/acc_emb": original_acc.item(),
-            "train/acc": new_acc.item(),
+            "train/acc": acc.item(),
+            "train/stats_unique": idx.unique().numel(),
+            "train/stats_total_queries": len(e1),
+            "train/stats_total_documents": len(e2),
             "batch_size": batch_size,
         })
         return loss
@@ -145,9 +149,9 @@ class CustomTrainer(transformers.Trainer):
         query_inputs["dataset_input_ids"] = dataset_inputs["input_ids"]
         query_inputs["dataset_attention_mask"] = dataset_inputs["attention_mask"]
 
-        # NEXT LINEs ARE A TEMPORARY HACK TO HIDE DATASET_LEVEL INFORMATION AND SEE WHAT HAPPENS!
-        query_inputs["dataset_input_ids"] = torch.ones_like(dataset_inputs["input_ids"], device=dataset_inputs["input_ids"].device)
-        document_inputs["dataset_input_ids"] = torch.ones_like(dataset_inputs["input_ids"], device=dataset_inputs["input_ids"].device)
+        if self.args.use_fake_dataset_info:
+            query_inputs["dataset_input_ids"] = torch.ones_like(dataset_inputs["input_ids"], device=dataset_inputs["input_ids"].device)
+            document_inputs["dataset_input_ids"] = torch.ones_like(dataset_inputs["input_ids"], device=dataset_inputs["input_ids"].device)
 
         if len(negative_document_inputs):
             all_document_inputs = {
@@ -158,19 +162,13 @@ class CustomTrainer(transformers.Trainer):
             }
         else:
             all_document_inputs = document_inputs
-        idx1 = inputs["idx"]
-        idx2 = inputs["idx"]
-        labels = (idx1[:, None] == idx2[None, :]).float()
-        labels /= labels.sum(dim=1)
-
-        # breakpoint()
 
         if self.use_gc:
             return self.gc(query_inputs, all_document_inputs, labels=labels, no_sync_except_last=False)
         else:
             e1 = model(**query_inputs)
             e2 = model(**all_document_inputs)
-            return self._contrastive_loss(e1, e2, labels=labels)
+            return self._contrastive_loss(e1, e2, idx =inputs["idx"])
     
     # Custom retrieval evalution code
     def _retrieval_evaluate(

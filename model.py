@@ -61,7 +61,7 @@ class Model(transformers.PreTrainedModel):
             torch.nn.Linear(self.hidden_size * 2, self.hidden_size),
         )
 
-        self.gamma = config.gamma
+        self.gamma = 0.0
         if config.disable_dropout:
             disable_dropout(self)
     

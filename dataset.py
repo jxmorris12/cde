@@ -435,12 +435,13 @@ class RedditDatasetWithSupervisedQuestions(RedditDataset):
             open(os.path.join(question_folder, 'question_idxs.p'), 'rb'))
         self.question_dataset = datasets.Dataset.load_from_disk(
             os.path.join(question_folder, 'test.dataset'))
-        # self.question_dataset.set_format('pt')
+        self.question_dataset.set_format('pt')
         # Now initialize (can't do this before loading questions or reset_dataset_idx will fail)
         super().__init__(data_folder=data_folder)
 
     def reset_dataset_idx(self) -> int:
         dataset_idx = random.choice(list(self.subreddit_questions.keys()))
+        random.shuffle(self.subreddit_questions[dataset_idx])
         self.current_dataset_idx.value = dataset_idx
 
     def __len__(self):
@@ -453,18 +454,16 @@ class RedditDatasetWithSupervisedQuestions(RedditDataset):
         dataset_questions = self.subreddit_questions[dataset_idx]
         query_id = dataset_questions[idx % len(dataset_questions)]
         query_ex = self.question_dataset[query_id]
-        query_input_ids = torch.tensor(query_ex['question_input_ids'])
-        doc_id = query_ex['passage_idx']
+        query_input_ids = query_ex['question_input_ids']
+        doc_id = query_ex['passage_idx'].item()
         document_input_ids = self.dataset[doc_id]['input_ids']
 
         assert query_ex['subreddit_idx'] == self.dataset[doc_id]['subreddit_idx']
 
-        try:
-            subreddit_idx = query_ex['subreddit_idx']
-            random_idx_within_subreddit = random.choice(self.subreddit_idxs[subreddit_idx])
-            dataset_input_ids = self.dataset[random_idx_within_subreddit]['input_ids']
-        except:
-            breakpoint()
+        subreddit_idx = query_ex['subreddit_idx'].item()
+        random_idx_within_subreddit = random.choice(self.subreddit_idxs[subreddit_idx])
+        dataset_input_ids = self.dataset[random_idx_within_subreddit]['input_ids']
+        
         return {
             'idx': doc_id,
             'idx_query': query_id,
