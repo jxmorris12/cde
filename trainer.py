@@ -10,6 +10,7 @@ from gradcache import GradCache
 from dataset import BeirDataset
 from helpers import RerankHelper
 from model import Model
+from utils import TensorRunningAverages
 
 
 def inputs_for_key(inputs: Dict[str, torch.Tensor], key: str):
@@ -36,10 +37,20 @@ class CustomTrainer(transformers.Trainer):
         self.embedder_tokenizer = embedder_tokenizer 
         self.use_gc = self.args.use_gc # whether to use gradcache
         self.gc = None # lazily initialized during training
+        self._extra_logs = TensorRunningAverages()
     
     def _get_train_sampler(self) -> Optional[torch.utils.data.Sampler]:
         # Don't sample train data; it's already randomizing itself.
         return None
+    
+    def _log_extra(self, key: str, val: torch.Tensor):
+        self._extra_logs.update(key, val)
+    
+    def log(self, logs: Dict[str, float]) -> None:
+        """Override log to add other metrics we're tracking.
+        """
+        logs.update(self._extra_logs.get_and_clear_all())
+        super().log(logs)
 
     def create_optimizer(self, *args, **kwargs):
         super().create_optimizer(*args, **kwargs)
@@ -64,6 +75,20 @@ class CustomTrainer(transformers.Trainer):
         # to reset the current dataset index
         self.train_dataloader = train_dataloader
         return train_dataloader
+
+    def get_eval_dataloader(self, *args, **kwargs) -> torch.utils.data.DataLoader:
+        """This is a clever bit of code that will do evaluation with
+        a different dataset per evaluation batch.
+        """
+        eval_dataloader = super().get_eval_dataloader(
+            *args, **kwargs)
+
+        def advance_and_return(x):
+            eval_dataloader.dataset.reset_dataset_idx()
+            return x
+        
+        return map(advance_and_return, eval_dataloader)
+
         
     def training_step(self, model: torch.nn.Module, inputs: Dict[str, Union[torch.Tensor, Any]]) -> torch.Tensor:
         # Reset dataloader index
@@ -106,13 +131,15 @@ class CustomTrainer(transformers.Trainer):
         pred_labels = one_hot_labels[torch.arange(len(one_hot_labels)), scores.argmax(dim=1)]
         acc = pred_labels.float().mean()
 
-        wandb.log({
+        metrics = {
             "train/acc": acc.item(),
             "train/stats_unique": idx.unique().numel(),
             "train/stats_total_queries": len(e1),
             "train/stats_total_documents": len(e2),
             "batch_size": batch_size,
-        })
+        }
+        for key, val in metrics.items():
+            self._log_extra(key, val)
         return loss
     
     def prediction_step(

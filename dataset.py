@@ -358,9 +358,9 @@ class RedditDataset(torch.utils.data.Dataset):
             os.path.join(
                 data_folder, "test.dataset"), 
         )
-        print("\tloading subreddit idxs...")
+        print("`\tLoading subreddit idxs from disk...")
         self.subreddit_idxs = pickle.load(open(os.path.join(data_folder, "subreddit_idxs.p"), "rb"))
-        print("\tloading subreddit keys...")
+        print("\tLoading subreddit keys from disk...")
         subreddit_names = pickle.load(open(os.path.join(data_folder, "subreddit_keys.p"), "rb"))
         self.subreddit_keys = dict(zip(range(len(subreddit_names)), subreddit_names))
         assert len(self.subreddit_idxs) == len(self.subreddit_keys)
@@ -377,8 +377,8 @@ class RedditDataset(torch.utils.data.Dataset):
         self.min_examples_per_subreddit = 256 # TODO: Experiment with this.
         self.subreddit_idxs = { k: v for k,v in self.subreddit_idxs.items() if len(v) > self.min_examples_per_subreddit }
         print(f"Filtered {original_num_subreddits} to {len(self.subreddit_idxs)} with min_examples_per_subreddit={self.min_examples_per_subreddit}")
-        self.reset_dataset_idx()
         self.subreddit_questions = {}
+        self.reset_dataset_idx()
     
     def tokenize(self, tokenizer: transformers.PreTrainedTokenizer, max_length: int) -> None:
         # reddit data comes pre-tokenized
@@ -388,14 +388,13 @@ class RedditDataset(torch.utils.data.Dataset):
         return len(self.subreddit_keys) # TODO: Maybe len(self.subreddit_keys) makes more sense?
 
     def reset_dataset_idx(self) -> int:
-        dataset_idx = random.choice(list(self.subreddit_idxs.keys()))
+        print("- choosing from list-", list(self.subreddit_questions.keys()))
+        dataset_idx = random.choice(list(self.subreddit_questions.keys()))
         self.current_dataset_idx.value = dataset_idx
     
     def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]: 
         # TODO allow other dataset sampling strategies from T0 paper.
         dataset_idx = self.current_dataset_idx.value
-        # print("idx:", idx, "dataset_idx:", dataset_idx)
-        # dataset_key = self.subreddit_keys[dataset_idx]
 
         i1 = random.choice(self.subreddit_idxs[dataset_idx])
         i2 = random.choice(self.subreddit_idxs[dataset_idx])
@@ -426,103 +425,26 @@ class RedditDataset(torch.utils.data.Dataset):
             'document_attention_mask': (document_input_ids != self.pad_token_id).int(),
             ######################################################################
         }
-
-
-class RedditDataset(torch.utils.data.Dataset):
-    def __init__(self, data_folder: str):
-        self.current_dataset_idx: mp.Value = mp.Value('i', 0)
-        print(f"Loading Reddit data from path: {data_folder}")
-        self.dataset = datasets_fast_load_from_disk(
-            os.path.join(
-                data_folder, "test.dataset"), 
-        )
-        print("\tloading subreddit idxs...")
-        self.subreddit_idxs = pickle.load(open(os.path.join(data_folder, "subreddit_idxs.p"), "rb"))
-        print("\tloading subreddit keys...")
-        subreddit_names = pickle.load(open(os.path.join(data_folder, "subreddit_keys.p"), "rb"))
-        self.subreddit_keys = dict(zip(range(len(subreddit_names)), subreddit_names))
-        assert len(self.subreddit_idxs) == len(self.subreddit_keys)
-
-        print(f"Loaded {len(self.dataset)} datapoints from {len(self.subreddit_keys)} subreddits")
-
-        # for key in self.subreddit_idxs.keys():
-            # random.shuffle(self.subreddit_idxs[key])
-        
-        self.pad_token_id = 0 # TODO: Set dynamically based on appropriate tokenizer.
-        self.dataset.set_format("pt")
-
-        original_num_subreddits = len(self.subreddit_idxs)
-        self.min_examples_per_subreddit = 256 # TODO: Experiment with this.
-        self.subreddit_idxs = { k: v for k,v in self.subreddit_idxs.items() if len(v) > self.min_examples_per_subreddit }
-        print(f"Filtered {original_num_subreddits} to {len(self.subreddit_idxs)} with min_examples_per_subreddit={self.min_examples_per_subreddit}")
-        self.reset_dataset_idx()
-        self.subreddit_questions = {}
-    
-    def tokenize(self, tokenizer: transformers.PreTrainedTokenizer, max_length: int) -> None:
-        # reddit data comes pre-tokenized
-        pass
-
-    def __len__(self):
-        return len(self.subreddit_keys) # TODO: Maybe len(self.subreddit_keys) makes more sense?
-
-    def reset_dataset_idx(self) -> int:
-        dataset_idx = random.choice(list(self.subreddit_idxs.keys()))
-        self.current_dataset_idx.value = dataset_idx
-    
-    def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]: 
-        # TODO allow other dataset sampling strategies from T0 paper.
-        dataset_idx = self.current_dataset_idx.value
-        # print("idx:", idx, "dataset_idx:", dataset_idx)
-        # dataset_key = self.subreddit_keys[dataset_idx]
-
-        i1 = random.choice(self.subreddit_idxs[dataset_idx])
-        i2 = random.choice(self.subreddit_idxs[dataset_idx])
-
-        ex1 = self.dataset[i1]
-        ex2 = self.dataset[i2]
-
-        assert ex1["subreddit_idx"] == ex2["subreddit_idx"]
-
-        query_input_ids, document_input_ids = independent_crop(
-            ex1["input_ids"],
-            pad_token_id=self.pad_token_id,
-            l1=256,
-            l2=256,
-        )
-
-        dataset_input_ids = ex2["input_ids"]
-        return {
-            'idx': i1,
-            ######################################################################
-            'dataset_input_ids': dataset_input_ids,
-            'dataset_attention_mask': (dataset_input_ids != self.pad_token_id).int(),
-            ######################################################################
-            'query_input_ids': query_input_ids,
-            'query_attention_mask': (query_input_ids != self.pad_token_id).int(),
-            ######################################################################
-            'document_input_ids': document_input_ids,
-            'document_attention_mask': (document_input_ids != self.pad_token_id).int(),
-            ######################################################################
-        }
-    
 
 
 class RedditDatasetWithSupervisedQuestions(RedditDataset):
     def __init__(self, data_folder: str,
                  question_folder: str):
+        super().__init__(data_folder=data_folder)
         # Load questions
         self.subreddit_questions = pickle.load(
             open(os.path.join(question_folder, 'question_idxs.p'), 'rb'))
         self.question_dataset = datasets.Dataset.load_from_disk(
             os.path.join(question_folder, 'test.dataset'))
         self.question_dataset.set_format('pt')
-        # Now initialize (can't do this before loading questions or reset_dataset_idx will fail)
-        super().__init__(data_folder=data_folder)
 
     def reset_dataset_idx(self) -> int:
-        dataset_idx = random.choice(list(self.subreddit_questions.keys()))
-        random.shuffle(self.subreddit_questions[dataset_idx])
-        self.current_dataset_idx.value = dataset_idx
+        if not len(self.subreddit_questions.keys()):
+            print("WARNING: Tried to reset dataset w/o any loaded.")
+        else:
+            dataset_idx = random.choice(list(self.subreddit_questions.keys()))
+            random.shuffle(self.subreddit_questions[dataset_idx])
+            self.current_dataset_idx.value = dataset_idx
 
     def __len__(self):
         return len(self.subreddit_questions) # TODO: Maybe len(self.subreddit_keys) makes more sense?
@@ -543,6 +465,9 @@ class RedditDatasetWithSupervisedQuestions(RedditDataset):
         subreddit_idx = query_ex['subreddit_idx'].item()
         random_idx_within_subreddit = random.choice(self.subreddit_idxs[subreddit_idx])
         dataset_input_ids = self.dataset[random_idx_within_subreddit]['input_ids']
+
+
+        breakpoint()
         
         return {
             'idx': doc_id,
@@ -560,7 +485,8 @@ class RedditDatasetWithSupervisedQuestions(RedditDataset):
         }
 
 class SyntheticCharactersDataset(torch.utils.data.Dataset):
-    def __init__(self):
+    def __init__(self, max_size: Optional[int] = None):
+        self.max_size = max_size
         vocab_size = 4096
         self.n_str_repeats = 12
         self.tokenizer = transformers.AutoTokenizer.from_pretrained('bert-base-uncased')
@@ -575,12 +501,12 @@ class SyntheticCharactersDataset(torch.utils.data.Dataset):
         self.char_ids = [torch.tensor(t) for t in char_ids]
         self.vocab_size = len(self.char_ids)
 
-        self.current_dataset_idx = mp.Value = mp.Value('i', 0)
+        self.current_dataset_idx: mp.Value = mp.Value('i', 0)
         self.pad_token_id = 0
         self.reset_dataset_idx()
     
     def __len__(self) -> int:
-        return (10 * self.vocab_size) # arbitrary number
+        return self.max_size or (100 * self.vocab_size) # arbitrary number
 
     def tokenize(self, tokenizer: transformers.PreTrainedTokenizer, max_length: int) -> None:
         # reddit data comes pre-tokenized
@@ -588,7 +514,8 @@ class SyntheticCharactersDataset(torch.utils.data.Dataset):
 
     def reset_dataset_idx(self) -> int:
         # This is the current shift
-        dataset_idx = random.choice(range(1, self.vocab_size))
+        # dataset_idx = random.choice(range(1, self.vocab_size))
+        dataset_idx = random.choice(range(1, 5))
         self.current_dataset_idx.value = dataset_idx
         # print("RESETdataset_idx:", dataset_idx)
     
@@ -608,9 +535,6 @@ class SyntheticCharactersDataset(torch.utils.data.Dataset):
                 self.char_ids[ex_id_2][1:] # cut off BOS :)
             ), dim=0
         )
-        # print("dataset idx:", self.current_dataset_idx, "ex_Id:", ex_id, "ex_id_2:", ex_id_2, "self.vocab_size:", self.vocab_size)
-        # print("dataset_input_ids.shape:", dataset_input_ids.shape)
-        # print("dataset_input_ids:", dataset_input_ids)
         
         return {
             'idx': doc_id,
@@ -643,7 +567,7 @@ def load_reddit_train_and_val(
         )
     else:
         train = RedditDataset(data_folder=data_folder)
-    print("First train point:", train[0])
+    print("Initialized dataset:", train.__class__)
     # Copy train->val to save dataloading time before split. However need to
     # clone these values individually so that they're not tied together.
     val = copy.copy(train)
@@ -668,11 +592,13 @@ def load_reddit_train_and_val(
     val.subreddit_keys = { k: v for k,v in val.subreddit_keys.items() if k in val_subreddits }
     val.subreddit_questions = { k: v for k,v in val.subreddit_questions.items() if k in val_subreddits }
     val.reset_dataset_idx()
+
+    print("First train point:", train[0])
     return train, val
 
 
 def load_synthetic_chars_dataset():
-    return SyntheticCharactersDataset(), None
+    return SyntheticCharactersDataset(), SyntheticCharactersDataset(max_size=1024)
 
 
 if __name__ == '__main__':

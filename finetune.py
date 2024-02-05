@@ -67,7 +67,7 @@ for k,v in retrieval_datasets.items():
 #     # data_folder="/home/jxm3/research/retrieval/tti3/data/mini",
 #     data_folder="/home/jxm3/research/retrieval/tti3/data/full",
 #     perc=0.95, 
-#     supervised=False,
+#     supervised=True,
 # )
 train_dataset, eval_dataset = load_synthetic_chars_dataset()
 train_dataset.tokenize(tokenizer=embedder_tokenizer, max_length=model_args.max_seq_length)
