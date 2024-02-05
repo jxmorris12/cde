@@ -33,6 +33,7 @@ class Model(transformers.PreTrainedModel):
             dataset_backbone: transformers.PreTrainedModel,
         ):
         super().__init__(config=config)
+        self.tokenizer = transformers.AutoTokenizer.from_pretrained('bert-base-uncased')
 
         if config.limit_layers:
             print(f"Limiting layers to {config.limit_layers}")
@@ -64,6 +65,7 @@ class Model(transformers.PreTrainedModel):
         self.gamma = 0.0
         if config.disable_dropout:
             disable_dropout(self)
+        self.tok = transformers.AutoTokenizer.from_pretrained('bert-base-uncased') # for debugging)
     
     def forward(
             self,

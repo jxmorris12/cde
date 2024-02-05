@@ -9,7 +9,7 @@ import transformers
 import wandb
 
 from collate import DocumentQueryCollatorWithPadding
-from dataset import BeirDataset, load_reddit_train_and_val
+from dataset import BeirDataset, load_reddit_train_and_val, load_synthetic_chars_dataset
 from helpers import ModelConfig
 from model import Model
 from run_args import ModelArguments, DataArguments, TrainingArguments
@@ -63,11 +63,13 @@ retrieval_datasets = {
 for k,v in retrieval_datasets.items():
     v.tokenize(tokenizer=embedder_tokenizer, max_length=model_args.max_seq_length)
 
-train_dataset, eval_dataset = load_reddit_train_and_val(
-    # data_folder="/home/jxm3/research/retrieval/tti3/data/mini",
-    data_folder="/home/jxm3/research/retrieval/tti3/data/full",
-    perc=0.95,
-)
+# train_dataset, eval_dataset = load_reddit_train_and_val(
+#     # data_folder="/home/jxm3/research/retrieval/tti3/data/mini",
+#     data_folder="/home/jxm3/research/retrieval/tti3/data/full",
+#     perc=0.95, 
+#     supervised=False,
+# )
+train_dataset, eval_dataset = load_synthetic_chars_dataset()
 train_dataset.tokenize(tokenizer=embedder_tokenizer, max_length=model_args.max_seq_length)
 
 model_config = ModelConfig(**vars(model_args))

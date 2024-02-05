@@ -374,10 +374,11 @@ class RedditDataset(torch.utils.data.Dataset):
         self.dataset.set_format("pt")
 
         original_num_subreddits = len(self.subreddit_idxs)
-        self.min_examples_per_subreddit = 0 # TODO: Experiment with this.
+        self.min_examples_per_subreddit = 256 # TODO: Experiment with this.
         self.subreddit_idxs = { k: v for k,v in self.subreddit_idxs.items() if len(v) > self.min_examples_per_subreddit }
         print(f"Filtered {original_num_subreddits} to {len(self.subreddit_idxs)} with min_examples_per_subreddit={self.min_examples_per_subreddit}")
         self.reset_dataset_idx()
+        self.subreddit_questions = {}
     
     def tokenize(self, tokenizer: transformers.PreTrainedTokenizer, max_length: int) -> None:
         # reddit data comes pre-tokenized
@@ -387,12 +388,91 @@ class RedditDataset(torch.utils.data.Dataset):
         return len(self.subreddit_keys) # TODO: Maybe len(self.subreddit_keys) makes more sense?
 
     def reset_dataset_idx(self) -> int:
-        dataset_idx = random.choice(list(self.subreddit_keys.keys()))
+        dataset_idx = random.choice(list(self.subreddit_idxs.keys()))
         self.current_dataset_idx.value = dataset_idx
     
     def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]: 
         # TODO allow other dataset sampling strategies from T0 paper.
         dataset_idx = self.current_dataset_idx.value
+        # print("idx:", idx, "dataset_idx:", dataset_idx)
+        # dataset_key = self.subreddit_keys[dataset_idx]
+
+        i1 = random.choice(self.subreddit_idxs[dataset_idx])
+        i2 = random.choice(self.subreddit_idxs[dataset_idx])
+
+        ex1 = self.dataset[i1]
+        ex2 = self.dataset[i2]
+
+        assert ex1["subreddit_idx"] == ex2["subreddit_idx"]
+
+        query_input_ids, document_input_ids = independent_crop(
+            ex1["input_ids"],
+            pad_token_id=self.pad_token_id,
+            l1=256,
+            l2=256,
+        )
+
+        dataset_input_ids = ex2["input_ids"]
+        return {
+            'idx': i1,
+            ######################################################################
+            'dataset_input_ids': dataset_input_ids,
+            'dataset_attention_mask': (dataset_input_ids != self.pad_token_id).int(),
+            ######################################################################
+            'query_input_ids': query_input_ids,
+            'query_attention_mask': (query_input_ids != self.pad_token_id).int(),
+            ######################################################################
+            'document_input_ids': document_input_ids,
+            'document_attention_mask': (document_input_ids != self.pad_token_id).int(),
+            ######################################################################
+        }
+
+
+class RedditDataset(torch.utils.data.Dataset):
+    def __init__(self, data_folder: str):
+        self.current_dataset_idx: mp.Value = mp.Value('i', 0)
+        print(f"Loading Reddit data from path: {data_folder}")
+        self.dataset = datasets_fast_load_from_disk(
+            os.path.join(
+                data_folder, "test.dataset"), 
+        )
+        print("\tloading subreddit idxs...")
+        self.subreddit_idxs = pickle.load(open(os.path.join(data_folder, "subreddit_idxs.p"), "rb"))
+        print("\tloading subreddit keys...")
+        subreddit_names = pickle.load(open(os.path.join(data_folder, "subreddit_keys.p"), "rb"))
+        self.subreddit_keys = dict(zip(range(len(subreddit_names)), subreddit_names))
+        assert len(self.subreddit_idxs) == len(self.subreddit_keys)
+
+        print(f"Loaded {len(self.dataset)} datapoints from {len(self.subreddit_keys)} subreddits")
+
+        # for key in self.subreddit_idxs.keys():
+            # random.shuffle(self.subreddit_idxs[key])
+        
+        self.pad_token_id = 0 # TODO: Set dynamically based on appropriate tokenizer.
+        self.dataset.set_format("pt")
+
+        original_num_subreddits = len(self.subreddit_idxs)
+        self.min_examples_per_subreddit = 256 # TODO: Experiment with this.
+        self.subreddit_idxs = { k: v for k,v in self.subreddit_idxs.items() if len(v) > self.min_examples_per_subreddit }
+        print(f"Filtered {original_num_subreddits} to {len(self.subreddit_idxs)} with min_examples_per_subreddit={self.min_examples_per_subreddit}")
+        self.reset_dataset_idx()
+        self.subreddit_questions = {}
+    
+    def tokenize(self, tokenizer: transformers.PreTrainedTokenizer, max_length: int) -> None:
+        # reddit data comes pre-tokenized
+        pass
+
+    def __len__(self):
+        return len(self.subreddit_keys) # TODO: Maybe len(self.subreddit_keys) makes more sense?
+
+    def reset_dataset_idx(self) -> int:
+        dataset_idx = random.choice(list(self.subreddit_idxs.keys()))
+        self.current_dataset_idx.value = dataset_idx
+    
+    def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]: 
+        # TODO allow other dataset sampling strategies from T0 paper.
+        dataset_idx = self.current_dataset_idx.value
+        # print("idx:", idx, "dataset_idx:", dataset_idx)
         # dataset_key = self.subreddit_keys[dataset_idx]
 
         i1 = random.choice(self.subreddit_idxs[dataset_idx])
@@ -479,16 +559,90 @@ class RedditDatasetWithSupervisedQuestions(RedditDataset):
             ######################################################################
         }
 
+class SyntheticCharactersDataset(torch.utils.data.Dataset):
+    def __init__(self):
+        vocab_size = 4096
+        self.n_str_repeats = 12
+        self.tokenizer = transformers.AutoTokenizer.from_pretrained('bert-base-uncased')
+
+        char_strs = [  # for some reason printable chars start at chr(33)
+            f'{chr(idx+33)}. ' for idx in range(vocab_size)
+        ]
+        char_strs = [(c * self.n_str_repeats).strip() for c in char_strs]
+        char_ids = self.tokenizer(char_strs).input_ids
+        char_ids = sorted(list(set(tuple(t) for t in char_ids)))
+        self.char_strs = self.tokenizer.batch_decode(char_ids, skip_special_tokens=True)
+        self.char_ids = [torch.tensor(t) for t in char_ids]
+        self.vocab_size = len(self.char_ids)
+
+        self.current_dataset_idx = mp.Value = mp.Value('i', 0)
+        self.pad_token_id = 0
+        self.reset_dataset_idx()
+    
+    def __len__(self) -> int:
+        return (10 * self.vocab_size) # arbitrary number
+
+    def tokenize(self, tokenizer: transformers.PreTrainedTokenizer, max_length: int) -> None:
+        # reddit data comes pre-tokenized
+        pass
+
+    def reset_dataset_idx(self) -> int:
+        # This is the current shift
+        dataset_idx = random.choice(range(1, self.vocab_size))
+        self.current_dataset_idx.value = dataset_idx
+        # print("RESETdataset_idx:", dataset_idx)
+    
+    def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]: 
+        doc_id = random.randint(0, self.vocab_size - 1)
+        document_input_ids = self.char_ids[doc_id]
+
+        query_id = (doc_id + self.current_dataset_idx.value) % self.vocab_size
+        query_input_ids = self.char_ids[query_id]
+
+        # Random mappings
+        ex_id = random.randint(0, self.vocab_size - 1)
+        ex_id_2 = (ex_id + self.current_dataset_idx.value) % self.vocab_size
+        dataset_input_ids = torch.cat(
+            (
+                self.char_ids[ex_id][:-1], # cut off EOS
+                self.char_ids[ex_id_2][1:] # cut off BOS :)
+            ), dim=0
+        )
+        # print("dataset idx:", self.current_dataset_idx, "ex_Id:", ex_id, "ex_id_2:", ex_id_2, "self.vocab_size:", self.vocab_size)
+        # print("dataset_input_ids.shape:", dataset_input_ids.shape)
+        # print("dataset_input_ids:", dataset_input_ids)
+        
+        return {
+            'idx': doc_id,
+            'idx_query': query_id,
+            ######################################################################
+            'dataset_input_ids': dataset_input_ids,
+            'dataset_attention_mask': (dataset_input_ids != self.pad_token_id).int(),
+            ######################################################################
+            'query_input_ids': query_input_ids,
+            'query_attention_mask': (query_input_ids != self.pad_token_id).int(),
+            ######################################################################
+            'document_input_ids': document_input_ids,
+            'document_attention_mask': (document_input_ids != self.pad_token_id).int(),
+            ######################################################################
+        }
+
+
 def load_reddit_train_and_val(
                               data_folder: str = "/home/jxm3/research/retrieval/tti3/data/mini",
-                              perc: float = 0.9) -> Tuple[
+                              perc: float = 0.9,
+                              supervised: bool = False
+                             ) -> Tuple[
     torch.utils.data.Dataset, torch.utils.data.Dataset]:
 
     question_folder = os.path.join(data_folder, "questions")
-    train = RedditDatasetWithSupervisedQuestions(
-        data_folder=data_folder,
-        question_folder=question_folder,
-    )
+    if supervised:
+        train = RedditDatasetWithSupervisedQuestions(
+            data_folder=data_folder,
+            question_folder=question_folder,
+        )
+    else:
+        train = RedditDataset(data_folder=data_folder)
     print("First train point:", train[0])
     # Copy train->val to save dataloading time before split. However need to
     # clone these values individually so that they're not tied together.
@@ -515,6 +669,10 @@ def load_reddit_train_and_val(
     val.subreddit_questions = { k: v for k,v in val.subreddit_questions.items() if k in val_subreddits }
     val.reset_dataset_idx()
     return train, val
+
+
+def load_synthetic_chars_dataset():
+    return SyntheticCharactersDataset(), None
 
 
 if __name__ == '__main__':

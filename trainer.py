@@ -96,7 +96,7 @@ class CustomTrainer(transformers.Trainer):
         one_hot_labels = (idx[:, None] == idx[None, :]).float()
         labels = one_hot_labels / one_hot_labels.sum(dim=1)
 
-        scores *= 50  # TODO argparse: self.args.contrastive_temperature.exp()
+        scores *= 20  # TODO argparse: self.args.contrastive_temperature.exp()
         loss = torch.nn.functional.cross_entropy(
             scores, labels, label_smoothing=0.0
         )
@@ -164,11 +164,12 @@ class CustomTrainer(transformers.Trainer):
             all_document_inputs = document_inputs
 
         if self.use_gc:
-            return self.gc(query_inputs, all_document_inputs, labels=labels, no_sync_except_last=False)
+            return self.gc(query_inputs, all_document_inputs, no_sync_except_last=False)
         else:
             e1 = model(**query_inputs)
             e2 = model(**all_document_inputs)
-            return self._contrastive_loss(e1, e2, idx =inputs["idx"])
+            return self._contrastive_loss(
+                e1, e2, idx=inputs["idx"])
     
     # Custom retrieval evalution code
     def _retrieval_evaluate(
