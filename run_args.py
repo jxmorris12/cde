@@ -97,36 +97,14 @@ class DataArguments:
     Arguments pertaining to what data we are going to input our model for training and eval.
     """
 
-    dataset_name: Optional[str] = field(
-        default="BeIR/nq", metadata={"help": "The name of the dataset to use (via the datasets library)."}
-    )
-    num_hard_negatives: int = field(
-        default=1, metadata={"help": "num hard negatives to use during training"}
-    )
-    dataset_config_name: Optional[str] = field(
-        default="corpus", metadata={"help": "The configuration name of the dataset to use (via the datasets library)."}
-    )
-    max_train_samples: Optional[int] = field(
-        default=None,
-        metadata={
-            "help": (
-                "For debugging purposes or quicker training, truncate the number of training examples to this "
-                "value if set."
-            )
-        },
-    )
-    max_eval_samples: Optional[int] = field(
-        default=None,
-        metadata={
-            "help": (
-                "For debugging purposes or quicker training, truncate the number of evaluation examples to this "
-                "value if set."
-            )
-        },
+    dataset: Optional[str] = field(
+        default="reddit_supervised", metadata={
+            "help": "The name of the dataset to use:",
+            "choices": ["synthetic_chars", "reddit_supervised", "reddit_unsupervised"]
+        }
     )
     def __post_init__(self):
-        if self.dataset_name is None:
-            raise ValueError("Need a dataset name.")
+        pass
 
 @dataclass
 class TrainingArguments(transformers.TrainingArguments):

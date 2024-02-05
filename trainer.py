@@ -89,6 +89,39 @@ class CustomTrainer(transformers.Trainer):
         
         return map(advance_and_return, eval_dataloader)
 
+    def _get_examples_table(self, dataloader, n: int = 64) -> wandb.Table:
+        """Decodes column tensors back to strings and displays them
+        in Weights & Biases.
+        """
+        if not self.args.use_wandb:
+             return None
+        elif not (self.args.local_rank <= 0):
+             return None
+        batch = next(iter(dataloader))
+        keys = ["query_input_ids", "document_input_ids", "dataset_input_ids"]
+        data = [
+                self.embedder_tokenizer.batch_decode(batch[key][:n], skip_special_tokens=True)
+                for key in keys
+        ]
+        names = [k.replace("_input_ids", "") for k in keys]
+        # transpose the list of lists
+        data = list(map(list, zip(*data)))
+        return wandb.Table(columns=names, data=data)
+
+    
+    def train(self, *args, **kwargs):
+        # On beginning of train, log tables of examples.
+        train_table: wandb.Table = self._get_examples_table(
+            super().get_train_dataloader()
+        )
+        eval_table: wandb.Table = self._get_examples_table(
+            super().get_eval_dataloader()
+        )
+        wandb.log({
+                      "examples/train": train_table,
+                      "examples/eval": eval_table,
+        })
+        super().train(*args, **kwargs)
         
     def training_step(self, model: torch.nn.Module, inputs: Dict[str, Union[torch.Tensor, Any]]) -> torch.Tensor:
         # Reset dataloader index
@@ -132,10 +165,10 @@ class CustomTrainer(transformers.Trainer):
         acc = pred_labels.float().mean()
 
         metrics = {
-            "train/acc": acc.item(),
-            "train/stats_unique": idx.unique().numel(),
-            "train/stats_total_queries": len(e1),
-            "train/stats_total_documents": len(e2),
+            "acc": acc.item(),
+            "stats_unique": idx.unique().numel(),
+            "stats_total_queries": len(e1),
+            "stats_total_documents": len(e2),
             "batch_size": batch_size,
         }
         for key, val in metrics.items():
@@ -288,3 +321,4 @@ class CustomTrainer(transformers.Trainer):
         # do my custom eval
         if should_evaluate:
             self.evaluate_retrieval_datasets()
+

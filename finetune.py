@@ -1,15 +1,14 @@
 from torch.utils.data import Dataset
-import pathlib, os, gzip, json
+import os
 import logging
 import os
-import random
 
 import torch
 import transformers
 import wandb
 
 from collate import DocumentQueryCollatorWithPadding
-from dataset import BeirDataset, load_reddit_train_and_val, load_synthetic_chars_dataset
+from dataset import load_reddit_train_and_val, load_synthetic_chars_dataset
 from helpers import ModelConfig
 from model import Model
 from run_args import ModelArguments, DataArguments, TrainingArguments
@@ -25,8 +24,8 @@ torch.autograd.set_detect_anomaly(True)
 os.environ["WANDB__SERVICE_WAIT"] = "300"
 os.environ["_WANDB_STARTUP_DEBUG"] = "true"
 
-# Prevent deadlocks...
-# os.environ['TOKENIZERS_PARALLELISM'] = 'false'
+# Fast data processing at risk of deadlocks...
+os.environ['TOKENIZERS_PARALLELISM'] = 'true'
 
 parser = transformers.HfArgumentParser((ModelArguments, DataArguments, TrainingArguments))
 model_args, data_args, training_args = parser.parse_args_into_dataclasses()
@@ -63,13 +62,26 @@ retrieval_datasets = {
 for k,v in retrieval_datasets.items():
     v.tokenize(tokenizer=embedder_tokenizer, max_length=model_args.max_seq_length)
 
-# train_dataset, eval_dataset = load_reddit_train_and_val(
-#     # data_folder="/home/jxm3/research/retrieval/tti3/data/mini",
-#     data_folder="/home/jxm3/research/retrieval/tti3/data/full",
-#     perc=0.95, 
-#     supervised=True,
-# )
-train_dataset, eval_dataset = load_synthetic_chars_dataset()
+
+if data_args.dataset == 'synthetic_chars':
+    train_dataset, eval_dataset = load_synthetic_chars_dataset()
+elif data_args.dataset == 'reddit_supervised':
+    train_dataset, eval_dataset = load_reddit_train_and_val(
+        # data_folder="/home/jxm3/research/retrieval/tti3/data/mini",
+        data_folder="/home/jxm3/research/retrieval/tti3/data/full",
+        perc=0.95, 
+        supervised=True,
+    )
+elif data_args.dataset == 'reddit_unsupervised':
+    train_dataset, eval_dataset = load_reddit_train_and_val(
+        # data_folder="/home/jxm3/research/retrieval/tti3/data/mini",
+        data_folder="/home/jxm3/research/retrieval/tti3/data/full",
+        perc=0.95, 
+        supervised=False,
+    )
+else:
+    raise ValueError(f'Unsupported dataset {data_args.dataset}')
+
 train_dataset.tokenize(tokenizer=embedder_tokenizer, max_length=model_args.max_seq_length)
 
 model_config = ModelConfig(**vars(model_args))
