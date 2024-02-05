@@ -39,14 +39,10 @@ class Model(transformers.PreTrainedModel):
             print(f"Limiting layers to {config.limit_layers}")
             embedder.transformer.layer = embedder.transformer.layer[:config.limit_layers]
             dataset_embedder.transformer.layer = dataset_embedder.transformer.layer[:config.limit_layers]
-            dataset_backbone.transformer.layer = dataset_backbone.transformer.layer[:config.limit_layers]
-        self.embedder = embedder
+        
+        # TODO: fix arguments. Disable t5 positional embedder.
+        self.embedder = transformers.AutoModel.from_pretrained('t5-base')
         self.dataset_embedder = dataset_embedder
-
-        # TODO make this a little nicer. (Not every model has 'embeddings...')
-        self.dataset_backbone = dataset_backbone
-        self.dataset_backbone.embeddings.position_embeddings.weight.requires_grad = False
-        self.dataset_backbone.embeddings.position_embeddings.weight.fill_(0.0)
 
         # TODO - fix. consider BART or another encoder-decoder.
         # self.backbone = transformers.AutoModel.from_pretrained("t5-small")
@@ -55,14 +51,12 @@ class Model(transformers.PreTrainedModel):
 
         self.hidden_size = self.embedder.config.hidden_size
         self.mlp = torch.nn.Sequential(
-            torch.nn.Linear(self.hidden_size * 2, self.hidden_size * 4),
-            torch.nn.GELU(),
-            torch.nn.Linear(self.hidden_size * 4, self.hidden_size * 2),
+            torch.nn.Linear(self.hidden_size, self.hidden_size * 2),
             torch.nn.GELU(),
             torch.nn.Linear(self.hidden_size * 2, self.hidden_size),
+            torch.nn.GELU(),
+            torch.nn.Linear(self.hidden_size, self.hidden_size),
         )
-
-        self.gamma = 0.0
         if config.disable_dropout:
             disable_dropout(self)
         self.tok = transformers.AutoTokenizer.from_pretrained('bert-base-uncased') # for debugging)
@@ -74,35 +68,25 @@ class Model(transformers.PreTrainedModel):
             dataset_input_ids: torch.Tensor,
             dataset_attention_mask: torch.Tensor,
     ) -> torch.Tensor:
-        dataset_input_embeddings = mean_pool(
+        batch_size = dataset_input_ids.shape[0]
+        dataset_embeddings = mean_pool(
             hidden_states=self.dataset_embedder(
                 input_ids=dataset_input_ids,
                 attention_mask=dataset_attention_mask
             ).last_hidden_state,
             attention_mask=dataset_attention_mask,
         )
-        assert len(dataset_input_embeddings.shape) == 2 # (b, d)
-        dataset_input_embeddings = dataset_input_embeddings[:, None, :]
-        dataset_intermediate_embeddings = self.dataset_backbone(
-            inputs_embeds=dataset_input_embeddings
-        ).last_hidden_state
-        dataset_embedding = dataset_intermediate_embeddings[:, 0, :].mean(dim=0, keepdim=True)
+        assert len(dataset_embeddings.shape) == 2 # (b, d)
+        dataset_embeddings = dataset_embeddings[None, :, :].repeat(batch_size, 1, 1)
         batch_size = dataset_input_ids.shape[0]
-        embeddings = mean_pool(
-            hidden_states=self.embedder(
-                input_ids=input_ids,
-                attention_mask=attention_mask).last_hidden_state,
-            attention_mask=attention_mask,
+        outputs = self.embedder(
+            inputs_embeds=dataset_embeddings,
+            decoder_input_ids=input_ids,
+            decoder_attention_mask=attention_mask,
         )
-        mlp_input_embeddings = torch.cat(
-            (
-                dataset_embedding.repeat((batch_size, 1)),
-                embeddings
-            ),
-            dim=1
-        )
-        # TODO use self.gamma here
-        # output_vectors = (document_embeddings * self.gamma) + (output_vectors * (1 - self.gamma))
-        outputs = self.mlp(mlp_input_embeddings)
-        assert outputs.shape == (batch_size, self.hidden_size)
-        return outputs
+        # select last hidden token
+        embeddings = outputs.last_hidden_state[:, -1, :]
+        # project
+        output_embeddings = self.mlp(embeddings)
+        assert output_embeddings.shape == (batch_size, self.hidden_size)
+        return output_embeddings
