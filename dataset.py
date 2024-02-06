@@ -485,18 +485,23 @@ class RedditDatasetWithSupervisedQuestions(RedditDataset):
         }
 
 class SyntheticCharactersDataset(torch.utils.data.Dataset):
-    def __init__(self, max_size: Optional[int] = None):
+    def __init__(self, vocab_size: int = 4096, min_shift: int = 1, max_shift: int = 5, max_size: Optional[int] = None):
         self.max_size = max_size
-        vocab_size = 4096
+        self.min_shift = min_shift
+        self.max_shift = max_shift
         self.n_str_repeats = 12
         self.tokenizer = transformers.AutoTokenizer.from_pretrained('bert-base-uncased')
 
-        char_strs = [  # for some reason printable chars start at chr(33)
-            f'{chr(idx+33)}. ' for idx in range(vocab_size)
+        # char_strs = [  # for some reason printable chars start at chr(33)
+        #     f'{chr(idx+33)}. ' for idx in range(vocab_size)
+        # ]
+
+        char_strs = [
+            f'{(idx+1)}. ' for idx in range(vocab_size)
         ]
         char_strs = [(c * self.n_str_repeats).strip() for c in char_strs]
         char_ids = self.tokenizer(char_strs).input_ids
-        char_ids = sorted(list(set(tuple(t) for t in char_ids)))
+        # char_ids = sorted(list(set(tuple(t) for t in char_ids)))
         self.char_strs = self.tokenizer.batch_decode(char_ids, skip_special_tokens=True)
         self.char_ids = [torch.tensor(t) for t in char_ids]
         self.vocab_size = len(self.char_ids)
@@ -515,7 +520,7 @@ class SyntheticCharactersDataset(torch.utils.data.Dataset):
     def reset_dataset_idx(self) -> int:
         # This is the current shift
         # dataset_idx = random.choice(range(1, self.vocab_size))
-        dataset_idx = random.choice(range(1, 5))
+        dataset_idx = random.choice(range(self.min_shift, self.max_shift))
         self.current_dataset_idx.value = dataset_idx
         # print("RESETdataset_idx:", dataset_idx)
     
@@ -535,6 +540,9 @@ class SyntheticCharactersDataset(torch.utils.data.Dataset):
                 self.char_ids[ex_id_2][1:] # cut off BOS :)
             ), dim=0
         )
+        # breakpoint()
+        print('dataset_idx:', self.current_dataset_idx.value, 'q/d:', query_id, '/', doc_id)
+        breakpoint()
         
         return {
             'idx': doc_id,
@@ -598,7 +606,19 @@ def load_reddit_train_and_val(
 
 
 def load_synthetic_chars_dataset():
-    return SyntheticCharactersDataset(), SyntheticCharactersDataset(max_size=1024)
+    vocab_size = 4096
+    train = SyntheticCharactersDataset(
+        min_shift=1,
+        max_shift=16,
+        vocab_size=vocab_size,
+    )
+    eval = SyntheticCharactersDataset(
+        max_size=1024,
+        min_shift=17,
+        max_shift=32,
+        vocab_size=vocab_size,
+    )
+    return train, eval
 
 
 if __name__ == '__main__':
