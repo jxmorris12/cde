@@ -1,6 +1,7 @@
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import copy
+import functools
 import gzip
 import json
 import logging
@@ -481,29 +482,31 @@ class RedditDatasetWithSupervisedQuestions(RedditDataset):
             ######################################################################
         }
 
+@functools.lru_cache()
+def get_char_ids(vocab_size: int, tokenizer_name: str) -> List[torch.Tensor]:
+    print("GET_CHAR_IDS")
+    tokenizer = transformers.AutoTokenizer.from_pretrained(tokenizer_name)
+    char_strs = [
+        f'{(idx+1)}. ' for idx in range(vocab_size)
+    ]
+    # char_strs = [  # for some reason printable chars start at chr(33)
+    #     f'{chr(idx+33)}. ' for idx in range(vocab_size)
+    # ]
+    char_strs = [(c * 8).strip() for c in char_strs]
+    char_ids = [torch.tensor(t) for t in tokenizer(char_strs).input_ids]
+    # char_strs = .tokenizer.batch_decode(char_ids, skip_special_tokens=True)
+    return char_ids
+
 class SyntheticCharactersDataset(torch.utils.data.Dataset):
     def __init__(self, vocab_size: int = 4096, min_shift: int = 1, max_shift: int = 5, max_size: Optional[int] = None):
         self.max_size = max_size
         self.min_shift = min_shift
         self.max_shift = max_shift
         self.n_str_repeats = 12
-        self.tokenizer = transformers.AutoTokenizer.from_pretrained('bert-base-uncased')
-
-        # char_strs = [  # for some reason printable chars start at chr(33)
-        #     f'{chr(idx+33)}. ' for idx in range(vocab_size)
-        # ]
-
-        char_strs = [
-            f'{(idx+1)}. ' for idx in range(vocab_size)
-        ]
-        char_strs = [(c * self.n_str_repeats).strip() for c in char_strs]
-        char_ids = self.tokenizer(char_strs).input_ids
-        # char_ids = sorted(list(set(tuple(t) for t in char_ids)))
-        self.char_strs = self.tokenizer.batch_decode(char_ids, skip_special_tokens=True)
-        self.char_ids = [torch.tensor(t) for t in char_ids]
+        self.char_ids = [torch.tensor(t) for t in get_char_ids(vocab_size, 'bert-base-uncased')]
         self.vocab_size = len(self.char_ids)
 
-        self.current_dataset_idx: mp.Value = mp.Value('i', 0)
+        self.current_dataset_idx: mp.Value = mp.Value('i', 0, lock=False)
         self.pad_token_id = 0
         self.reset_dataset_idx()
     

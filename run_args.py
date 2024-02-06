@@ -185,9 +185,9 @@ class TrainingArguments(transformers.TrainingArguments):
         num_workers = int(len(os.sched_getaffinity(0)) / torch.cuda.device_count())
         # num_workers = 0 # For debugging
         ############################################################################
-        os.environ["RAYON_RS_NUM_CPUS"] = str(
-            num_workers
-        )  # Sets threads for hf tokenizers
+        # os.environ["RAYON_RS_NUM_CPUS"] = str(
+        #     num_workers
+        # )  # Sets threads for hf tokenizers
         self.dataloader_num_workers = num_workers
         self.dataloader_persistent_workers = (num_workers > 0)
         today_date = datetime.date.today()
