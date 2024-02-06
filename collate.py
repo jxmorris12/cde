@@ -110,7 +110,7 @@ class DocumentQueryCollatorWithPadding(transformers.DataCollatorWithPadding):
             output['input_ids'] = torch.nn.utils.rnn.pad_sequence(
                 output['input_ids'], batch_first=True, padding_value=0)
             output['attention_mask'] = torch.nn.utils.rnn.pad_sequence(
-                output['input_ids'], batch_first=True, padding_value=0
+                output['attention_mask'], batch_first=True, padding_value=0
             )
             return output
 
