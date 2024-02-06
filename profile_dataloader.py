@@ -25,10 +25,12 @@ def main(num_iters: int, num_workers: int):
         batch_size=256,
         collate_fn=collator,
         num_workers=num_workers,
-        pin_memory=True,
+        pin_memory=False,
     )
     for _ in range(num_iters):
+        dataloader.dataset.reset_dataset_idx()
         for _ in tqdm.tqdm(dataloader):
+            del _
             pass
 
 if __name__ == '__main__':
