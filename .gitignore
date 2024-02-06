@@ -7,3 +7,5 @@ notebooks/
 saves/
 slurm-scripts/
 wandb/
+
+profile*.txt

@@ -465,9 +465,6 @@ class RedditDatasetWithSupervisedQuestions(RedditDataset):
         subreddit_idx = query_ex['subreddit_idx'].item()
         random_idx_within_subreddit = random.choice(self.subreddit_idxs[subreddit_idx])
         dataset_input_ids = self.dataset[random_idx_within_subreddit]['input_ids']
-
-
-        breakpoint()
         
         return {
             'idx': doc_id,
@@ -518,11 +515,8 @@ class SyntheticCharactersDataset(torch.utils.data.Dataset):
         pass
 
     def reset_dataset_idx(self) -> int:
-        # This is the current shift
-        # dataset_idx = random.choice(range(1, self.vocab_size))
         dataset_idx = random.choice(range(self.min_shift, self.max_shift))
         self.current_dataset_idx.value = dataset_idx
-        # print("RESETdataset_idx:", dataset_idx)
     
     def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]: 
         doc_id = random.randint(0, self.vocab_size - 1)
@@ -540,9 +534,6 @@ class SyntheticCharactersDataset(torch.utils.data.Dataset):
                 self.char_ids[ex_id_2][1:] # cut off BOS :)
             ), dim=0
         )
-        # breakpoint()
-        print('dataset_idx:', self.current_dataset_idx.value, 'q/d:', query_id, '/', doc_id)
-        breakpoint()
         
         return {
             'idx': doc_id,
@@ -606,16 +597,16 @@ def load_reddit_train_and_val(
 
 
 def load_synthetic_chars_dataset():
-    vocab_size = 4096
+    vocab_size = 512
     train = SyntheticCharactersDataset(
-        min_shift=1,
-        max_shift=16,
+        min_shift=16,
+        max_shift=32,
         vocab_size=vocab_size,
     )
     eval = SyntheticCharactersDataset(
-        max_size=1024,
-        min_shift=17,
-        max_shift=32,
+        max_size=512,
+        min_shift=32,
+        max_shift=48,
         vocab_size=vocab_size,
     )
     return train, eval
