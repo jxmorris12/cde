@@ -443,7 +443,6 @@ class RedditDatasetWithSupervisedQuestions(RedditDataset):
             print("WARNING: Tried to reset dataset w/o any loaded.")
         else:
             dataset_idx = random.choice(list(self.subreddit_questions.keys()))
-            random.shuffle(self.subreddit_questions[dataset_idx])
             self.current_dataset_idx.value = dataset_idx
 
     def __len__(self):
@@ -465,6 +464,13 @@ class RedditDatasetWithSupervisedQuestions(RedditDataset):
         subreddit_idx = query_ex['subreddit_idx'].item()
         random_idx_within_subreddit = random.choice(self.subreddit_idxs[subreddit_idx])
         dataset_input_ids = self.dataset[random_idx_within_subreddit]['input_ids']
+
+        # print(
+        #     "dataset_idx", dataset_idx, "idx", idx, 
+        #     "/", idx % len(dataset_questions), 
+        #     "query_id", query_id, 
+        #     "subreddit_idx", subreddit_idx
+        # )
         
         return {
             'idx': doc_id,
@@ -565,11 +571,14 @@ def load_reddit_train_and_val(
     else:
         train = RedditDataset(data_folder=data_folder)
     print("Initialized dataset:", train.__class__)
+    # Randomize subreddit idxs.
+    for k in  train.subreddit_questions.keys():
+        random.Random(42).shuffle(train.subreddit_questions[k])
     # Copy train->val to save dataloading time before split. However need to
     # clone these values individually so that they're not tied together.
-    val = copy.copy(train)
+    eval = copy.copy(train)
     train.current_dataset_idx: mp.Value = mp.Value('i', 0)
-    val.current_dataset_idx: mp.Value = mp.Value('i', 0)
+    eval.current_dataset_idx: mp.Value = mp.Value('i', 0)
     subreddit_names = list(train.subreddit_idxs.keys())
     # shuffle with fixed seed so that order doesn't change every time
     random.Random(42).shuffle(subreddit_names)
@@ -589,8 +598,6 @@ def load_reddit_train_and_val(
     eval.subreddit_keys = { k: v for k,v in eval.subreddit_keys.items() if k in eval_subreddits }
     eval.subreddit_questions = { k: v for k,v in eval.subreddit_questions.items() if k in eval_subreddits }
     eval.reset_dataset_idx()
-
-    breakpoint()
 
     print("First train point:", train[0])
     return train, eval

@@ -102,7 +102,12 @@ class Model(transformers.PreTrainedModel):
             decoder_attention_mask=attention_mask,
         )
         # select last hidden token
-        embeddings = outputs.last_hidden_state[:, -1, :]
+        # embeddings = outputs.last_hidden_state[:, -1, :]
+        gather_idxs = attention_mask.cumsum(1).argmax(1)
+        embeddings = outputs.last_hidden_state[
+            torch.arange(batch_size), gather_idxs
+        ]
+        assert embeddings.shape == (batch_size, self.hidden_size)
         # project
         output_embeddings = self.mlp(embeddings)
         assert output_embeddings.shape == (batch_size, self.hidden_size)

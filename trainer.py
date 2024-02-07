@@ -81,7 +81,8 @@ class CustomTrainer(transformers.Trainer):
         a different dataset per evaluation batch.
         """
         eval_dataloader = super().get_eval_dataloader(
-            *args, **kwargs)
+            *args, **kwargs
+        )
 
         def advance_and_return(x):
             eval_dataloader.dataset.reset_dataset_idx()

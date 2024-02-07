@@ -26,7 +26,7 @@ def main():
     os.environ["_WANDB_STARTUP_DEBUG"] = "true"
 
     # Fast data processing at risk of deadlocks...
-    os.environ['TOKENIZERS_PARALLELISM'] = 'True'
+    os.environ['TOKENIZERS_PARALLELISM'] = 'False'
 
     parser = transformers.HfArgumentParser((ModelArguments, DataArguments, TrainingArguments))
     model_args, data_args, training_args = parser.parse_args_into_dataclasses()
