@@ -191,3 +191,5 @@ class TrainingArguments(transformers.TrainingArguments):
         self.exp_name = f"{formatted_date}-{self.exp_name}"
         self.output_dir = os.path.join("saves", self.exp_name)
         print(f"outputting model to directory: {self.output_dir}")
+        print(f"setting dataloader_drop_last from {self.dataloader_drop_last} -> {True}")
+        self.dataloader_drop_last = True

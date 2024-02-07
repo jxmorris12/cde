@@ -20,6 +20,8 @@ assert torch.cuda.device_count() > 0, "can't train without CUDA"
 def main():
     # Helps with debugging.
     torch.autograd.set_detect_anomaly(True)
+    # torch._logging.set_logs(dynamo=logging.DEBUG)
+    # torch._dynamo.config.verbose = True
 
     # Allow W&B to start slowly.
     os.environ["WANDB__SERVICE_WAIT"] = "300"

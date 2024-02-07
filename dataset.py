@@ -386,7 +386,7 @@ class RedditDataset(torch.utils.data.Dataset):
         pass
 
     def __len__(self):
-        return len(self.subreddit_keys) # TODO: Maybe len(self.subreddit_keys) makes more sense?
+        return len(self.subreddit_keys)
 
     def reset_dataset_idx(self) -> int:
         dataset_idx = random.choice(list(self.subreddit_idxs.keys()))
@@ -446,7 +446,7 @@ class RedditDatasetWithSupervisedQuestions(RedditDataset):
             self.current_dataset_idx.value = dataset_idx
 
     def __len__(self):
-        return len(self.subreddit_questions) # TODO: Maybe len(self.subreddit_keys) makes more sense?
+        return len(self.subreddit_questions) * 1024
     
     def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]: 
         # TODO allow other dataset sampling strategies from T0 paper.

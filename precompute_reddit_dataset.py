@@ -291,8 +291,6 @@ if __name__ == '__main__':
             subreddits[subreddit_keys[subreddit_name]].append(total_idx)
             total_idx += 1
     
-    # breakpoint()
-    
     print("got", total_idx, "docs; filtered", content_duplicate, "duplicates and", content_too_short, "too-short docs")
     
     del all_content_hash

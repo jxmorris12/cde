@@ -39,9 +39,9 @@ class CustomTrainer(transformers.Trainer):
         self.gc = None # lazily initialized during training
         self._extra_logs = TensorRunningAverages()
     
-    def _get_train_sampler(self) -> Optional[torch.utils.data.Sampler]:
-        # Don't sample train data; it's already randomizing itself.
-        return None
+    # def _get_train_sampler(self) -> Optional[torch.utils.data.Sampler]:
+    #     # Don't sample train data; it's already randomizing itself.
+    #     return None
     
     def _log_extra(self, key: str, val: torch.Tensor):
         self._extra_logs.update(key, val)

@@ -118,11 +118,13 @@ class DocumentQueryCollatorWithPadding(transformers.DataCollatorWithPadding):
         # tokenize documents.
         if len(document_batch):
             document_batch: Dict[str, torch.Tensor] = pad_batch_func(document_batch)
+            document_batch = cut_padding(document_batch, self.tokenizer.pad_token_id)
             ex.update({f'document_{k}': v for k,v in document_batch.items()})
         
         # tokenize hard negative documents.
         if len(hn_document_batch):
             hn_document_batch: Dict[str, torch.Tensor] = pad_batch_func(hn_document_batch)
+            hn_document_batch = cut_padding(hn_document_batch, self.tokenizer.pad_token_id)
             ex.update({f'negative_document_{k}': v for k,v in hn_document_batch.items()})
 
         # tokenize queries.

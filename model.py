@@ -72,7 +72,6 @@ class Model(transformers.PreTrainedModel):
         self.dataset_positional_embeddings = torch.nn.Parameter(
             torch.randn((1024, self.hidden_size)), requires_grad=True
         )
-        self.tok = transformers.AutoTokenizer.from_pretrained('bert-base-uncased') # for debugging)
     
     def forward(
             self,
@@ -81,6 +80,7 @@ class Model(transformers.PreTrainedModel):
             dataset_input_ids: torch.Tensor,
             dataset_attention_mask: torch.Tensor,
     ) -> torch.Tensor:
+        # print("shapes:", input_ids.shape, dataset_input_ids.shape, "(", attention_mask.shape, dataset_attention_mask.shape, ")")
         batch_size = dataset_input_ids.shape[0]
         dataset_outputs = self.dataset_embedder(
             input_ids=dataset_input_ids,
@@ -102,11 +102,9 @@ class Model(transformers.PreTrainedModel):
             decoder_attention_mask=attention_mask,
         )
         # select last hidden token
-        # embeddings = outputs.last_hidden_state[:, -1, :]
         gather_idxs = attention_mask.cumsum(1).argmax(1)
-        embeddings = outputs.last_hidden_state[
-            torch.arange(batch_size), gather_idxs
-        ]
+        batch_idxs = torch.arange(batch_size, device=gather_idxs.device)
+        embeddings = outputs.last_hidden_state[batch_idxs, gather_idxs]
         assert embeddings.shape == (batch_size, self.hidden_size)
         # project
         output_embeddings = self.mlp(embeddings)
