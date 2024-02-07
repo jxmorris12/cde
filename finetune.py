@@ -87,8 +87,7 @@ def main():
 
     model_config = ModelConfig(**vars(model_args))
     dataset_embedder = transformers.AutoModel.from_pretrained(model_args.dataset_embedder)
-    dataset_backbone = transformers.AutoModel.from_pretrained(model_args.dataset_backbone)
-    model = Model(config=model_config, embedder=embedder, dataset_embedder=dataset_embedder, dataset_backbone=dataset_backbone)
+    model = Model(config=model_config, embedder=embedder, dataset_embedder=dataset_embedder)
     wandb_run_id = training_args.exp_name
     print("starting wandb run with name", wandb_run_id)
     wandb.init(

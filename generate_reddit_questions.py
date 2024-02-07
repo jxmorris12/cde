@@ -24,13 +24,13 @@ from dataset import RedditDataset
 output_file = "test.dataset"
 
 # Minimum number of documents per subreddit.
-MIN_N_DOCS: int = 8192 # 256
+MIN_N_DOCS: int = 64
 
 # Number of passages to generate documents for.
-N_PASSAGES: int = 32 # 64 
+N_PASSAGES: int = 64
 
 # Number of questions to generate per passage.
-N_QUESTIONS: int = 3 # 3
+N_QUESTIONS: int = 5 # 3
 
 # Number of threads that will make requests in parallel.
 N_THREADS = 128
@@ -85,9 +85,15 @@ def main():
     start_time = time.time()
 
     # Number of documents to generate questions for per subreddit.
-    data_folder: str = "/home/jxm3/research/retrieval/tti3/data/mini"
-    # data_folder: str = "/home/jxm3/research/retrieval/tti3/data/full"
-    ds = RedditDataset(data_folder=data_folder)
+    # data_folder: str = "/home/jxm3/research/retrieval/tti3/data/mini"
+    data_folder: str = "/home/jxm3/research/retrieval/tti3/data/full"
+
+    questions_outfolder = "questions64"
+
+    ds = RedditDataset(
+        data_folder=data_folder,
+        min_examples_per_subreddit=MIN_N_DOCS,
+    )
     subreddit_lists = { key: lst for key, lst in ds.subreddit_idxs.items() if len(lst) >= MIN_N_DOCS }
     print(f"Num subreddits with at least {MIN_N_DOCS} documents: {len(subreddit_lists)}")
     print(f"\t Total number of documents: {sum(map(len, subreddit_lists.values()))}")
@@ -126,11 +132,11 @@ def main():
                     q['question_idx'] = questions_total
                     all_questions.append(q)
                     question_idxs[q['subreddit_idx']].append(questions_total)
-                questions_total += 1
+                    questions_total += 1
                 pbar.update(1)
 
         
-    question_data_folder = os.path.join(data_folder, "questions")
+    question_data_folder = os.path.join(data_folder, questions_outfolder)
     os.makedirs(question_data_folder, exist_ok=True)
     dataset = datasets.Dataset.from_list(all_questions)
 

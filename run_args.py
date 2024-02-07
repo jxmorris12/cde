@@ -59,10 +59,6 @@ class ModelArguments:
         default="distilbert-base-uncased",
         metadata={"help": "embedder name for the model"}
     )
-    dataset_backbone: str = field(
-        default="distilbert-base-uncased",
-        metadata={"help": "backbone model name"}
-    )
     dataset_embedder: str = field(
         default="distilbert-base-uncased",
         metadata={"help": "embedder name for the model that embeds random dataset instances"}

@@ -352,14 +352,14 @@ class MsmarcoDatasetHardNegatives(BeirDataset):
 
 
 class RedditDataset(torch.utils.data.Dataset):
-    def __init__(self, data_folder: str):
+    def __init__(self, data_folder: str, min_examples_per_subreddit: int = 256):
         self.current_dataset_idx: mp.Value = mp.Value('i', 0)
         print(f"Loading Reddit data from path: {data_folder}")
         self.dataset = datasets_fast_load_from_disk(
             os.path.join(
                 data_folder, "test.dataset"), 
         )
-        print("`\tLoading subreddit idxs from disk...")
+        print("\tLoading subreddit idxs from disk...")
         self.subreddit_idxs = pickle.load(open(os.path.join(data_folder, "subreddit_idxs.p"), "rb"))
         print("\tLoading subreddit keys from disk...")
         subreddit_names = pickle.load(open(os.path.join(data_folder, "subreddit_keys.p"), "rb"))
@@ -375,7 +375,7 @@ class RedditDataset(torch.utils.data.Dataset):
         self.dataset.set_format("pt")
 
         original_num_subreddits = len(self.subreddit_idxs)
-        self.min_examples_per_subreddit = 256 # TODO: Experiment with this.
+        self.min_examples_per_subreddit = min_examples_per_subreddit # TODO: Experiment with this.
         self.subreddit_idxs = { k: v for k,v in self.subreddit_idxs.items() if len(v) > self.min_examples_per_subreddit }
         print(f"Filtered {original_num_subreddits} to {len(self.subreddit_idxs)} with min_examples_per_subreddit={self.min_examples_per_subreddit}")
         self.subreddit_questions = {}
@@ -389,8 +389,7 @@ class RedditDataset(torch.utils.data.Dataset):
         return len(self.subreddit_keys) # TODO: Maybe len(self.subreddit_keys) makes more sense?
 
     def reset_dataset_idx(self) -> int:
-        print("- choosing from list-", list(self.subreddit_questions.keys()))
-        dataset_idx = random.choice(list(self.subreddit_questions.keys()))
+        dataset_idx = random.choice(list(self.subreddit_idxs.keys()))
         self.current_dataset_idx.value = dataset_idx
     
     def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]: 
@@ -489,12 +488,8 @@ def get_char_ids(vocab_size: int, tokenizer_name: str) -> List[torch.Tensor]:
     char_strs = [
         f'{(idx+1)}. ' for idx in range(vocab_size)
     ]
-    # char_strs = [  # for some reason printable chars start at chr(33)
-    #     f'{chr(idx+33)}. ' for idx in range(vocab_size)
-    # ]
     char_strs = [(c * 8).strip() for c in char_strs]
     char_ids = [torch.tensor(t) for t in tokenizer(char_strs).input_ids]
-    # char_strs = .tokenizer.batch_decode(char_ids, skip_special_tokens=True)
     return char_ids
 
 class SyntheticCharactersDataset(torch.utils.data.Dataset):
@@ -555,13 +550,13 @@ class SyntheticCharactersDataset(torch.utils.data.Dataset):
 
 
 def load_reddit_train_and_val(
-                              data_folder: str = "/home/jxm3/research/retrieval/tti3/data/mini",
+                              data_folder: str,
                               perc: float = 0.9,
                               supervised: bool = False
                              ) -> Tuple[
     torch.utils.data.Dataset, torch.utils.data.Dataset]:
 
-    question_folder = os.path.join(data_folder, "questions")
+    question_folder = os.path.join(data_folder, "questions64")
     if supervised:
         train = RedditDatasetWithSupervisedQuestions(
             data_folder=data_folder,
@@ -583,20 +578,22 @@ def load_reddit_train_and_val(
         round(1 - len(subreddit_names) * perc)
     )
     train_subreddits = set(subreddit_names[N:])
-    val_subreddits = set(subreddit_names[:N])
+    eval_subreddits = set(subreddit_names[:N])
 
-    print(f"Creating training and validation data with a {perc:.2f}/{1-perc:.2f} split ({len(train_subreddits)}/{len(val_subreddits)})")
+    print(f"Creating training and validation data with a {perc:.2f}/{1-perc:.2f} split ({len(train_subreddits)}/{len(eval_subreddits)})")
     train.subreddit_idxs = { k: v for k,v in train.subreddit_idxs.items() if k in train_subreddits }
     train.subreddit_keys = { k: v for k,v in train.subreddit_keys.items() if k in train_subreddits }
     train.subreddit_questions = { k: v for k,v in train.subreddit_questions.items() if k in train_subreddits }
     train.reset_dataset_idx()
-    val.subreddit_idxs = { k: v for k,v in val.subreddit_idxs.items() if k in val_subreddits }
-    val.subreddit_keys = { k: v for k,v in val.subreddit_keys.items() if k in val_subreddits }
-    val.subreddit_questions = { k: v for k,v in val.subreddit_questions.items() if k in val_subreddits }
-    val.reset_dataset_idx()
+    eval.subreddit_idxs = { k: v for k,v in eval.subreddit_idxs.items() if k in eval_subreddits }
+    eval.subreddit_keys = { k: v for k,v in eval.subreddit_keys.items() if k in eval_subreddits }
+    eval.subreddit_questions = { k: v for k,v in eval.subreddit_questions.items() if k in eval_subreddits }
+    eval.reset_dataset_idx()
+
+    breakpoint()
 
     print("First train point:", train[0])
-    return train, val
+    return train, eval
 
 
 def load_synthetic_chars_dataset():
