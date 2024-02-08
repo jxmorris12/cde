@@ -14,12 +14,13 @@ from model import Model
 from run_args import ModelArguments, DataArguments, TrainingArguments
 from trainer import CustomTrainer
 
-
 assert torch.cuda.device_count() > 0, "can't train without CUDA"
+
 
 def main():
     # Helps with debugging.
     torch.autograd.set_detect_anomaly(True)
+    torch.compiler.reset()
     # torch._logging.set_logs(dynamo=logging.DEBUG)
     # torch._dynamo.config.verbose = True
 
@@ -33,9 +34,11 @@ def main():
     parser = transformers.HfArgumentParser((ModelArguments, DataArguments, TrainingArguments))
     model_args, data_args, training_args = parser.parse_args_into_dataclasses()
     transformers.set_seed(training_args.seed)
-    logging.basicConfig(format='%(asctime)s - %(message)s',
-                        datefmt='%Y-%m-%d %H:%M:%S',
-                        level=logging.INFO)
+    logging.basicConfig(
+        format='%(asctime)s - %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S',
+        level=logging.INFO
+    )
     embedder = transformers.AutoModel.from_pretrained(model_args.embedder)
     embedder_tokenizer =  transformers.AutoTokenizer.from_pretrained(model_args.embedder)
 

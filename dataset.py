@@ -446,7 +446,7 @@ class RedditDatasetWithSupervisedQuestions(RedditDataset):
             self.current_dataset_idx.value = dataset_idx
 
     def __len__(self):
-        return len(self.subreddit_questions) * 1024
+        return len(self.subreddit_questions) * 64
     
     def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]: 
         # TODO allow other dataset sampling strategies from T0 paper.

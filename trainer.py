@@ -119,8 +119,8 @@ class CustomTrainer(transformers.Trainer):
             super().get_eval_dataloader()
         )
         wandb.log({
-                      "examples/train": train_table,
-                      "examples/eval": eval_table,
+            "examples/train": train_table,
+            "examples/eval": eval_table,
         })
         super().train(*args, **kwargs)
         
@@ -172,8 +172,9 @@ class CustomTrainer(transformers.Trainer):
             "stats_total_documents": len(e2),
             "batch_size": batch_size,
         }
-        for key, val in metrics.items():
-            self._log_extra(key, val)
+        if self.is_in_train:
+            for key, val in metrics.items():
+                self._log_extra(key, val)
         return loss
     
     def prediction_step(

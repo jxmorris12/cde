@@ -242,7 +242,7 @@ class RedditDataset(RetrievalDataset):
         return len(self.subreddits)
 
 if __name__ == '__main__':
-    suffix, N = ("full", None)
+    suffix, N = ("full_t5", None)
     # suffix, N = ("mini", 20_000)
 
     data_folder = f"data/{suffix}"
@@ -256,6 +256,9 @@ if __name__ == '__main__':
     )
     fhandle = open(dataset.filename, "r")
     output_dataset = None
+
+    bert_tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
+    t5_tokenizer = AutoTokenizer.from_pretrained("t5-base")
     
     os.environ["TOKENIZERS_PARALLELISM"] = "1"
     
@@ -292,7 +295,7 @@ if __name__ == '__main__':
             total_idx += 1
     
     print("got", total_idx, "docs; filtered", content_duplicate, "duplicates and", content_too_short, "too-short docs")
-    
+    breakpoint()
     del all_content_hash
 
     # Add last piece of dataset        
@@ -304,14 +307,22 @@ if __name__ == '__main__':
 
     # Tokenize
     def tokenize_ex(ex: Dict) -> Dict:
-        tt = dataset.tokenizer(
+        tt_bert = bert_tokenizer(
             ex["text"], 
             padding=True, 
             truncation=True,
             max_length=dataset.token_max_length, 
             return_tensors='pt'
         )
-        ex["input_ids"] = tt.input_ids
+        ex["input_ids_bert"] = tt_bert.input_ids
+        tt_t5 = t5_tokenizer(
+            ex["text"], 
+            padding=True, 
+            truncation=True,
+            max_length=dataset.token_max_length, 
+            return_tensors='pt'
+        )
+        ex["input_ids_t5"] = tt_t5.input_ids
         return ex
 
     cache_file_name = os.path.join(data_folder, output_file) + f"{len(output_dataset)}.cache"

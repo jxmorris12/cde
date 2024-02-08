@@ -80,7 +80,7 @@ class Model(transformers.PreTrainedModel):
             dataset_input_ids: torch.Tensor,
             dataset_attention_mask: torch.Tensor,
     ) -> torch.Tensor:
-        # print("shapes:", input_ids.shape, dataset_input_ids.shape, "(", attention_mask.shape, dataset_attention_mask.shape, ")")
+        print("shapes:", input_ids.shape, dataset_input_ids.shape, "(", attention_mask.shape, dataset_attention_mask.shape, ")")
         batch_size = dataset_input_ids.shape[0]
         dataset_outputs = self.dataset_embedder(
             input_ids=dataset_input_ids,
