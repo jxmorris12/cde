@@ -49,7 +49,8 @@ class CustomTrainer(transformers.Trainer):
     def log(self, logs: Dict[str, float]) -> None:
         """Override log to add other metrics we're tracking.
         """
-        logs.update(self._extra_logs.get_and_clear_all())
+        if self.is_in_train:
+            logs.update(self._extra_logs.get_and_clear_all())
         super().log(logs)
 
     def create_optimizer(self, *args, **kwargs):

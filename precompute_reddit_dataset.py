@@ -1,11 +1,13 @@
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterable, Optional, Tuple
 
 import collections
+import gc
 import json
 import io
 import os
 import pickle
 import random
+import sys
 
 import datasets
 import numpy as np
@@ -83,41 +85,6 @@ class RetrievalDataset(Dataset):
             input_ids, attention_mask = tokenized_text.values()
         return [input_ids, attention_mask]
     
-    def sample_random_window(self, data, window_length):
-        """Samples a random window from the text.
-        """
-        input_ids, attention_mask = data
-
-        cls = self.tokenizer.cls_token_id
-        pad = self.tokenizer.pad_token_id
-        eos = self.tokenizer.eos_token_id
-        if type(eos) != int:
-            eos = self.tokenizer.sep_token_id
-
-        # Inputs are smaller than window size -> add padding
-        padding = window_length - input_ids.shape[1]
-        if padding > 0:
-            input_ids = torch.nn.functional.pad(input_ids, (0, padding), 'constant', pad) 
-            attention_mask = torch.nn.functional.pad(attention_mask, (0, padding), 'constant', 0) 
-            return [input_ids, attention_mask]
-
-        # Inputs are larger than window size -> sample random windows
-        true_lengths = torch.sum(torch.where(input_ids != 1, 1, 0), 1)
-        start_indices = torch.tensor([random.randint(1, l - window_length + 2) if l >= window_length else 1 for l in true_lengths])
-        indices = torch.tensor([list(range(start, start + window_length - 2)) for start, l in zip(start_indices, true_lengths)])
-        input_ids = input_ids.gather(1, indices)
-        attention_mask = attention_mask.gather(1, indices)
-        
-        # Add cls token
-        input_ids = torch.nn.functional.pad(input_ids, (1, 0), 'constant', cls)
-        attention_mask = torch.nn.functional.pad(attention_mask, (1, 0), 'constant', 1)
-        
-        # Add eos token
-        input_ids = torch.cat((input_ids, torch.where(true_lengths > window_length, eos, pad).unsqueeze(1)), 1)
-        attention_mask = torch.cat((attention_mask, torch.where(true_lengths > window_length, 1, 0).unsqueeze(1)), 1)
-
-        return [input_ids, attention_mask]
-
     def load_data(self, filename: str):
         """Loads in the data specified in `filename` and populates the necessary 
            variables for sampling the dataset.
@@ -243,67 +210,92 @@ class RedditDataset(RetrievalDataset):
 
 if __name__ == '__main__':
     suffix, N = ("full_t5", None)
-    # suffix, N = ("mini", 20_000)
+    # suffix, N = ("mini_t5", 20_000)  # TODO argparse ...
+    token_max_length = 128  # TODO argparse ...
+
+    num_proc = len(os.sched_getaffinity(0))
 
     data_folder = f"data/{suffix}"
     os.makedirs(data_folder, exist_ok=True)
     output_file = "test.dataset"
-    dataset = RedditDataset(
-        model_name="bert-base-uncased", # Used for tokenization (TODO argparse)
-        split="train",
-        token_max_length=128, # TODO argparse ...
-        sanity=N,  # TODO argparse ...
-    )
-    fhandle = open(dataset.filename, "r")
-    output_dataset = None
 
     bert_tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
     t5_tokenizer = AutoTokenizer.from_pretrained("t5-base")
     
     os.environ["TOKENIZERS_PARALLELISM"] = "1"
     
-    texts = []
-    subreddit_idxs = []
-    total_idxs = []
     subreddits = collections.defaultdict(list)
     subreddit_keys = {}
-    all_content_hash = collections.defaultdict(set)
-    total_idx = 0
-    content_too_short = 0
-    content_duplicate = 0
-    for author_idx in tqdm.tqdm(range(dataset.num_authors), desc='creating datasets'):
-        author_data = dataset.read_line(fhandle, author_idx)
-        for subreddit_idx, subreddit_name in enumerate(author_data['action_type']):
-            text = author_data[dataset.text_key][subreddit_idx]
-            if len(text) < dataset.min_char_length: 
-                content_too_short += 1
-                continue
-            if subreddit_name not in subreddit_keys:
-                subreddit_keys[subreddit_name] = len(subreddit_keys)
-            
-            text_hash = hash(text)
-            if text_hash in all_content_hash[subreddit_name]:
-                content_duplicate += 1
-                continue
-            else:
-                all_content_hash[subreddit_name].add(text_hash)
 
-            texts.append(text)
-            subreddit_idxs.append(subreddit_keys[subreddit_name])
-            total_idxs.append(total_idx)
-            subreddits[subreddit_keys[subreddit_name]].append(total_idx)
-            total_idx += 1
-    
-    print("got", total_idx, "docs; filtered", content_duplicate, "duplicates and", content_too_short, "too-short docs")
-    breakpoint()
-    del all_content_hash
+    def generate_reddit() -> Iterable[Dict[str, Any]]:
+        global subreddits
+        global subreddit_keys
+        dataset = RedditDataset(
+            model_name="bert-base-uncased", # Used for tokenization (TODO argparse)
+            split="train",
+            token_max_length=token_max_length,
+            sanity=N,
+        )
+        fhandle = open(dataset.filename, "r")
+        texts = []
+        subreddit_idxs = []
+        total_idxs = []
+        all_content_hash = collections.defaultdict(set)
+        total_idx = 0
+        content_too_short = 0
+        content_duplicate = 0
+        for author_idx in tqdm.tqdm(range(dataset.num_authors), desc='creating datasets'):
+            author_data = dataset.read_line(fhandle, author_idx)
+            for subreddit_idx, subreddit_name in enumerate(author_data['action_type']):
+                text = author_data[dataset.text_key][subreddit_idx]
+                if len(text) < dataset.min_char_length: 
+                    content_too_short += 1
+                    continue
+                if subreddit_name not in subreddit_keys:
+                    subreddit_keys[subreddit_name] = len(subreddit_keys)
+                
+                text_hash = hash(text)
+                if text_hash in all_content_hash[subreddit_name]:
+                    content_duplicate += 1
+                    continue
+                else:
+                    all_content_hash[subreddit_name].add(text_hash)
 
+                texts.append(text)
+                subreddit_idxs.append(subreddit_keys[subreddit_name])
+                total_idxs.append(total_idx)
+                subreddits[subreddit_keys[subreddit_name]].append(total_idx)
+                total_idx += 1
+
+                yield {
+                    "text": text,
+                    "subreddit_idx": subreddit_keys[subreddit_name],
+                    "total_idx": total_idx
+                }
+        del all_content_hash
+        del dataset
+        gc.collect()
+        print("Done! yielded", total_idx, "docs; filtered", content_duplicate, "duplicates and", content_too_short, "too-short docs")
+
+    # all_obj = globals()
+    # print("\n", "=" * 40)
+    # print("LARGEST OBJECTS IN MEMORY")
+    # object_name = list(all_obj).copy()
+    # object_size = [sys.getsizeof(all_obj[x]) for x in object_name]
+
+    # d = pd.DataFrame(dict(name=object_name, size=object_size))
+    # d.sort_values(['size'], ascending=[0],inplace=True)
+
+    # print(d.head(10))
+    # print("=" * 40, "\n")
+
+    # gc.collect()
+    # print("GARBAGE COLLECTED!")
+
+    print("[1] calling datasets.Dataset.from_generator")
     # Add last piece of dataset        
-    output_dataset = datasets.Dataset.from_dict({
-        "text": texts,
-        "subreddit_idx": subreddit_idxs,
-        "total_idxs": total_idxs,
-    })
+    output_dataset = datasets.Dataset.from_generator(generate_reddit)
+    print("[2] called datasets.Dataset.from_generator")
 
     # Tokenize
     def tokenize_ex(ex: Dict) -> Dict:
@@ -311,7 +303,7 @@ if __name__ == '__main__':
             ex["text"], 
             padding=True, 
             truncation=True,
-            max_length=dataset.token_max_length, 
+            max_length=token_max_length, 
             return_tensors='pt'
         )
         ex["input_ids_bert"] = tt_bert.input_ids
@@ -319,7 +311,7 @@ if __name__ == '__main__':
             ex["text"], 
             padding=True, 
             truncation=True,
-            max_length=dataset.token_max_length, 
+            max_length=token_max_length, 
             return_tensors='pt'
         )
         ex["input_ids_t5"] = tt_t5.input_ids
@@ -328,7 +320,11 @@ if __name__ == '__main__':
     cache_file_name = os.path.join(data_folder, output_file) + f"{len(output_dataset)}.cache"
     print("tokenizing dataset of length:", len(output_dataset))
     output_dataset = output_dataset.map(
-        tokenize_ex, batch_size=1000, batched=True, cache_file_name=cache_file_name
+        tokenize_ex,
+        batch_size=1000,
+        batched=True,
+        cache_file_name=cache_file_name,
+        num_proc=num_proc,
     )
     # Save to disk
     assert len(subreddits.keys()) == len(subreddit_keys)
