@@ -11,6 +11,7 @@ import random
 
 import beir.datasets.data_loader
 import datasets
+import numpy as np
 import pickle
 import random
 import torch
@@ -20,6 +21,7 @@ import tqdm
 from helpers import (
     datasets_fast_load_from_disk,
     download_url, download_url_and_unzip, 
+    get_num_proc,
     independent_crop,
     tokenize_dataset, 
 )
@@ -290,67 +292,6 @@ class BeirDataset(torch.utils.data.Dataset):
         }
 
 
-class MsmarcoDatasetHardNegatives(BeirDataset):
-    corpus: datasets.Dataset
-    queries: datasets.Dataset
-    query_embeddings: datasets.Dataset
-    corpus_embeddings: datasets.Dataset
-    size: int
-    column_names: List[str] = ["idx", "query_embedding", "document_embeddings", "negative_document_embeddings"]
-    hard_negatives: Optional[Dict[str, Any]]
-    num_hard_negatives: int
-    def __init__(
-            self,
-            embedder: str,
-            num_hard_negatives: int,
-        ):
-        super().__init__(dataset="msmarco", split="train", embedder=embedder)
-        self.hard_negatives = load_msmarco_hard_negatives()
-        self.num_hard_negatives = num_hard_negatives
-
-    def __getitem__(self, query_id: int) -> Dict[str, torch.Tensor]:
-        """Returns example from MSMARCO, including query, document, and hard-negative document."""
-        query_id_str = self.queries[query_id]['id']
-        while query_id_str not in self.hard_negatives:
-            # We don't have negative samples for a few queries in the corpus 
-            # (maybe because the hard negatives were filtered out by the 
-            # cross encoder?). This iterates until we find one.
-            #  TODO: Figure out why some queries are missing.
-            query_id = random.randint(0, len(self)-1)
-            query_id_str = self.queries[query_id]['id']
-
-        hn_dict = self.hard_negatives[query_id_str]
-        
-        ex = {}
-
-        ex['query_input_ids'] = self.queries[query_id]['text_input_ids']
-        ex['query_attention_mask'] = self.queries[query_id]['text_attention_mask']
-
-        pos_doc_id = int(hn_dict['pos'][0])
-        ex['document_input_ids'] = self.corpus[pos_doc_id]['text_input_ids']
-        ex['document_attention_mask'] = self.corpus[pos_doc_id]['text_attention_mask']
-
-        negative_document_input_ids = []
-        negative_document_attention_mask = []
-        for neg_doc_id in map(int, random.choices(hn_dict['hard_neg'], k=self.num_hard_negatives)):
-            negative_document_input_ids.append(
-                self.corpus[neg_doc_id]['text_input_ids']
-            )
-            negative_document_attention_mask.append(
-                self.corpus[neg_doc_id]['text_attention_mask']
-            )
-        ex['negative_document_input_ids'] = negative_document_input_ids
-        ex['negative_document_attention_mask'] = negative_document_attention_mask
-
-        ex.update({
-            "idx": query_id,
-            "query_embedding": self.query_embeddings[query_id]["embeds"],
-            "document_embeddings": self.corpus_embeddings[pos_doc_id]["embeds"],
-            "negative_document_embeddings": self.corpus_embeddings[neg_doc_id]["embeds"],
-        })
-        return ex
-
-
 class RedditDataset(torch.utils.data.Dataset):
     def __init__(self, data_folder: str, min_examples_per_subreddit: int = 256):
         self.current_dataset_idx: mp.Value = mp.Value('i', 0)
@@ -428,7 +369,8 @@ class RedditDataset(torch.utils.data.Dataset):
 
 
 class RedditDatasetWithSupervisedQuestions(RedditDataset):
-    def __init__(self, data_folder: str,
+    def __init__(
+            self, data_folder: str,
                  question_folder: str):
         super().__init__(data_folder=data_folder)
         # Load questions
@@ -437,6 +379,9 @@ class RedditDatasetWithSupervisedQuestions(RedditDataset):
         self.question_dataset = datasets.Dataset.load_from_disk(
             os.path.join(question_folder, 'test.dataset'))
         self.question_dataset.set_format('pt')
+
+        self._embedder_tokenizer_name = 't5'
+        self._dataset_tokenizer_name = 'bert'
 
     def reset_dataset_idx(self) -> int:
         if not len(self.subreddit_questions.keys()):
@@ -448,6 +393,21 @@ class RedditDatasetWithSupervisedQuestions(RedditDataset):
     def __len__(self):
         return len(self.subreddit_questions) * 64
     
+    @property
+    def _question_input_ids_key(self) -> str:
+        """The key in the dataset for question input IDs (tokenizer-specific)."""
+        return f'question_input_ids_{self._embedder_tokenizer_name}'
+    
+    @property
+    def _document_input_ids_key(self) -> str:
+        """The key in the dataset for document input IDs (tokenizer-specific)."""
+        return f'input_ids_{self._embedder_tokenizer_name}'
+    
+    @property
+    def _dataset_input_ids_key(self) -> str:
+        """The key in the dataset for dataset input IDs (tokenizer-specific)."""
+        return f'input_ids_{self._dataset_tokenizer_name}'
+    
     def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]: 
         # TODO allow other dataset sampling strategies from T0 paper.
         dataset_idx = self.current_dataset_idx.value        
@@ -455,22 +415,15 @@ class RedditDatasetWithSupervisedQuestions(RedditDataset):
         dataset_questions = self.subreddit_questions[dataset_idx]
         query_id = dataset_questions[idx % len(dataset_questions)]
         query_ex = self.question_dataset[query_id]
-        query_input_ids = query_ex['question_input_ids']
+        query_input_ids = query_ex[self._question_input_ids_key]
         doc_id = query_ex['passage_idx'].item()
-        document_input_ids = self.dataset[doc_id]['input_ids']
+        document_input_ids = self.dataset[doc_id][self._document_input_ids_key]
 
         assert query_ex['subreddit_idx'] == self.dataset[doc_id]['subreddit_idx']
 
         subreddit_idx = query_ex['subreddit_idx'].item()
         random_idx_within_subreddit = random.choice(self.subreddit_idxs[subreddit_idx])
-        dataset_input_ids = self.dataset[random_idx_within_subreddit]['input_ids']
-
-        # print(
-        #     "dataset_idx", dataset_idx, "idx", idx, 
-        #     "/", idx % len(dataset_questions), 
-        #     "query_id", query_id, 
-        #     "subreddit_idx", subreddit_idx
-        # )
+        dataset_input_ids = self.dataset[random_idx_within_subreddit][self._dataset_input_ids_key]
         
         return {
             'idx': doc_id,
@@ -498,29 +451,76 @@ def get_char_ids(vocab_size: int, tokenizer_name: str) -> List[torch.Tensor]:
     char_ids = [torch.tensor(t) for t in tokenizer(char_strs).input_ids]
     return char_ids
 
-class SyntheticCharactersDataset(torch.utils.data.Dataset):
-    def __init__(self, vocab_size: int = 4096, min_shift: int = 1, max_shift: int = 5, max_size: Optional[int] = None):
-        self.max_size = max_size
-        self.min_shift = min_shift
-        self.max_shift = max_shift
-        self.n_str_repeats = 12
-        self.char_ids = [torch.tensor(t) for t in get_char_ids(vocab_size, 'bert-base-uncased')]
-        self.vocab_size = len(self.char_ids)
 
-        self.current_dataset_idx: mp.Value = mp.Value('i', 0, lock=False)
+@functools.lru_cache()
+def load_english_single_token_words(
+    ) -> datasets.Dataset:
+    """Loads all the English words from NLTK dictionary that are a single token
+    when a space is appended to them.
+    """
+    import nltk
+    nltk.download('words')
+    from nltk.corpus import words
+    word_list = words.words()
+    t5_tokenizer = transformers.AutoTokenizer.from_pretrained('t5-base')
+    bert_tokenizer = transformers.AutoTokenizer.from_pretrained('bert-base-uncased')
+
+    def tokenize_ex(ex: Dict[str, str]) -> Tuple[torch.Tensor, torch.Tensor]:
+        tt_bert = bert_tokenizer(
+            [text + " " for text in ex["word"]],
+            padding=True, 
+            truncation=True,
+            max_length=4, 
+            add_special_tokens=False,
+            return_tensors='pt'
+        )
+        tt_t5 = t5_tokenizer(
+            [text + " " for text in ex["word"]],
+            padding=True, 
+            truncation=True,
+            max_length=4, 
+            add_special_tokens=False,
+            return_tensors='pt'
+        )
+        # filter single tokens
+        ex["input_ids_t5"] = tt_t5.input_ids
+        ex["input_ids_bert"] = tt_bert.input_ids
+        is_single_token_bert = tt_bert.attention_mask.sum(dim=1) == 1
+        is_single_token_t5 = tt_t5.attention_mask.sum(dim=1) == 1
+        ex["is_single_token"] = is_single_token_bert & is_single_token_t5
+        return ex
+
+    word_dataset = datasets.Dataset.from_dict({ "word": word_list })
+    word_dataset = word_dataset.map(tokenize_ex, batched=True, batch_size=2000, num_proc=get_num_proc())
+    return word_dataset.filter(lambda ex: ex["is_single_token"])
+
+class SyntheticWordsDataset(torch.utils.data.Dataset):
+    def __init__(self):
+        self.word_list = ['j', 'a', 'c', 'k'] # load_english_single_token_words()
+        num_samples = 1000
+
+        # Create a Zipf distribution
+        alpha = 2.0  # Shape parameter, adjust as needed
+
+        self.current_dataset_idx: mp.Value = mp.Value('i', 0)
+        self.current_term_frequencies = mp.Array('d', len(self.word_list))
         self.pad_token_id = 0
         self.reset_dataset_idx()
+        self.max_size = None
     
     def __len__(self) -> int:
-        return self.max_size or (100 * self.vocab_size) # arbitrary number
+        return self.max_size or (len(self.word_list) * 64)
 
     def tokenize(self, tokenizer: transformers.PreTrainedTokenizer, max_length: int) -> None:
         # reddit data comes pre-tokenized
         pass
 
     def reset_dataset_idx(self) -> int:
-        dataset_idx = random.choice(range(self.min_shift, self.max_shift))
+        dataset_idx = random.choice(list(range(self.word_list)))
         self.current_dataset_idx.value = dataset_idx
+        # reset Zipf distribution
+        samples = np.random.zipf(a=4.0, n=len(self.word_list))
+        self.current_term_frequencies[:] = samples[:] # set shared array values
     
     def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]: 
         doc_id = random.randint(0, self.vocab_size - 1)
@@ -603,19 +603,9 @@ def load_reddit_train_and_val(
     return train, eval
 
 
-def load_synthetic_chars_dataset():
-    vocab_size = 512
-    train = SyntheticCharactersDataset(
-        min_shift=16,
-        max_shift=32,
-        vocab_size=vocab_size,
-    )
-    eval = SyntheticCharactersDataset(
-        max_size=512,
-        min_shift=32,
-        max_shift=48,
-        vocab_size=vocab_size,
-    )
+def load_synthetic_words_dataset():
+    train = SyntheticWordsDataset()
+    eval = SyntheticWordsDataset()
     return train, eval
 
 
@@ -630,8 +620,9 @@ if __name__ == '__main__':
     # )
     # print(dataset[10_001])
 
-    ds_train, ds_val = load_reddit_train_and_val(
-        data_folder="/home/jxm3/research/retrieval/tti3/data/full",
-        perc=0.9,
-    )
+    # ds_train, ds_val = load_reddit_train_and_val(
+    #     data_folder="/home/jxm3/research/retrieval/tti3/data/full",
+    #     perc=0.9,
+    # )
+    ds_train, ds_val = load_synthetic_words_dataset()
     print(ds_train[0])

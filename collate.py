@@ -45,6 +45,8 @@ class DocumentQueryCollatorWithPadding(transformers.DataCollatorWithPadding):
     pad_to_multiple_of: Optional[int] = None
     return_tensors: str = "pt"
 
+    # TODO: Fix to use separate tokenizers
+
     def __call__(self, features: List[Dict[str, Any]]) -> Dict[str, Any]:
         document_batch, query_batch, hn_document_batch, dataset_batch = [], [], [], []
         other_features = collections.defaultdict(list)

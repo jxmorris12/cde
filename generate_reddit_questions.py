@@ -144,16 +144,25 @@ def main():
     print(f"generated {len(all_questions)} questions! tokenizing...")
     model_name = "bert-base-uncased"
     token_max_length = 128
-    tokenizer = transformers.AutoTokenizer.from_pretrained(model_name) 
+    bert_tokenizer = transformers.AutoTokenizer.from_pretrained("bert-base-uncased")
+    t5_tokenizer = transformers.AutoTokenizer.from_pretrained("t5-base")
     def tokenize_ex(ex: Dict) -> Dict:
-        tt = tokenizer(
-            ex["question"], 
+        tt_bert = bert_tokenizer(
+            ex["text"], 
             padding=True, 
             truncation=True,
             max_length=token_max_length, 
             return_tensors='pt'
         )
-        ex["question_input_ids"] = tt.input_ids
+        tt_t5 = t5_tokenizer(
+            ex["text"], 
+            padding=True, 
+            truncation=True,
+            max_length=token_max_length, 
+            return_tensors='pt'
+        )
+        ex["question_input_ids_t5"] = tt_t5.input_ids
+        ex["question_input_ids_bert"] = tt_bert.input_ids
         return ex
     
     cache_file_name = os.path.join(question_data_folder, output_file) + f"{len(dataset)}.cache"

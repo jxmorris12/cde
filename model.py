@@ -24,10 +24,9 @@ def mean_pool(
 class Model(transformers.PreTrainedModel):
     embedder: transformers.PreTrainedModel
     dataset_embedder: transformers.PreTrainedModel
-    dataset_backbone: transformers.PreTrainedModel
     def __init__(
             self, 
-            config, #: transformers.PreTrainedConfig, 
+            config,
             embedder: transformers.PreTrainedModel, 
             dataset_embedder: transformers.PreTrainedModel, 
         ):
@@ -39,12 +38,10 @@ class Model(transformers.PreTrainedModel):
             embedder.transformer.layer = embedder.transformer.layer[:config.limit_layers]
             dataset_embedder.transformer.layer = dataset_embedder.transformer.layer[:config.limit_layers]
         
-        # TODO: fix arguments. Disable t5 positional embedder.
-        self.embedder = transformers.AutoModel.from_pretrained('t5-base')
+        self.embedder = embedder
         self.dataset_embedder = dataset_embedder
 
-        # TODO - fix. consider BART or another encoder-decoder.
-        # self.backbone = transformers.AutoModel.from_pretrained("t5-small")
+        # TODO - consider BART or another encoder-decoder.
         disabled_attention_bias_count = 0
         for M in self.embedder.encoder.modules(): 
             if hasattr(M, "has_relative_attention_bias"):
@@ -80,7 +77,7 @@ class Model(transformers.PreTrainedModel):
             dataset_input_ids: torch.Tensor,
             dataset_attention_mask: torch.Tensor,
     ) -> torch.Tensor:
-        print("shapes:", input_ids.shape, dataset_input_ids.shape, "(", attention_mask.shape, dataset_attention_mask.shape, ")")
+        # print("shapes:", input_ids.shape, dataset_input_ids.shape, "(", attention_mask.shape, dataset_attention_mask.shape, ")")
         batch_size = dataset_input_ids.shape[0]
         dataset_outputs = self.dataset_embedder(
             input_ids=dataset_input_ids,

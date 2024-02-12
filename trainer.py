@@ -20,9 +20,12 @@ def inputs_for_key(inputs: Dict[str, torch.Tensor], key: str):
 
 class CustomTrainer(transformers.Trainer):
     retrieval_datasets: Dict[str, datasets.Dataset]
+    embedder_tokenizer: transformers.PreTrainedTokenizer
+    dataset_tokenizer:  transformers.PreTrainedTokenizer
 
     def __init__(self, *args,
                  embedder_tokenizer: transformers.PreTrainedTokenizer,
+                 dataset_tokenizer:  transformers.PreTrainedTokenizer,
                  retrieval_datasets: Dict[str, datasets.Dataset], **kwargs
                 ):
         super().__init__(*args, **kwargs)
@@ -35,6 +38,7 @@ class CustomTrainer(transformers.Trainer):
             "query_input_ids", "query_attention_mask",
         ]
         self.embedder_tokenizer = embedder_tokenizer 
+        self.dataset_tokenizer = dataset_tokenizer
         self.use_gc = self.args.use_gc # whether to use gradcache
         self.gc = None # lazily initialized during training
         self._extra_logs = TensorRunningAverages()
@@ -101,9 +105,10 @@ class CustomTrainer(transformers.Trainer):
              return None
         batch = next(iter(dataloader))
         keys = ["query_input_ids", "document_input_ids", "dataset_input_ids"]
+        tokenizers = [ self.embedder_tokenizer,  self.embedder_tokenizer, self.dataset_tokenizer]
         data = [
-                self.embedder_tokenizer.batch_decode(batch[key][:n], skip_special_tokens=True)
-                for key in keys
+                tokenizer.batch_decode(batch[key][:n], skip_special_tokens=True)
+                for (tokenizer, key) in zip(tokenizers, keys)
         ]
         names = [k.replace("_input_ids", "") for k in keys]
         # transpose the list of lists

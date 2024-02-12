@@ -14,15 +14,6 @@ class ModelArguments:
     """
     Arguments pertaining to which model/config/tokenizer we are going to fine-tune, or train from scratch.
     """
-    config_overrides: Optional[str] = field(
-        default=None,
-        metadata={
-            "help": (
-                "Override some existing default config settings when a model is trained from scratch. Example: "
-                "n_embd=10,resid_pdrop=0.2,scale_attn_weights=false,summary_type=cls_index"
-            )
-        },
-    )
     disable_dropout: bool = field(
         default=False,
         metadata={"help": "set model dropout rate to zero"}
@@ -56,8 +47,8 @@ class ModelArguments:
         },
     )
     embedder: str = field(
-        default="distilbert-base-uncased",
-        metadata={"help": "embedder name for the model"}
+        default="t5-base",
+        metadata={"help": "embedder name for the model (encoder-decoder)"}
     )
     dataset_embedder: str = field(
         default="distilbert-base-uncased",
@@ -79,13 +70,6 @@ class ModelArguments:
             "help": "If set, will load backbone and embedders with limited number of layers"
         }
     )
-
-    def __post_init__(self):
-        if self.config_overrides is not None and (self.config_name is not None or self.model_name_or_path is not None):
-            raise ValueError(
-                "--config_overrides can't be used in combination with --config_name or --model_name_or_path"
-            )
-
 
 @dataclass
 class DataArguments:
@@ -186,6 +170,8 @@ class TrainingArguments(transformers.TrainingArguments):
         # )  # Sets threads for hf tokenizers
         self.dataloader_num_workers = num_workers
         self.dataloader_persistent_workers = (num_workers > 0)
+        # self.dataloader_persistent_workers = False # Disabling to see if this fixes an error I had
+        self.dataloader_pin_memory = False
         today_date = datetime.date.today()
         formatted_date = today_date.strftime("%Y-%m-%d")
         self.exp_name = f"{formatted_date}-{self.exp_name}"
