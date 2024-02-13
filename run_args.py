@@ -164,6 +164,7 @@ class TrainingArguments(transformers.TrainingArguments):
         ############################################################################
         num_workers = int(len(os.sched_getaffinity(0)) / torch.cuda.device_count())
         # num_workers = 0 # For debugging
+        num_workers = 1 # For debugging
         ############################################################################
         # os.environ["RAYON_RS_NUM_CPUS"] = str(
         #     num_workers

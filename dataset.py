@@ -515,10 +515,9 @@ class SyntheticWordsDataset(torch.utils.data.Dataset):
             self.embedder_tokenizer, self._embedder_tokenizer_name,
             self.dataset_tokenizer, self._dataset_tokenizer_name,
         )
-        num_samples = 1000
 
         # Create a Zipf distribution
-        alpha = 2.0  # Shape parameter, adjust as needed
+        self.zipf_alpha = 2.0  # Shape parameter, adjust as needed
 
         self.current_dataset_idx: mp.Value = mp.Value('i', 0)
         self.current_term_frequencies = mp.Array('d', len(self.word_list))
@@ -526,7 +525,7 @@ class SyntheticWordsDataset(torch.utils.data.Dataset):
         self.pad_token_id = 0
         self.reset_dataset_idx()
         self.max_size = None
-        self._num_rare_words = 8
+        self._num_rare_words = 4
         self._num_common_words = 24
     
     def __len__(self) -> int:
@@ -540,7 +539,7 @@ class SyntheticWordsDataset(torch.utils.data.Dataset):
         dataset_idx = random.choice(list(range(len(self.word_list))))
         self.current_dataset_idx.value = dataset_idx
         # reset Zipf distribution
-        word_counts = np.random.zipf(a=1.6, size=len(self.word_list))
+        word_counts = np.random.zipf(a=self.zipf_alpha, size=len(self.word_list))
         self.current_term_frequencies[:] = word_counts / word_counts.sum() # set shared array values
 
         low_word_counts = np.zeros_like(word_counts[:])
@@ -562,9 +561,12 @@ class SyntheticWordsDataset(torch.utils.data.Dataset):
         common_terms_dist = array_to_categorical(self.current_term_frequencies)
         rare_terms_dist = array_to_categorical(self.current_term_frequencies_low)
 
-        common_terms_1 = common_terms_dist.sample([self._num_common_words])
-        common_terms_2 = common_terms_dist.sample([self._num_common_words])
-        rare_terms = rare_terms_dist.sample([self._num_rare_words])
+        num_rare_words = np.random.randint(low=1, high=self._num_rare_words)
+        num_common_words = 32 - num_rare_words
+
+        common_terms_1 = common_terms_dist.sample([num_common_words])
+        common_terms_2 = common_terms_dist.sample([num_common_words])
+        rare_terms = rare_terms_dist.sample([num_rare_words])
 
         def doc_ids_to_tensor(ids_tensor: torch.Tensor) -> torch.Tensor:
             ids = ids_tensor.flatten().tolist()
@@ -589,7 +591,7 @@ class SyntheticWordsDataset(torch.utils.data.Dataset):
         query_input_ids = doc_ids_to_tensor(Q)
 
         D = torch.cat((common_terms_2, rare_terms), dim=0)
-        D = D[torch.randperm(Q.shape[0])]
+        D = D[torch.randperm(D.shape[0])]
         document_input_ids = doc_ids_to_tensor(D)
 
         common_terms_3 = common_terms_dist.sample([self._num_common_words + self._num_rare_words])
