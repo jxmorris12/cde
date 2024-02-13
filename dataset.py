@@ -564,8 +564,14 @@ class SyntheticWordsDataset(torch.utils.data.Dataset):
         num_rare_words = np.random.randint(low=1, high=self._num_rare_words)
         num_common_words = 32 - num_rare_words
 
-        common_terms_1 = common_terms_dist.sample([num_common_words])
-        common_terms_2 = common_terms_dist.sample([num_common_words])
+        # common_terms_1 = common_terms_dist.sample([num_common_words])
+        # common_terms_2 = common_terms_dist.sample([num_common_words])
+        # common_terms_3 = common_terms_dist.sample([self._num_common_words + self._num_rare_words])
+
+        common_terms_1 = common_terms_dist.probs.argsort(descending=True)[:num_common_words]
+        common_terms_2 = common_terms_1.clone()
+        common_terms_3 = common_terms_1.clone()
+
         rare_terms = rare_terms_dist.sample([num_rare_words])
 
         def doc_ids_to_tensor(ids_tensor: torch.Tensor) -> torch.Tensor:
@@ -594,7 +600,6 @@ class SyntheticWordsDataset(torch.utils.data.Dataset):
         D = D[torch.randperm(D.shape[0])]
         document_input_ids = doc_ids_to_tensor(D)
 
-        common_terms_3 = common_terms_dist.sample([self._num_common_words + self._num_rare_words])
         Z = common_terms_3
         dataset_input_ids = dataset_ids_to_tensor(Z)
         
