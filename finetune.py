@@ -8,7 +8,7 @@ import transformers
 import wandb
 
 from collate import DocumentQueryCollatorWithPadding
-from dataset import load_reddit_train_and_val, load_synthetic_chars_dataset
+from dataset import load_reddit_train_and_val, load_synthetic_words_dataset
 from helpers import ModelConfig
 from model import Model
 from run_args import ModelArguments, DataArguments, TrainingArguments
@@ -70,8 +70,8 @@ def main():
     # for k, v in retrieval_datasets.items():
     #     v.tokenize(tokenizer=embedder_tokenizer, max_length=model_args.max_seq_length)
 
-    if data_args.dataset == 'synthetic_chars':
-        train_dataset, eval_dataset = load_synthetic_chars_dataset()
+    if data_args.dataset == 'synthetic_words':
+        train_dataset, eval_dataset = load_synthetic_words_dataset()
     elif data_args.dataset == 'reddit_supervised':
         train_dataset, eval_dataset = load_reddit_train_and_val(
             # data_folder="/home/jxm3/research/retrieval/tti3/data/mini",

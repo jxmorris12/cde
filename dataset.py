@@ -454,6 +454,8 @@ def get_char_ids(vocab_size: int, tokenizer_name: str) -> List[torch.Tensor]:
 
 @functools.lru_cache()
 def load_english_single_token_words(
+        embedder_tokenizer: transformers.PreTrainedTokenizer, embedder_tokenizer_name: str,
+        dataset_tokenizer: transformers.PreTrainedTokenizer, dataset_tokenizer_name: str,
     ) -> datasets.Dataset:
     """Loads all the English words from NLTK dictionary that are a single token
     when a space is appended to them.
@@ -462,41 +464,57 @@ def load_english_single_token_words(
     nltk.download('words')
     from nltk.corpus import words
     word_list = words.words()
-    t5_tokenizer = transformers.AutoTokenizer.from_pretrained('t5-base')
-    bert_tokenizer = transformers.AutoTokenizer.from_pretrained('bert-base-uncased')
 
     def tokenize_ex(ex: Dict[str, str]) -> Tuple[torch.Tensor, torch.Tensor]:
-        tt_bert = bert_tokenizer(
+        tt_t5 = embedder_tokenizer(
             [text + " " for text in ex["word"]],
             padding=True, 
             truncation=True,
-            max_length=4, 
+            max_length=2, 
             add_special_tokens=False,
             return_tensors='pt'
         )
-        tt_t5 = t5_tokenizer(
+        tt_bert = dataset_tokenizer(
             [text + " " for text in ex["word"]],
             padding=True, 
             truncation=True,
-            max_length=4, 
+            max_length=2, 
             add_special_tokens=False,
             return_tensors='pt'
         )
         # filter single tokens
-        ex["input_ids_t5"] = tt_t5.input_ids
-        ex["input_ids_bert"] = tt_bert.input_ids
         is_single_token_bert = tt_bert.attention_mask.sum(dim=1) == 1
         is_single_token_t5 = tt_t5.attention_mask.sum(dim=1) == 1
         ex["is_single_token"] = is_single_token_bert & is_single_token_t5
+        ex[f"input_ids_{embedder_tokenizer_name}"] = tt_t5.input_ids[:, 0].tolist()
+        ex[f"input_ids_{dataset_tokenizer_name}"] = tt_bert.input_ids[:, 0].tolist()
         return ex
 
     word_dataset = datasets.Dataset.from_dict({ "word": word_list })
     word_dataset = word_dataset.map(tokenize_ex, batched=True, batch_size=2000, num_proc=get_num_proc())
     return word_dataset.filter(lambda ex: ex["is_single_token"])
 
+
+def array_to_categorical(shared_array: mp.Array) -> torch.distributions.Categorical:
+    return torch.distributions.Categorical(
+        torch.Tensor(
+            np.frombuffer(shared_array.get_obj(), dtype=np.float64)
+        )
+    )
+
+
 class SyntheticWordsDataset(torch.utils.data.Dataset):
     def __init__(self):
-        self.word_list = ['j', 'a', 'c', 'k'] # load_english_single_token_words()
+        # TODO pipe in from outside
+        self._embedder_tokenizer_name = 't5'
+        self._dataset_tokenizer_name = 'bert'
+        self.embedder_tokenizer = transformers.AutoTokenizer.from_pretrained('t5-base')
+        self.dataset_tokenizer = transformers.AutoTokenizer.from_pretrained('bert-base-uncased')
+
+        self.word_list: datasets.Dataset = load_english_single_token_words(
+            self.embedder_tokenizer, self._embedder_tokenizer_name,
+            self.dataset_tokenizer, self._dataset_tokenizer_name,
+        )
         num_samples = 1000
 
         # Create a Zipf distribution
@@ -504,9 +522,12 @@ class SyntheticWordsDataset(torch.utils.data.Dataset):
 
         self.current_dataset_idx: mp.Value = mp.Value('i', 0)
         self.current_term_frequencies = mp.Array('d', len(self.word_list))
+        self.current_term_frequencies_low = mp.Array('d', len(self.word_list))
         self.pad_token_id = 0
         self.reset_dataset_idx()
         self.max_size = None
+        self._num_rare_words = 8
+        self._num_common_words = 24
     
     def __len__(self) -> int:
         return self.max_size or (len(self.word_list) * 64)
@@ -516,32 +537,68 @@ class SyntheticWordsDataset(torch.utils.data.Dataset):
         pass
 
     def reset_dataset_idx(self) -> int:
-        dataset_idx = random.choice(list(range(self.word_list)))
+        dataset_idx = random.choice(list(range(len(self.word_list))))
         self.current_dataset_idx.value = dataset_idx
         # reset Zipf distribution
-        samples = np.random.zipf(a=4.0, n=len(self.word_list))
-        self.current_term_frequencies[:] = samples[:] # set shared array values
+        word_counts = np.random.zipf(a=1.6, size=len(self.word_list))
+        self.current_term_frequencies[:] = word_counts / word_counts.sum() # set shared array values
+
+        low_word_counts = np.zeros_like(word_counts[:])
+        low_freq_words = low_word_counts.argsort()[:len(self.word_list) // 2]
+        low_word_counts[low_freq_words] = 1
+        self.current_term_frequencies_low[:] = low_word_counts / low_word_counts.sum()
+    
+    @property
+    def _document_input_ids_key(self) -> str:
+        """The key in the dataset for document input IDs (tokenizer-specific)."""
+        return f'input_ids_{self._embedder_tokenizer_name}'
+    
+    @property
+    def _dataset_input_ids_key(self) -> str:
+        """The key in the dataset for dataset input IDs (tokenizer-specific)."""
+        return f'input_ids_{self._dataset_tokenizer_name}'
     
     def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]: 
-        doc_id = random.randint(0, self.vocab_size - 1)
-        document_input_ids = self.char_ids[doc_id]
+        common_terms_dist = array_to_categorical(self.current_term_frequencies)
+        rare_terms_dist = array_to_categorical(self.current_term_frequencies_low)
 
-        query_id = (doc_id + self.current_dataset_idx.value) % self.vocab_size
-        query_input_ids = self.char_ids[query_id]
+        common_terms_1 = common_terms_dist.sample([self._num_common_words])
+        common_terms_2 = common_terms_dist.sample([self._num_common_words])
+        rare_terms = rare_terms_dist.sample([self._num_rare_words])
 
-        # Random mappings
-        ex_id = random.randint(0, self.vocab_size - 1)
-        ex_id_2 = (ex_id + self.current_dataset_idx.value) % self.vocab_size
-        dataset_input_ids = torch.cat(
-            (
-                self.char_ids[ex_id][:-1], # cut off EOS
-                self.char_ids[ex_id_2][1:] # cut off BOS :)
-            ), dim=0
-        )
+        def doc_ids_to_tensor(ids_tensor: torch.Tensor) -> torch.Tensor:
+            ids = ids_tensor.flatten().tolist()
+            ids = (
+                ([self.embedder_tokenizer.bos_token_id] if (self.embedder_tokenizer.bos_token_id is not None) else []) + 
+                [self.word_list[idx][self._document_input_ids_key] for idx in ids] +
+                ([self.embedder_tokenizer.eos_token_id] if (self.embedder_tokenizer.eos_token_id is not None) else [])
+            )
+            return torch.tensor(ids)
+
+        def dataset_ids_to_tensor(ids_tensor: torch.Tensor) -> torch.Tensor:
+            ids = ids_tensor.flatten().tolist()
+            ids = (
+                ([self.dataset_tokenizer.bos_token_id] if (self.dataset_tokenizer.bos_token_id is not None) else []) + 
+                [self.word_list[idx][self._dataset_input_ids_key] for idx in ids] +
+                ([self.dataset_tokenizer.eos_token_id] if (self.dataset_tokenizer.eos_token_id is not None) else [])
+            )
+            return torch.tensor(ids)
+
+        Q = torch.cat((common_terms_1, rare_terms), dim=0)
+        Q = Q[torch.randperm(Q.shape[0])]
+        query_input_ids = doc_ids_to_tensor(Q)
+
+        D = torch.cat((common_terms_2, rare_terms), dim=0)
+        D = D[torch.randperm(Q.shape[0])]
+        document_input_ids = doc_ids_to_tensor(D)
+
+        common_terms_3 = common_terms_dist.sample([self._num_common_words + self._num_rare_words])
+        Z = common_terms_3
+        dataset_input_ids = dataset_ids_to_tensor(Z)
         
         return {
-            'idx': doc_id,
-            'idx_query': query_id,
+            'idx': idx,
+            'idx_query': idx,
             ######################################################################
             'dataset_input_ids': dataset_input_ids,
             'dataset_attention_mask': (dataset_input_ids != self.pad_token_id).int(),
@@ -606,6 +663,7 @@ def load_reddit_train_and_val(
 def load_synthetic_words_dataset():
     train = SyntheticWordsDataset()
     eval = SyntheticWordsDataset()
+    eval.max_size = 64 * 8
     return train, eval
 
 
