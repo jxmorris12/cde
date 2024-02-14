@@ -626,6 +626,16 @@ def load_reddit_train_and_val(
                              ) -> Tuple[
     torch.utils.data.Dataset, torch.utils.data.Dataset]:
 
+    data_folder_scratch = (
+        data_folder.replace(
+            "/home/jxm3/research/retrieval/tti3", 
+            "/scratch/jxm3/tti3"
+        )
+    )
+    if os.path.exists(data_folder_scratch):
+        print(f"Updating reddit data folder from {data_folder} to {data_folder_scratch}; hopefully will be faster")
+        data_folder = data_folder_scratch
+
     question_folder = os.path.join(data_folder, "questions64")
     if supervised:
         train = RedditDatasetWithSupervisedQuestions(

@@ -230,7 +230,6 @@ class CustomTrainer(transformers.Trainer):
             }
         else:
             all_document_inputs = document_inputs
-        breakpoint()
 
         if self.use_gc:
             return self.gc(query_inputs, all_document_inputs, no_sync_except_last=False)

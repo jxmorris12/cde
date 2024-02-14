@@ -5,6 +5,7 @@ datasets/
 logs/
 notebooks/
 saves/
+slurm-*.out
 slurm-scripts/
 wandb/
 
