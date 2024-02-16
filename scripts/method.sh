@@ -13,5 +13,5 @@
 python finetune.py --bf16=1 --use_wandb=1 --use_gc=0 --logging_steps=50 \
     --per_device_train_batch_size 64 --per_device_eval_batch_size 64 \
     --exp_name reddit-full-supervised-q64-t5-4 --use_wandb 1 \
-    --num_train_epochs 100.0 --eval_steps 2500 --use_fake_dataset_info 0 \
+    --num_train_epochs 100.0 --eval_steps 5000 --use_fake_dataset_info 0 \
     --torch_compile 1 --torch_compile_mode "max-autotune-no-cudagraphs"

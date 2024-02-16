@@ -164,15 +164,15 @@ class TrainingArguments(transformers.TrainingArguments):
         ############################################################################
         num_workers = int(len(os.sched_getaffinity(0)) / torch.cuda.device_count())
         # num_workers = 0 # For debugging
-        num_workers = 1 # For debugging
+        # num_workers = 1 # For debugging
         ############################################################################
         # os.environ["RAYON_RS_NUM_CPUS"] = str(
         #     num_workers
         # )  # Sets threads for hf tokenizers
         self.dataloader_num_workers = num_workers
         self.dataloader_persistent_workers = (num_workers > 0)
-        # self.dataloader_persistent_workers = False # Disabling to see if this fixes an error I had
-        self.dataloader_pin_memory = False
+        self.dataloader_persistent_workers = False # Disabling to see if this fixes an error I had
+        self.dataloader_pin_memory = True
         today_date = datetime.date.today()
         formatted_date = today_date.strftime("%Y-%m-%d")
         self.exp_name = f"{formatted_date}-{self.exp_name}"

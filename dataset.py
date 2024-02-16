@@ -419,6 +419,9 @@ class RedditDatasetWithSupervisedQuestions(RedditDataset):
         doc_id = query_ex['passage_idx'].item()
         document_input_ids = self.dataset[doc_id][self._document_input_ids_key]
 
+        document_input_ids_dataset_embedder = self.dataset[doc_id][self._dataset_input_ids_key]
+
+
         assert query_ex['subreddit_idx'] == self.dataset[doc_id]['subreddit_idx']
 
         subreddit_idx = query_ex['subreddit_idx'].item()
@@ -429,8 +432,10 @@ class RedditDatasetWithSupervisedQuestions(RedditDataset):
             'idx': doc_id,
             'idx_query': query_id,
             ######################################################################
-            'dataset_input_ids': dataset_input_ids,
-            'dataset_attention_mask': (dataset_input_ids != self.pad_token_id).int(),
+            'dataset_input_ids': document_input_ids_dataset_embedder,
+            'dataset_attention_mask': (document_input_ids_dataset_embedder != self.pad_token_id).int(),
+            # 'dataset_input_ids': dataset_input_ids,
+            # 'dataset_attention_mask': (dataset_input_ids != self.pad_token_id).int(),
             ######################################################################
             'query_input_ids': query_input_ids,
             'query_attention_mask': (query_input_ids != self.pad_token_id).int(),
