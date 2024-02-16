@@ -413,7 +413,8 @@ class RedditDatasetWithSupervisedQuestions(RedditDataset):
         dataset_idx = self.current_dataset_idx.value        
 
         dataset_questions = self.subreddit_questions[dataset_idx]
-        query_id = dataset_questions[idx % len(dataset_questions)]
+        query_id = random.choice(dataset_questions)
+        # query_id = dataset_questions[idx % len(dataset_questions)]
         query_ex = self.question_dataset[query_id]
         query_input_ids = query_ex[self._question_input_ids_key]
         doc_id = query_ex['passage_idx'].item()
