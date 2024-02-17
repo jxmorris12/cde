@@ -1,5 +1,3 @@
-
-
-sbatch control.sh
-sbatch method_batch.sh
-sbatch method_random.sh
+sbatch scripts/control.sh
+sbatch scripts/method_batch.sh
+sbatch scripts/method_random.sh

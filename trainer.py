@@ -35,6 +35,7 @@ class CustomTrainer(transformers.Trainer):
             "document_input_ids", "document_attention_mask",
             "negative_document_input_ids", "negative_document_attention_mask",
             "dataset_input_ids", "dataset_attention_mask",
+            "batch_dataset_input_ids", "batch_dataset_attention_mask",
             "query_input_ids", "query_attention_mask",
         ]
         self.embedder_tokenizer = embedder_tokenizer 
@@ -229,9 +230,15 @@ class CustomTrainer(transformers.Trainer):
 
         if self.args.dataset_info == "fake":
             batch_size = dataset_inputs["input_ids"].shape[0]
-            fake_seq_length = 16
-            fake_dataset_input_ids = torch.ones((batch_size, fake_seq_length), device=dataset_inputs["input_ids"].device)
-            fake_dataset_attention_mask = torch.ones((batch_size, fake_seq_length), device=dataset_inputs["input_ids"].device)
+            fake_seq_length = 64
+            fake_dataset_input_ids = torch.ones(
+                (batch_size, fake_seq_length), device=dataset_inputs["input_ids"].device,
+                dtype=torch.long
+            )
+            fake_dataset_attention_mask = torch.ones(
+                (batch_size, fake_seq_length), device=dataset_inputs["input_ids"].device,
+                dtype=torch.long
+            )
             query_inputs["dataset_input_ids"] = fake_dataset_input_ids
             query_inputs["dataset_attention_mask"] = fake_dataset_attention_mask
             document_inputs["dataset_input_ids"] = fake_dataset_input_ids
