@@ -88,9 +88,12 @@ class DataArguments:
 
 @dataclass
 class TrainingArguments(transformers.TrainingArguments):
-    use_fake_dataset_info: bool = field(
-        default=False,
-        metadata={"help": "whether to use fake info for dataset (as opposed to our method)"}
+    dataset_info: str = field(
+        default="random",
+        metadata={
+            "help": "whether to use fake info for dataset (as opposed to our method)",
+            "choices": ["random", "batch", "fake"],
+        }
     )
     # https://github.com/huggingface/transformers/blob/e82c1cb78e178519060b9391214727be75a218ca/src/transformers/training_args.py#L121
     output_dir: str = field(
@@ -134,6 +137,8 @@ class TrainingArguments(transformers.TrainingArguments):
         default=100,
          metadata={"help": "Number of reranked examples during eval"}
     )
+    save_strategy: str = "steps"
+    save_steps: int = 5000
     save_total_limit: int = 1  # Maximum number of checkpoints to save.
 
     exp_name: str = field(
@@ -175,6 +180,7 @@ class TrainingArguments(transformers.TrainingArguments):
         self.dataloader_pin_memory = True
         today_date = datetime.date.today()
         formatted_date = today_date.strftime("%Y-%m-%d")
+        self.exp_name__no_date = "self.exp_name"
         self.exp_name = f"{formatted_date}-{self.exp_name}"
         self.output_dir = os.path.join("saves", self.exp_name)
         print(f"outputting model to directory: {self.output_dir}")

@@ -1,4 +1,4 @@
-from torch.utils.data import Dataset
+from typing import Optional
 import os
 import logging
 import os
@@ -16,6 +16,47 @@ from trainer import CustomTrainer
 
 assert torch.cuda.device_count() > 0, "can't train without CUDA"
 
+logger = logging.getLogger(__name__)
+
+
+def get_checkpoint(training_args) -> Optional[str]:
+    last_checkpoint = None
+    if (
+        os.path.isdir(training_args.output_dir)
+        and not training_args.overwrite_output_dir
+    ):
+        last_checkpoint = transformers.trainer_utils.get_last_checkpoint(
+            training_args.output_dir
+        )
+        if (
+            last_checkpoint is None
+            and len(os.listdir(training_args.output_dir)) > 0
+        ):
+            raise ValueError(
+                f"Output directory ({training_args.output_dir}) already exists and is not empty. "
+                "Use --overwrite_output_dir to overcome."
+            )
+        elif (
+            last_checkpoint is not None
+            and training_args.resume_from_checkpoint is None
+        ):
+            logger.info(
+                f"Checkpoint detected, resuming training at {last_checkpoint}. To avoid this behavior, change "
+                "the `--output_dir` or add `--overwrite_output_dir` to train from scratch."
+            )
+    checkpoint = None
+    if training_args.resume_from_checkpoint is not None:
+        checkpoint = training_args.resume_from_checkpoint
+    elif last_checkpoint is not None:
+        checkpoint = last_checkpoint
+
+    if checkpoint:
+        logger.info("Loading from checkpoint %s", checkpoint)
+    else:
+        logger.info("No checkpoint found, training from scratch")
+
+    return checkpoint
+
 
 def main():
     # Helps with debugging.
@@ -25,7 +66,7 @@ def main():
     # torch._dynamo.config.verbose = True
 
     # Allow W&B to start slowly.
-    os.environ["WANDB__SERVICE_WAIT"] = "300"
+    os.environ["WANDB__SERVICE_WAIT"] = "30" # This used to be 300 but was causing errors for me.
     os.environ["_WANDB_STARTUP_DEBUG"] = "true"
 
     # Fast data processing at risk of deadlocks...
@@ -117,8 +158,11 @@ def main():
         embedder_tokenizer=embedder_tokenizer,
         retrieval_datasets={},
     )
+
+    checkpoint = get_checkpoint(training_args)
+    logging.info("train() loaded checkpoint %s", checkpoint)
     # trainer.evaluate_retrieval_datasets()
-    trainer.train()
+    trainer.train(resume_from_checkpoint=checkpoint)
 
 
 if __name__ == '__main__':

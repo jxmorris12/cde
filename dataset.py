@@ -327,7 +327,7 @@ class RedditDataset(torch.utils.data.Dataset):
         pass
 
     def __len__(self):
-        return len(self.subreddit_keys)
+        return len(self.subreddit_keys) * 64
 
     def reset_dataset_idx(self) -> int:
         dataset_idx = random.choice(list(self.subreddit_idxs.keys()))
@@ -383,15 +383,18 @@ class RedditDatasetWithSupervisedQuestions(RedditDataset):
         self._embedder_tokenizer_name = 't5'
         self._dataset_tokenizer_name = 'bert'
 
+        self.size = None
+
     def reset_dataset_idx(self) -> int:
         if not len(self.subreddit_questions.keys()):
             print("WARNING: Tried to reset dataset w/o any loaded.")
         else:
             dataset_idx = random.choice(list(self.subreddit_questions.keys()))
+            random.shuffle(self.subreddit_questions[dataset_idx])
             self.current_dataset_idx.value = dataset_idx
 
     def __len__(self):
-        return len(self.subreddit_questions) * 64
+        return self.size or len(self.subreddit_questions) * 64
     
     @property
     def _question_input_ids_key(self) -> str:
@@ -413,8 +416,8 @@ class RedditDatasetWithSupervisedQuestions(RedditDataset):
         dataset_idx = self.current_dataset_idx.value        
 
         dataset_questions = self.subreddit_questions[dataset_idx]
-        query_id = random.choice(dataset_questions)
-        # query_id = dataset_questions[idx % len(dataset_questions)]
+        # query_id = random.choice(dataset_questions)
+        query_id = dataset_questions[idx % len(dataset_questions)]
         query_ex = self.question_dataset[query_id]
         query_input_ids = query_ex[self._question_input_ids_key]
         doc_id = query_ex['passage_idx'].item()
@@ -433,10 +436,11 @@ class RedditDatasetWithSupervisedQuestions(RedditDataset):
             'idx': doc_id,
             'idx_query': query_id,
             ######################################################################
-            'dataset_input_ids': document_input_ids_dataset_embedder,
-            'dataset_attention_mask': (document_input_ids_dataset_embedder != self.pad_token_id).int(),
-            # 'dataset_input_ids': dataset_input_ids,
-            # 'dataset_attention_mask': (dataset_input_ids != self.pad_token_id).int(),
+            'batch_dataset_input_ids': document_input_ids_dataset_embedder,
+            'batch_dataset_attention_mask': (document_input_ids_dataset_embedder != self.pad_token_id).int(),
+            ######################################################################
+            'dataset_input_ids': dataset_input_ids,
+            'dataset_attention_mask': (dataset_input_ids != self.pad_token_id).int(),
             ######################################################################
             'query_input_ids': query_input_ids,
             'query_attention_mask': (query_input_ids != self.pad_token_id).int(),
@@ -626,11 +630,10 @@ class SyntheticWordsDataset(torch.utils.data.Dataset):
 
 
 def load_reddit_train_and_val(
-                              data_folder: str,
-                              perc: float = 0.9,
-                              supervised: bool = False
-                             ) -> Tuple[
-    torch.utils.data.Dataset, torch.utils.data.Dataset]:
+        data_folder: str,
+        perc: float = 0.9,
+        supervised: bool = False
+    ) -> Tuple[torch.utils.data.Dataset, torch.utils.data.Dataset]:
 
     data_folder_scratch = (
         data_folder.replace(

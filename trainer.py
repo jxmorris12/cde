@@ -81,14 +81,29 @@ class CustomTrainer(transformers.Trainer):
         self.train_dataloader = train_dataloader
         return train_dataloader
 
-    def get_eval_dataloader(self, *args, **kwargs) -> torch.utils.data.DataLoader:
+    def get_eval_dataloader(self, eval_dataset: Optional[torch.utils.data.Dataset]) -> torch.utils.data.DataLoader:
         """This is a clever bit of code that will do evaluation with
         a different dataset per evaluation batch.
         """
-        eval_dataloader = super().get_eval_dataloader(
-            *args, **kwargs
-        )
+        data_collator = self.data_collator
 
+        if isinstance(eval_dataset, datasets.Dataset):
+            eval_dataset = self._remove_unused_columns(eval_dataset, description="evaluation")
+        else:
+            data_collator = self._get_collator_with_removed_columns(data_collator, description="evaluation")
+        
+        eval_dataset.size = (self.args.eval_batch_size * 16)
+        
+        eval_dataloader = torch.utils.data.DataLoader(
+            eval_dataset,
+            sampler=self._get_eval_sampler(eval_dataset),
+            batch_size=self.args.eval_batch_size,
+            collate_fn=data_collator,
+            drop_last=self.args.dataloader_drop_last,
+            num_workers=self.args.dataloader_num_workers,
+            pin_memory=self.args.dataloader_pin_memory,
+            prefetch_factor=1,
+        )
         def advance_and_return(x):
             eval_dataloader.dataset.reset_dataset_idx()
             return x
@@ -210,16 +225,28 @@ class CustomTrainer(transformers.Trainer):
         document_inputs = inputs_for_key(inputs, key="document")
         negative_document_inputs = inputs_for_key(inputs, key="negative_document")
         dataset_inputs = inputs_for_key(inputs, key="dataset")
+        batch_dataset_inputs = inputs_for_key(inputs, key="batch_dataset")
 
-        document_inputs["dataset_input_ids"] = dataset_inputs["input_ids"]
-        document_inputs["dataset_attention_mask"] = dataset_inputs["attention_mask"]
+        if self.args.dataset_info == "fake":
+            batch_size = dataset_inputs["input_ids"].shape[0]
+            fake_seq_length = 16
+            fake_dataset_input_ids = torch.ones((batch_size, fake_seq_length), device=dataset_inputs["input_ids"].device)
+            fake_dataset_attention_mask = torch.ones((batch_size, fake_seq_length), device=dataset_inputs["input_ids"].device)
+            query_inputs["dataset_input_ids"] = fake_dataset_input_ids
+            query_inputs["dataset_attention_mask"] = fake_dataset_attention_mask
+            document_inputs["dataset_input_ids"] = fake_dataset_input_ids
+            document_inputs["dataset_attention_mask"] = fake_dataset_attention_mask
+        elif self.args.dataset_info == "batch":
+            query_inputs["dataset_input_ids"] = batch_dataset_inputs["input_ids"]
+            query_inputs["dataset_attention_mask"] = batch_dataset_inputs["attention_mask"]
+            document_inputs["dataset_input_ids"] = batch_dataset_inputs["input_ids"]
+            document_inputs["dataset_attention_mask"] = batch_dataset_inputs["attention_mask"]
+        else:
+            document_inputs["dataset_input_ids"] = dataset_inputs["input_ids"]
+            document_inputs["dataset_attention_mask"] = dataset_inputs["attention_mask"]
+            query_inputs["dataset_input_ids"] = dataset_inputs["input_ids"]
+            query_inputs["dataset_attention_mask"] = dataset_inputs["attention_mask"]
 
-        query_inputs["dataset_input_ids"] = dataset_inputs["input_ids"]
-        query_inputs["dataset_attention_mask"] = dataset_inputs["attention_mask"]
-
-        if self.args.use_fake_dataset_info:
-            query_inputs["dataset_input_ids"] = torch.ones_like(dataset_inputs["input_ids"], device=dataset_inputs["input_ids"].device)
-            document_inputs["dataset_input_ids"] = torch.ones_like(dataset_inputs["input_ids"], device=dataset_inputs["input_ids"].device)
 
         if len(negative_document_inputs):
             all_document_inputs = {

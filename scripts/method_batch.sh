@@ -12,6 +12,7 @@
 
 python finetune.py --bf16=1 --use_wandb=1 --use_gc=0 --logging_steps=100 \
     --per_device_train_batch_size 64 --per_device_eval_batch_size 64 \
-    --exp_name reddit-fake-1 --use_wandb 1 \
+    --exp_name reddit-batch-1 --use_wandb 1 \
     --num_train_epochs 100.0 --eval_steps 10000 --dataset_info "batch" \
     --torch_compile 1 --torch_compile_mode "max-autotune-no-cudagraphs"
+    
