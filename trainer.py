@@ -9,7 +9,6 @@ import wandb
 from gradcache import GradCache
 from dataset import BeirDataset
 from helpers import RerankHelper
-from model import Model
 from utils import TensorRunningAverages
 
 
@@ -103,7 +102,7 @@ class CustomTrainer(transformers.Trainer):
             drop_last=self.args.dataloader_drop_last,
             num_workers=self.args.dataloader_num_workers,
             pin_memory=self.args.dataloader_pin_memory,
-            prefetch_factor=1,
+            # prefetch_factor=1,
         )
         def advance_and_return(x):
             eval_dataloader.dataset.reset_dataset_idx()
@@ -218,7 +217,7 @@ class CustomTrainer(transformers.Trainer):
 
     def compute_loss(
         self,
-        model: Model,
+        model: transformers.PreTrainedModel,
         inputs: Dict[str, torch.Tensor],
         return_outputs: bool = False,
     ) -> Union[Tuple[torch.Tensor, Dict[str, torch.Tensor]], torch.Tensor]:

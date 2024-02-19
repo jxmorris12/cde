@@ -380,7 +380,7 @@ class RedditDatasetWithSupervisedQuestions(RedditDataset):
             os.path.join(question_folder, 'test.dataset'))
         self.question_dataset.set_format('pt')
 
-        self._embedder_tokenizer_name = 't5'
+        self._embedder_tokenizer_name = 'bert'
         self._dataset_tokenizer_name = 'bert'
 
         self.size = None

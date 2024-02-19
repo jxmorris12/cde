@@ -10,7 +10,7 @@ import wandb
 from collate import DocumentQueryCollatorWithPadding
 from dataset import load_reddit_train_and_val, load_synthetic_words_dataset
 from helpers import ModelConfig
-from model import Model
+from model import get_model_class
 from run_args import ModelArguments, DataArguments, TrainingArguments
 from trainer import CustomTrainer
 
@@ -83,6 +83,7 @@ def main():
     embedder = transformers.AutoModel.from_pretrained(model_args.embedder)
     embedder_tokenizer = transformers.AutoTokenizer.from_pretrained(model_args.embedder)
     dataset_embedder = transformers.AutoModel.from_pretrained(model_args.dataset_embedder)
+    dataset_backbone = transformers.AutoModel.from_pretrained(model_args.dataset_embedder)
     dataset_tokenizer = transformers.AutoTokenizer.from_pretrained(model_args.dataset_embedder)
 
     # beir_dataset_names = [
@@ -132,7 +133,13 @@ def main():
         raise ValueError(f'Unsupported dataset {data_args.dataset}')
 
     model_config = ModelConfig(**vars(model_args))
-    model = Model(config=model_config, embedder=embedder, dataset_embedder=dataset_embedder)
+    model_cls = get_model_class('mlp') # TODO: argparse.
+    model = model_cls(
+        config=model_config,
+        embedder=embedder,
+        dataset_embedder=dataset_embedder,
+        dataset_backbone=dataset_backbone,
+    )
     wandb_run_id = training_args.exp_name
     print("starting wandb run with name", wandb_run_id)
     wandb.init(
