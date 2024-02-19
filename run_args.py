@@ -70,6 +70,12 @@ class ModelArguments:
             "help": "If set, will load backbone and embedders with limited number of layers"
         }
     )
+    gamma: float = field(
+        default=0.9,
+        metadata={
+            "help": "Weighting between document and dataset embedding for dataset transformer"
+        }
+    )
 
 @dataclass
 class DataArguments:

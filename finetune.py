@@ -133,7 +133,7 @@ def main():
         raise ValueError(f'Unsupported dataset {data_args.dataset}')
 
     model_config = ModelConfig(**vars(model_args))
-    model_cls = get_model_class('mlp') # TODO: argparse.
+    model_cls = get_model_class('biencoder') # TODO: argparse.
     model = model_cls(
         config=model_config,
         embedder=embedder,

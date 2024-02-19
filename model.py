@@ -155,10 +155,8 @@ class TwoEmbeddersWithMLP(transformers.PreTrainedModel):
             torch.nn.Linear(self.hidden_size * 2, self.hidden_size),
         )
 
-        self.gamma = 0.0
         if config.disable_dropout:
             disable_dropout(self)
-        self.tok = transformers.AutoTokenizer.from_pretrained('bert-base-uncased') # for debugging)
     
     def forward(
             self,
@@ -195,15 +193,189 @@ class TwoEmbeddersWithMLP(transformers.PreTrainedModel):
             ),
             dim=1
         )
-        # TODO use self.gamma here
         outputs = self.mlp(mlp_input_embeddings)
         assert outputs.shape == (batch_size, self.hidden_size)
         return outputs
+
+
+class DatasetTransformer(transformers.PreTrainedModel):
+    embedder: transformers.PreTrainedModel
+    dataset_embedder: transformers.PreTrainedModel
+    dataset_backbone: transformers.PreTrainedModel
+    def __init__(
+            self, 
+            config, #: transformers.PreTrainedConfig, 
+            embedder: transformers.PreTrainedModel, 
+            dataset_embedder: transformers.PreTrainedModel, 
+            dataset_backbone: transformers.PreTrainedModel,
+        ):
+        super().__init__(config=config)
+        self.tokenizer = transformers.AutoTokenizer.from_pretrained('bert-base-uncased')
+
+        if config.limit_layers:
+            print(f"Limiting layers to {config.limit_layers}")
+            embedder.transformer.layer = embedder.transformer.layer[:config.limit_layers]
+            dataset_backbone.transformer.layer = dataset_backbone.transformer.layer[:config.limit_layers]   
+        
+        del dataset_embedder
+        self.embedder = embedder
+        self.dataset_backbone = dataset_backbone
+
+        self.hidden_size = self.embedder.config.hidden_size
+
+        # TODO make this a little nicer. (Not every model has 'embeddings...')
+        self.backbone = dataset_backbone
+        self.backbone.embeddings.position_embeddings.weight.requires_grad = False
+        self.backbone.embeddings.position_embeddings.weight.fill_(0.0)
+
+        self.embedding_dim = self.embedder.config.hidden_size
+        self.hidden_size = self.backbone.config.hidden_size
+
+        self.n_sequence = 16
+        self.prompt_projection = torch.nn.Sequential(
+            torch.nn.Linear(self.embedding_dim, self.hidden_size),
+            torch.nn.ReLU(),
+            torch.nn.Linear(self.hidden_size, self.hidden_size * self.n_sequence)
+        )
+        self.query_projection = torch.nn.Sequential(
+            torch.nn.Linear(self.embedding_dim, self.hidden_size),
+            torch.nn.ReLU(),
+            torch.nn.Linear(self.hidden_size, self.hidden_size * self.n_sequence)
+        )
+        self.corpus_projection = torch.nn.Sequential(
+            torch.nn.Linear(self.embedding_dim, self.hidden_size),
+            torch.nn.ReLU(),
+            torch.nn.Linear(self.hidden_size, self.hidden_size)
+        )
+
+        # whether to share hard negatives between queries.
+        # TODO argparse for this.
+        self.share_hard_negatives = False
+
+        self.gamma = config.gamma
+        if config.disable_dropout:
+            disable_dropout(self)
+
+    def forward(
+            self, 
+            input_ids: torch.Tensor,
+            attention_mask: torch.Tensor,
+            dataset_input_ids: torch.Tensor,
+            dataset_attention_mask: torch.Tensor,
+        ) -> torch.Tensor:
+        """
+        query_embedding (float torch.Tensor) - shape (batch_size, embedding_dim)
+        document_embeddings (float torch.Tensor) - shape (corpus_size, embedding_dim)
+            where the corpus_size >= batch_size and is structured like this:
+                [d1, d2, d3, hn1_1, hn1_2, hn2_1, hn2_2, hn3_1, hn3_2]
+                for a corpus with three documents and two hard negatives per document
+        """
+        del dataset_input_ids
+        del dataset_attention_mask
+
+        outputs = (
+            self.embedder(
+                input_ids=input_ids,
+                attention_mask=attention_mask).last_hidden_state
+        )
+        document_embeddings = mean_pool(outputs, attention_mask)
+        document_embeddings = document_embeddings[None, :, :]
+        
+        batch_size = input_ids.shape[0]
+        document_embeddings = self.corpus_projection(document_embeddings)
+        _, corpus_size, hidden_dim = document_embeddings.shape
+        assert _ == 1
+        
+        # TODO: we shouldn't need to apply the below constraint if we property disable backbone
+        # model positionality.
+        backbone_max_seq_length = self.backbone.config.max_position_embeddings
+        assert batch_size + (2 * self.n_sequence + corpus_size) < backbone_max_seq_length, "too many hard negatives for backbone model"
+
+        soft_prompt = torch.ones((1, self.embedding_dim), device=document_embeddings.device, dtype=torch.float32)
+        soft_prompt = self.prompt_projection(soft_prompt).reshape((1, self.n_sequence, self.hidden_size))
+        
+        inputs_embeds = document_embeddings
+        inputs_embeds = torch.cat((soft_prompt, inputs_embeds), dim=1)
+        output = self.backbone(
+            inputs_embeds=inputs_embeds,
+        )
+        # trim soft prompt
+        output_vectors = output.last_hidden_state[:, self.n_sequence:, :]
+        # average with original vectors
+        output_vectors = (document_embeddings * self.gamma) + (output_vectors * (1 - self.gamma))
+        # return
+        return output_vectors.squeeze(dim=0)
+
+
+class BiEncoder(transformers.PreTrainedModel):
+    embedder: transformers.PreTrainedModel
+    def __init__(
+            self, 
+            config, #: transformers.PreTrainedConfig, 
+            embedder: transformers.PreTrainedModel, 
+            dataset_embedder: transformers.PreTrainedModel, 
+            dataset_backbone: transformers.PreTrainedModel,
+        ):
+        super().__init__(config=config)
+        self.tokenizer = transformers.AutoTokenizer.from_pretrained('bert-base-uncased')
+
+        if config.limit_layers:
+            print(f"Limiting layers to {config.limit_layers}")
+            embedder.transformer.layer = embedder.transformer.layer[:config.limit_layers]
+            dataset_backbone.transformer.layer = dataset_backbone.transformer.layer[:config.limit_layers]   
+        
+        del dataset_embedder
+        del dataset_backbone
+        self.embedder = embedder
+        self.hidden_size = self.embedder.config.hidden_size
+        self.mlp = torch.nn.Sequential(
+            torch.nn.Linear(self.hidden_size, self.hidden_size),
+            torch.nn.GELU(),
+            torch.nn.Linear(self.hidden_size, self.hidden_size * 2),
+            torch.nn.GELU(),
+            torch.nn.Linear(self.hidden_size * 2, self.hidden_size),
+        )
+
+        if config.disable_dropout:
+            disable_dropout(self)
+
+        self.embedding_dim = self.embedder.config.hidden_size
+
+    def forward(
+            self, 
+            input_ids: torch.Tensor,
+            attention_mask: torch.Tensor,
+            dataset_input_ids: torch.Tensor,
+            dataset_attention_mask: torch.Tensor,
+        ) -> torch.Tensor:
+        """
+        query_embedding (float torch.Tensor) - shape (batch_size, embedding_dim)
+        document_embeddings (float torch.Tensor) - shape (corpus_size, embedding_dim)
+            where the corpus_size >= batch_size and is structured like this:
+                [d1, d2, d3, hn1_1, hn1_2, hn2_1, hn2_2, hn3_1, hn3_2]
+                for a corpus with three documents and two hard negatives per document
+        """
+        del dataset_input_ids
+        del dataset_attention_mask
+
+        outputs = (
+            self.embedder(
+                input_ids=input_ids,
+                attention_mask=attention_mask).last_hidden_state
+        )
+        document_embeddings = mean_pool(outputs, attention_mask)
+        # return
+        return self.mlp(document_embeddigns)
+
 
 def get_model_class(name: str):
     if name == 'mlp':
         return TwoEmbeddersWithMLP
     elif name == 'encoder_decoder':
         return EncoderDecoderWithDatasetEmbedder
+    elif name == 'dataset_transformer':
+        return DatasetTransformer
+    elif name == 'biencoder':
+        return BiEncoder
     else:
         raise ValueError(f'unknown model cls {name}')

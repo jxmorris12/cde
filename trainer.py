@@ -173,10 +173,11 @@ class CustomTrainer(transformers.Trainer):
         # of multiplying the cosine similarity score by 20 for
         # better optimization (Thakur et al., 2021)."
         # 
+        scores *= 20  # TODO argparse: self.args.contrastive_temperature.exp()
+
         one_hot_labels = (idx[:, None] == idx[None, :]).float()
         labels = one_hot_labels / one_hot_labels.sum(dim=1)
 
-        scores *= 20  # TODO argparse: self.args.contrastive_temperature.exp()
         loss = torch.nn.functional.cross_entropy(
             scores, labels, label_smoothing=0.0
         )
