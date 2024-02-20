@@ -91,22 +91,6 @@ def load_msmarco_hard_negatives() -> Dict[str, Dict[str, Any]]:
     
     return train_queries
 
-
-def get_bm25_results(dataset: str, corpus, queries) -> Dict:
-    from beir.retrieval.evaluation import EvaluateRetrieval
-    from beir.retrieval.search.lexical import BM25Search as BM25
-
-    index_name = f"beir_{dataset}"
-    username = "elastic"
-    password = "FjZD_LI-=AJOtsfpq9U*"
-
-    # url = f"https://{username}:{password}@rush-compute-01.tech.cornell.edu:9200""
-    hostname = f"{username}:{password}@rush-compute-01.tech.cornell.edu:9200"
-    bm25_model = BM25(index_name=index_name, hostname=hostname, initialize=True)
-    retriever = EvaluateRetrieval(bm25_model)
-    return retriever.retrieve(corpus, queries)
-
-
 def get_ance_results(dataset: str, corpus, queries) -> Dict:
     if len(corpus) > 100_000:
         print(f"Auto-skipping ANCE evaluation of {dataset} -- corpus too large.")
@@ -293,7 +277,7 @@ class BeirDataset(torch.utils.data.Dataset):
 
 
 class RedditDataset(torch.utils.data.Dataset):
-    def __init__(self, data_folder: str, min_examples_per_subreddit: int = 256):
+    def __init__(self, data_folder: str, min_examples_per_subreddit: int = 0):
         self.current_dataset_idx: mp.Value = mp.Value('i', 0)
         print(f"Loading Reddit data from path: {data_folder}")
         self.dataset = datasets_fast_load_from_disk(
@@ -411,23 +395,20 @@ class RedditDatasetWithSupervisedQuestions(RedditDataset):
         """The key in the dataset for dataset input IDs (tokenizer-specific)."""
         return f'input_ids_{self._dataset_tokenizer_name}'
     
-    def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]: 
+    def first(self) -> Dict[str, torch.Tensor]:
+        subreddit_question_idxs = list(next(iter(self.subreddit_questions.values())))
+        random_question_idx = subreddit_question_idxs[0]
+        return self[random_question_idx]
+    
+    def __getitem__(self, query_id: int) -> Dict[str, torch.Tensor]: 
         # TODO allow other dataset sampling strategies from T0 paper.
-        dataset_idx = self.current_dataset_idx.value        
-
-        dataset_questions = self.subreddit_questions[dataset_idx]
-        # query_id = random.choice(dataset_questions)
-        query_id = dataset_questions[idx % len(dataset_questions)]
         query_ex = self.question_dataset[query_id]
         query_input_ids = query_ex[self._question_input_ids_key]
         doc_id = query_ex['passage_idx'].item()
         document_input_ids = self.dataset[doc_id][self._document_input_ids_key]
 
         document_input_ids_dataset_embedder = self.dataset[doc_id][self._dataset_input_ids_key]
-
-
         assert query_ex['subreddit_idx'] == self.dataset[doc_id]['subreddit_idx']
-
         subreddit_idx = query_ex['subreddit_idx'].item()
         random_idx_within_subreddit = random.choice(self.subreddit_idxs[subreddit_idx])
         dataset_input_ids = self.dataset[random_idx_within_subreddit][self._dataset_input_ids_key]
@@ -682,7 +663,7 @@ def load_reddit_train_and_val(
     eval.subreddit_questions = { k: v for k,v in eval.subreddit_questions.items() if k in eval_subreddits }
     eval.reset_dataset_idx()
 
-    print("First train point:", train[0])
+    print("First train point:", train.first())
     return train, eval
 
 
@@ -710,3 +691,4 @@ if __name__ == '__main__':
     # )
     ds_train, ds_val = load_synthetic_words_dataset()
     print(ds_train[0])
+

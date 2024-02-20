@@ -9,6 +9,7 @@ import wandb
 from gradcache import GradCache
 from dataset import BeirDataset
 from helpers import RerankHelper
+from sampler import RedditSampler
 from utils import TensorRunningAverages
 
 
@@ -43,9 +44,20 @@ class CustomTrainer(transformers.Trainer):
         self.gc = None # lazily initialized during training
         self._extra_logs = TensorRunningAverages()
     
-    # def _get_train_sampler(self) -> Optional[torch.utils.data.Sampler]:
-    #     # Don't sample train data; it's already randomizing itself.
-    #     return None
+    def _get_train_sampler(self) -> torch.utils.data.Sampler:
+        return RedditSampler(
+            dataset=self.train_dataset, 
+            batch_size=self.args.per_device_train_batch_size,
+            shuffle=True,
+        )
+    
+    def _get_eval_sampler(self, eval_dataset: datasets.Dataset) -> torch.utils.data.Sampler:
+        return RedditSampler(
+            eval_dataset, 
+            batch_size=self.args.per_device_eval_batch_size,
+            shuffle=False,
+            max_num_batches=512,
+        )
     
     def _log_extra(self, key: str, val: torch.Tensor):
         self._extra_logs.update(key, val)
@@ -91,8 +103,6 @@ class CustomTrainer(transformers.Trainer):
             eval_dataset = self._remove_unused_columns(eval_dataset, description="evaluation")
         else:
             data_collator = self._get_collator_with_removed_columns(data_collator, description="evaluation")
-        
-        eval_dataset.size = (self.args.eval_batch_size * 16)
         
         eval_dataloader = torch.utils.data.DataLoader(
             eval_dataset,

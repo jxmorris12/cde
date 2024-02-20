@@ -4,6 +4,15 @@ import torch
 import transformers
 
 
+def limit_layers(model: transformers.PreTrainedModel, n_layers: int) -> None:
+    if hasattr(model, 'transformer'):
+        model.transformer.layer = model.transformer.layer[:n_layers]
+    elif hasattr(model, 'encoder'):
+        model.encoder.layer = model.encoder.layer[:n_layers]
+    else:
+        raise RuntimeError(f"unknown how to limit layers of model {type(model)}")
+
+
 def disable_dropout(model: torch.nn.Module):
     dropout_modules = [m for m in model.modules() if isinstance(m, torch.nn.Dropout)]
     for m in dropout_modules:
@@ -37,8 +46,8 @@ class EncoderDecoderWithDatasetEmbedder(transformers.PreTrainedModel):
 
         if config.limit_layers:
             print(f"Limiting layers to {config.limit_layers}")
-            embedder.transformer.layer = embedder.transformer.layer[:config.limit_layers]
-            dataset_embedder.transformer.layer = dataset_embedder.transformer.layer[:config.limit_layers]
+            limit_layers(embedder, config.limit_layers)
+            limit_layers(dataset_embedder, config.limit_layers)
         
         self.embedder = embedder
         self.dataset_embedder = dataset_embedder
@@ -129,9 +138,9 @@ class TwoEmbeddersWithMLP(transformers.PreTrainedModel):
 
         if config.limit_layers:
             print(f"Limiting layers to {config.limit_layers}")
-            embedder.transformer.layer = embedder.transformer.layer[:config.limit_layers]
-            dataset_embedder.transformer.layer = dataset_embedder.transformer.layer[:config.limit_layers]
-            dataset_backbone.transformer.layer = dataset_backbone.transformer.layer[:config.limit_layers]
+            limit_layers(embedder, config.limit_layers)
+            limit_layers(dataset_embedder, config.limit_layers)
+            limit_layers(dataset_backbone, config.limit_layers)
         self.embedder = embedder
         self.dataset_embedder = dataset_embedder
 
@@ -214,8 +223,8 @@ class DatasetTransformer(transformers.PreTrainedModel):
 
         if config.limit_layers:
             print(f"Limiting layers to {config.limit_layers}")
-            embedder.transformer.layer = embedder.transformer.layer[:config.limit_layers]
-            dataset_backbone.transformer.layer = dataset_backbone.transformer.layer[:config.limit_layers]   
+            limit_layers(embedder, config.limit_layers)
+            limit_layers(dataset_backbone, config.limit_layers)
         
         del dataset_embedder
         self.embedder = embedder
@@ -231,7 +240,7 @@ class DatasetTransformer(transformers.PreTrainedModel):
         self.embedding_dim = self.embedder.config.hidden_size
         self.hidden_size = self.backbone.config.hidden_size
 
-        self.n_sequence = 16
+        self.n_sequence = 4
         self.prompt_projection = torch.nn.Sequential(
             torch.nn.Linear(self.embedding_dim, self.hidden_size),
             torch.nn.ReLU(),
@@ -289,7 +298,7 @@ class DatasetTransformer(transformers.PreTrainedModel):
         # TODO: we shouldn't need to apply the below constraint if we property disable backbone
         # model positionality.
         backbone_max_seq_length = self.backbone.config.max_position_embeddings
-        assert batch_size + (2 * self.n_sequence + corpus_size) < backbone_max_seq_length, "too many hard negatives for backbone model"
+        assert batch_size + (2 * self.n_sequence + corpus_size) <= backbone_max_seq_length, "too many hard negatives for backbone model"
 
         soft_prompt = torch.ones((1, self.embedding_dim), device=document_embeddings.device, dtype=torch.float32)
         soft_prompt = self.prompt_projection(soft_prompt).reshape((1, self.n_sequence, self.hidden_size))
@@ -321,8 +330,8 @@ class BiEncoder(transformers.PreTrainedModel):
 
         if config.limit_layers:
             print(f"Limiting layers to {config.limit_layers}")
-            embedder.transformer.layer = embedder.transformer.layer[:config.limit_layers]
-            dataset_backbone.transformer.layer = dataset_backbone.transformer.layer[:config.limit_layers]   
+            limit_layers(embedder, config.limit_layers)
+            limit_layers(dataset_backbone, config.limit_layers)
         
         del dataset_embedder
         del dataset_backbone
@@ -365,7 +374,7 @@ class BiEncoder(transformers.PreTrainedModel):
         )
         document_embeddings = mean_pool(outputs, attention_mask)
         # return
-        return self.mlp(document_embeddigns)
+        return self.mlp(document_embeddings)
 
 
 def get_model_class(name: str):

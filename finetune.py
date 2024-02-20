@@ -119,14 +119,14 @@ def main():
             # data_folder="/home/jxm3/research/retrieval/tti3/data/mini",
             # data_folder="/home/jxm3/research/retrieval/tti3/data/full",
             data_folder="/home/jxm3/research/retrieval/tti3/data/full_t5",
-            perc=0.95, 
+            perc=0.98, 
             supervised=True,
         )
     elif data_args.dataset == 'reddit_unsupervised':
         train_dataset, eval_dataset = load_reddit_train_and_val(
             # data_folder="/home/jxm3/research/retrieval/tti3/data/mini",
             data_folder="/home/jxm3/research/retrieval/tti3/data/full",
-            perc=0.95, 
+            perc=0.98, 
             supervised=False,
         )
     else:
@@ -134,6 +134,7 @@ def main():
 
     model_config = ModelConfig(**vars(model_args))
     model_cls = get_model_class('biencoder') # TODO: argparse.
+    # model_cls = get_model_class('dataset_transformer') # TODO: argparse.
     model = model_cls(
         config=model_config,
         embedder=embedder,

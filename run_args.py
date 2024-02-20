@@ -183,7 +183,7 @@ class TrainingArguments(transformers.TrainingArguments):
         self.dataloader_num_workers = num_workers
         self.dataloader_persistent_workers = (num_workers > 0)
         self.dataloader_persistent_workers = False # Disabling to see if this fixes an error I had
-        self.dataloader_pin_memory = True
+        self.dataloader_pin_memory = False
         today_date = datetime.date.today()
         formatted_date = today_date.strftime("%Y-%m-%d")
         self.exp_name__no_date = "self.exp_name"
