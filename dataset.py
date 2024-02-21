@@ -303,7 +303,7 @@ class RedditDataset(torch.utils.data.Dataset):
         self.min_examples_per_subreddit = min_examples_per_subreddit # TODO: Experiment with this.
         self.subreddit_idxs = { k: v for k,v in self.subreddit_idxs.items() if len(v) > self.min_examples_per_subreddit }
         print(f"Filtered {original_num_subreddits} to {len(self.subreddit_idxs)} with min_examples_per_subreddit={self.min_examples_per_subreddit}")
-        self.subreddit_questions = {}
+        self.subdomain_idxs = {}
         self.reset_dataset_idx()
     
     def tokenize(self, tokenizer: transformers.PreTrainedTokenizer, max_length: int) -> None:
@@ -358,7 +358,7 @@ class RedditDatasetWithSupervisedQuestions(RedditDataset):
                  question_folder: str):
         super().__init__(data_folder=data_folder)
         # Load questions
-        self.subreddit_questions = pickle.load(
+        self.subdomain_idxs = pickle.load(
             open(os.path.join(question_folder, 'question_idxs.p'), 'rb'))
         self.question_dataset = datasets.Dataset.load_from_disk(
             os.path.join(question_folder, 'test.dataset'))
@@ -370,15 +370,15 @@ class RedditDatasetWithSupervisedQuestions(RedditDataset):
         self.size = None
 
     def reset_dataset_idx(self) -> int:
-        if not len(self.subreddit_questions.keys()):
+        if not len(self.subdomain_idxs.keys()):
             print("WARNING: Tried to reset dataset w/o any loaded.")
         else:
-            dataset_idx = random.choice(list(self.subreddit_questions.keys()))
-            random.shuffle(self.subreddit_questions[dataset_idx])
+            dataset_idx = random.choice(list(self.subdomain_idxs.keys()))
+            random.shuffle(self.subdomain_idxs[dataset_idx])
             self.current_dataset_idx.value = dataset_idx
 
     def __len__(self):
-        return self.size or len(self.subreddit_questions) * 64
+        return self.size or sum(map(len, self.subdomain_idxs.values()))
     
     @property
     def _question_input_ids_key(self) -> str:
@@ -396,7 +396,7 @@ class RedditDatasetWithSupervisedQuestions(RedditDataset):
         return f'input_ids_{self._dataset_tokenizer_name}'
     
     def first(self) -> Dict[str, torch.Tensor]:
-        subreddit_question_idxs = list(next(iter(self.subreddit_questions.values())))
+        subreddit_question_idxs = list(next(iter(self.subdomain_idxs.values())))
         random_question_idx = subreddit_question_idxs[0]
         return self[random_question_idx]
     
@@ -430,6 +430,91 @@ class RedditDatasetWithSupervisedQuestions(RedditDataset):
             'document_attention_mask': (document_input_ids != self.pad_token_id).int(),
             ######################################################################
         }
+
+
+class NomicDataset:
+    def __init__(self):
+        data_folder = '/home/jxm3/research/retrieval/tti3/data/nomic_embed_supervised'
+        # Load questions
+        self.subdomain_idxs = pickle.load(
+            open(os.path.join(data_folder, 'subdomain_idxs.p'), 'rb'))
+        self.dataset = datasets.Dataset.load_from_disk(
+            os.path.join(data_folder, 'test.dataset'))
+        self.dataset.set_format('pt')
+        self.pad_token_id = 0 # TODO: Set dynamically based on appropriate tokenizer
+
+        self._embedder_tokenizer_name = 'bert'
+        self._dataset_tokenizer_name = 'bert'
+
+        self.size = None
+
+    def reset_dataset_idx(self) -> int:
+        pass # Not needed with smart sampler
+
+    def __len__(self):
+        return len(self.dataset)
+    
+    @property
+    def _query_input_ids_key(self) -> str:
+        """The key in the dataset for question input IDs (tokenizer-specific)."""
+        return f'query_input_ids_{self._embedder_tokenizer_name}'
+    
+    @property
+    def _document_input_ids_key(self) -> str:
+        """The key in the dataset for document input IDs (tokenizer-specific)."""
+        return f'document_input_ids_{self._embedder_tokenizer_name}'
+    
+    @property
+    def _negative_document_input_ids_key(self) -> str:
+        """The key in the dataset for document input IDs (tokenizer-specific)."""
+        return f'document_input_ids_{self._embedder_tokenizer_name}'
+    
+    @property
+    def _dataset_input_ids_key(self) -> str:
+        """The key in the dataset for dataset input IDs (tokenizer-specific)."""
+        return f'input_ids_{self._dataset_tokenizer_name}'
+    
+    def first(self) -> Dict[str, torch.Tensor]:
+        subdomain_query_idxs = list(next(iter(self.subdomain_idxs.values())))
+        random_query_idx = subdomain_query_idxs[0]
+        return self[random_query_idx]
+    
+    def __getitem__(self, query_id: int) -> Dict[str, torch.Tensor]: 
+        # 
+        # TODO: 
+        # 
+        query_ex = self.dataset[query_id]
+        query_input_ids = query_ex[self._query_input_ids_key]
+        document_input_ids = self.dataset[query_id][self._document_input_ids_key]
+        hn_document_input_ids = self.dataset[query_id][self._negative_document_input_ids_key]
+        # document_input_ids_dataset_embedder = self.dataset[doc_id][self._dataset_input_ids_key]
+        # assert query_ex['subreddit_idx'] == self.dataset[doc_id]['subreddit_idx']
+        # subreddit_idx = query_ex['subreddit_idx'].item()
+        # random_idx_within_subreddit = random.choice(self.subreddit_idxs[subreddit_idx])
+        # dataset_input_ids = self.dataset[random_idx_within_subreddit][self._dataset_input_ids_key]
+        # 
+        return {
+            'idx': query_id,
+            ######################################################################
+            # 'batch_dataset_input_ids': document_input_ids_dataset_embedder,
+            # 'batch_dataset_attention_mask': (document_input_ids_dataset_embedder != self.pad_token_id).int(),
+            # ######################################################################
+            # 'dataset_input_ids': dataset_input_ids,
+            # 'dataset_attention_mask': (dataset_input_ids != self.pad_token_id).int(),
+            ######################################################################
+            'query_input_ids': query_input_ids,
+            'query_attention_mask': (query_input_ids != self.pad_token_id).int(),
+            ######################################################################
+            'document_input_ids': document_input_ids,
+            'document_attention_mask': (document_input_ids != self.pad_token_id).int(),
+            ######################################################################
+            'hn_document_input_ids': hn_document_input_ids,
+            'hn_document_attention_mask': (hn_document_input_ids != self.pad_token_id).int(),
+            ######################################################################
+        }
+
+
+
 
 @functools.lru_cache()
 def get_char_ids(vocab_size: int, tokenizer_name: str) -> List[torch.Tensor]:
@@ -636,8 +721,8 @@ def load_reddit_train_and_val(
         train = RedditDataset(data_folder=data_folder)
     print("Initialized dataset:", train.__class__)
     # Randomize subreddit idxs.
-    for k in  train.subreddit_questions.keys():
-        random.Random(42).shuffle(train.subreddit_questions[k])
+    for k in  train.subdomain_idxs.keys():
+        random.Random(42).shuffle(train.subdomain_idxs[k])
     # Copy train->val to save dataloading time before split. However need to
     # clone these values individually so that they're not tied together.
     eval = copy.copy(train)
@@ -656,11 +741,11 @@ def load_reddit_train_and_val(
     print(f"Creating training and validation data with a {perc:.2f}/{1-perc:.2f} split ({len(train_subreddits)}/{len(eval_subreddits)})")
     train.subreddit_idxs = { k: v for k,v in train.subreddit_idxs.items() if k in train_subreddits }
     train.subreddit_keys = { k: v for k,v in train.subreddit_keys.items() if k in train_subreddits }
-    train.subreddit_questions = { k: v for k,v in train.subreddit_questions.items() if k in train_subreddits }
+    train.subdomain_idxs= { k: v for k,v in train.subdomain_idxs.items() if k in train_subreddits }
     train.reset_dataset_idx()
     eval.subreddit_idxs = { k: v for k,v in eval.subreddit_idxs.items() if k in eval_subreddits }
     eval.subreddit_keys = { k: v for k,v in eval.subreddit_keys.items() if k in eval_subreddits }
-    eval.subreddit_questions = { k: v for k,v in eval.subreddit_questions.items() if k in eval_subreddits }
+    eval.subdomain_idxs= { k: v for k,v in eval.subdomain_idxs.items() if k in eval_subreddits }
     eval.reset_dataset_idx()
 
     print("First train point:", train.first())
@@ -689,6 +774,10 @@ if __name__ == '__main__':
     #     data_folder="/home/jxm3/research/retrieval/tti3/data/full",
     #     perc=0.9,
     # )
-    ds_train, ds_val = load_synthetic_words_dataset()
+    # ds_train, ds_val = load_synthetic_words_dataset()
+    # print(ds_train[0])
+
+    ds_train = NomicDataset()
     print(ds_train[0])
+
 

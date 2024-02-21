@@ -8,7 +8,7 @@ import transformers
 import wandb
 
 from collate import DocumentQueryCollatorWithPadding
-from dataset import load_reddit_train_and_val, load_synthetic_words_dataset
+from dataset import load_reddit_train_and_val, load_synthetic_words_dataset, NomicDataset
 from helpers import ModelConfig
 from model import get_model_class
 from run_args import ModelArguments, DataArguments, TrainingArguments
@@ -129,6 +129,9 @@ def main():
             perc=0.98, 
             supervised=False,
         )
+    elif data_args.dataset == 'nomic':
+        train_dataset = NomicDataset()
+        eval_dataset = None
     else:
         raise ValueError(f'Unsupported dataset {data_args.dataset}')
 

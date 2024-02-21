@@ -84,9 +84,9 @@ class DataArguments:
     """
 
     dataset: Optional[str] = field(
-        default="reddit_supervised", metadata={
+        default="nomic", metadata={
             "help": "The name of the dataset to use:",
-            "choices": ["synthetic_words", "reddit_supervised", "reddit_unsupervised"]
+            "choices": ["synthetic_words", "reddit_supervised", "reddit_unsupervised", "nomic"]
         }
     )
     def __post_init__(self):

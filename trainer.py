@@ -146,9 +146,12 @@ class CustomTrainer(transformers.Trainer):
         train_table: wandb.Table = self._get_examples_table(
             super().get_train_dataloader()
         )
-        eval_table: wandb.Table = self._get_examples_table(
-            super().get_eval_dataloader()
-        )
+        if self.eval_dataset is not None:
+            eval_table: wandb.Table = self._get_examples_table(
+                super().get_eval_dataloader()
+            )
+        else:
+            eval_table = None
         wandb.log({
             "examples/train": train_table,
             "examples/eval": eval_table,
