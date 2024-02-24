@@ -47,15 +47,15 @@ class ModelArguments:
         },
     )
     embedder: str = field(
-        default="t5-base",
+        default="nomic-ai/nomic-embed-text-v1-unsupervised",
         metadata={"help": "embedder name for the model (encoder-decoder)"}
     )
     dataset_embedder: str = field(
-        default="distilbert-base-uncased",
+        default="nomic-ai/nomic-embed-text-v1-unsupervised",
         metadata={"help": "embedder name for the model that embeds random dataset instances"}
     )
     embedder_rerank: str = field(
-        default="sentence-transformers/gtr-t5-base",
+        default="nomic-ai/nomic-embed-text-v1-unsupervised",
         metadata={"help": "embedder name for reranking"}
     )
     architecture: str = field(

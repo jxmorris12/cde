@@ -472,7 +472,7 @@ class NomicDataset:
     @property
     def _dataset_input_ids_key(self) -> str:
         """The key in the dataset for dataset input IDs (tokenizer-specific)."""
-        return f'input_ids_{self._dataset_tokenizer_name}'
+        return f'document_input_ids_{self._dataset_tokenizer_name}'
     
     def first(self) -> Dict[str, torch.Tensor]:
         subdomain_query_idxs = list(next(iter(self.subdomain_idxs.values())))
@@ -487,11 +487,10 @@ class NomicDataset:
         query_input_ids = query_ex[self._query_input_ids_key]
         document_input_ids = self.dataset[query_id][self._document_input_ids_key]
         hn_document_input_ids = self.dataset[query_id][self._negative_document_input_ids_key]
-        # document_input_ids_dataset_embedder = self.dataset[doc_id][self._dataset_input_ids_key]
-        # assert query_ex['subreddit_idx'] == self.dataset[doc_id]['subreddit_idx']
-        # subreddit_idx = query_ex['subreddit_idx'].item()
-        # random_idx_within_subreddit = random.choice(self.subreddit_idxs[subreddit_idx])
-        # dataset_input_ids = self.dataset[random_idx_within_subreddit][self._dataset_input_ids_key]
+        #
+        subdomain_id = query_ex['dataset']
+        random_idx_within_subdomain = random.choice(self.subdomain_idxs[subdomain_id])
+        dataset_input_ids = self.dataset[random_idx_within_subdomain][self._dataset_input_ids_key]
         # 
         return {
             'idx': query_id,
@@ -499,8 +498,8 @@ class NomicDataset:
             # 'batch_dataset_input_ids': document_input_ids_dataset_embedder,
             # 'batch_dataset_attention_mask': (document_input_ids_dataset_embedder != self.pad_token_id).int(),
             # ######################################################################
-            # 'dataset_input_ids': dataset_input_ids,
-            # 'dataset_attention_mask': (dataset_input_ids != self.pad_token_id).int(),
+            'dataset_input_ids': dataset_input_ids,
+            'dataset_attention_mask': (dataset_input_ids != self.pad_token_id).int(),
             ######################################################################
             'query_input_ids': query_input_ids,
             'query_attention_mask': (query_input_ids != self.pad_token_id).int(),
@@ -512,8 +511,6 @@ class NomicDataset:
             'hn_document_attention_mask': (hn_document_input_ids != self.pad_token_id).int(),
             ######################################################################
         }
-
-
 
 
 @functools.lru_cache()

@@ -80,10 +80,10 @@ def main():
         datefmt='%Y-%m-%d %H:%M:%S',
         level=logging.INFO
     )
-    embedder = transformers.AutoModel.from_pretrained(model_args.embedder)
+    embedder = transformers.AutoModel.from_pretrained(model_args.embedder, trust_remote_code=True)
     embedder_tokenizer = transformers.AutoTokenizer.from_pretrained(model_args.embedder)
-    dataset_embedder = transformers.AutoModel.from_pretrained(model_args.dataset_embedder)
-    dataset_backbone = transformers.AutoModel.from_pretrained(model_args.dataset_embedder)
+    dataset_embedder = transformers.AutoModel.from_pretrained(model_args.dataset_embedder, trust_remote_code=True)
+    dataset_backbone = transformers.AutoModel.from_pretrained(model_args.dataset_embedder, trust_remote_code=True)
     dataset_tokenizer = transformers.AutoTokenizer.from_pretrained(model_args.dataset_embedder)
 
     # beir_dataset_names = [
