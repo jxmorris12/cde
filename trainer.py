@@ -22,14 +22,14 @@ class CustomTrainer(transformers.Trainer):
     embedder_tokenizer: transformers.PreTrainedTokenizer
     dataset_tokenizer:  transformers.PreTrainedTokenizer
     train_sampler: Sampler
-    val_sampler: Sampler
+    eval_sampler: Sampler
 
     def __init__(self, *args,
                  embedder_tokenizer: transformers.PreTrainedTokenizer,
                  dataset_tokenizer:  transformers.PreTrainedTokenizer,
                  retrieval_datasets: Dict[str, datasets.Dataset],
-                 _train_sampler: Sampler,
-                 _val_sampler: Sampler,
+                 train_sampler: Sampler,
+                 eval_sampler: Sampler,
                   **kwargs
                 ):
         super().__init__(*args, **kwargs)
@@ -51,7 +51,6 @@ class CustomTrainer(transformers.Trainer):
         self._extra_logs = TensorRunningAverages()
     
     def _get_train_sampler(self) -> torch.utils.data.Sampler:
-        self._train_sampler.shuffle()
         return self._train_sampler
     
     def _get_eval_sampler(self, eval_dataset: datasets.Dataset) -> torch.utils.data.Sampler:

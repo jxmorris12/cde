@@ -12,6 +12,7 @@ from dataset import load_reddit_train_and_val, load_synthetic_words_dataset, Nom
 from helpers import ModelConfig
 from model import get_model_class
 from run_args import ModelArguments, DataArguments, TrainingArguments
+from sampler import get_sampler
 from trainer import CustomTrainer
 
 assert torch.cuda.device_count() > 0, "can't train without CUDA"
@@ -157,8 +158,19 @@ def main():
         return_tensors='pt',
         max_length=model_args.max_seq_length,
     )
-
-    import pdb; pdb.set_trace()
+    
+    train_sampler = get_sampler(
+        data_args=data_args,
+        dataset=train_dataset,
+        batch_size=training_args.per_device_train_batch_size,
+        shuffle=True,
+    )
+    eval_sampler = get_sampler(
+        data_args=data_args,
+        dataset=train_dataset,
+        batch_size=training_args.per_device_eval_batch_size,
+        shuffle=False,
+    )
 
     trainer = CustomTrainer(
         data_collator=collator,
@@ -168,6 +180,8 @@ def main():
         eval_dataset=eval_dataset,
         dataset_tokenizer=dataset_tokenizer,
         embedder_tokenizer=embedder_tokenizer,
+        train_sampler=train_sampler,
+        eval_sampler=eval_sampler,
         retrieval_datasets={},
     )
 

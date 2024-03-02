@@ -757,24 +757,5 @@ def load_synthetic_words_dataset() -> Tuple[datasets.Dataset, datasets.Dataset]:
 
 
 if __name__ == '__main__':
-    # nfcorpus = BeirDataset(
-    #     dataset="nfcorpus",    
-    #     embedder="sentence-transformers/gtr-t5-base"
-    # )
-    # dataset = MsmarcoDatasetHardNegatives(
-    #     embedder="sentence-transformers/gtr-t5-base",
-    #     num_hard_negatives=1,
-    # )
-    # print(dataset[10_001])
-
-    # ds_train, ds_val = load_reddit_train_and_val(
-    #     data_folder="/home/jxm3/research/retrieval/tti3/data/full",
-    #     perc=0.9,
-    # )
-    # ds_train, ds_val = load_synthetic_words_dataset()
-    # print(ds_train[0])
-
     ds_train = NomicDataset()
     print(ds_train[0])
-
-

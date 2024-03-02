@@ -84,9 +84,17 @@ class DataArguments:
     """
 
     dataset: Optional[str] = field(
-        default="nomic", metadata={
+        default="nomic", 
+        metadata={
             "help": "The name of the dataset to use:",
             "choices": ["synthetic_words", "reddit_supervised", "reddit_unsupervised", "nomic"]
+        }
+    )
+    sampler_strategy: str = field(
+        default="random",
+        metadata={
+            "help": "sampling strategy for batches",
+            "choices": ["random", "domain", "cluster"]
         }
     )
     clustering_model: str = field(

@@ -20,6 +20,8 @@ TTI_CACHE_DIR = os.environ.get(
     "TTI_CACHE_DIR", "/scratch/jxm/tti"
 )
 
+identity = lambda x: x
+
 
 def get_cache_location_from_kwargs(**kwargs):
     cache_location = os.path.join(
@@ -94,15 +96,19 @@ def cluster_dataset(
         return result
 
 
-
-
-
 class Sampler(abc.ABC, torch.utils.data.Sampler):
-    @abc.abstractmethod
-    def shuffle(self) -> None:
-        """Called between epochs."""
-        pass
-
+    def __init__(
+            self, 
+            dataset: Union[NomicDataset, RedditDataset], 
+            batch_size: int, 
+            shuffle: bool, 
+            max_num_batches: Optional[int] = None,
+        ):
+        self.dataset = dataset
+        self.batch_size = batch_size
+        self.max_num_batches = max_num_batches
+        self.shuffle_func = random.shuffle if shuffle else identity
+    
     @abc.abstractmethod
     def __iter__(self) -> Iterable[Dict]:
         raise NotImplementedError()
@@ -115,10 +121,16 @@ class Sampler(abc.ABC, torch.utils.data.Sampler):
 class RandomSampler(Sampler):
     """Samples randomly from a dataset during training."""
     def __iter__(self):
-        raise NotImplementedError()
-    
+        idxs = list(range(len(self)))
+        self.shuffle_func(idxs)
+        for i in idxs:
+            yield i
+        
     def __len__(self) -> int:
-        raise NotImplementedError()
+        return (
+            self.max_num_batches * self.batch_size 
+            if self.max_num_batches else len(self.dataset)
+        )
 
 
 class FixedSubdomainSampler(Sampler):
@@ -145,7 +157,6 @@ class FixedSubdomainSampler(Sampler):
         assert hasattr(self.dataset, 'subdomain_idxs')
         num_questions = { k: len_minus_batch(v) for k,v in self.dataset.subdomain_idxs.items() }
         self.batch_assignments = [x for k, v in num_questions.items() for x in [k] * v]
-        identity = lambda x: x
         self.shuffle_func = random.shuffle if shuffle else identity
 
     def __iter__(self) -> Iterable[Dict]:
@@ -196,3 +207,32 @@ class AutoClusterSampler(FixedSubdomainSampler):
             query_to_doc=query_to_doc,
             batch_size=batch_size,
         )
+
+
+def get_sampler(
+    dataset: datasets.Dataset,
+    batch_size: int,
+    shuffle: bool,
+    data_args,
+) -> Sampler:
+    strategy = data_args.sampler_strategy
+    if strategy == "random":
+        return RandomSampler(
+            dataset=dataset, 
+            batch_size=batch_size,
+            shuffle=shuffle,
+        )
+    elif strategy == "domain":
+        return FixedSubdomainSampler(
+            dataset=dataset, 
+            batch_size=batch_size,
+            shuffle=shuffle,
+        )
+    elif strategy == "cluster":
+        return AutoClusterSampler(
+            batch_size=batch_size,
+            query_to_doc=data_args.clustering_query_to_doc, 
+            model=data_args.clustering_model,
+        )
+    else:
+        raise ValueError(f"invalid sampling strategy {strategy}")
