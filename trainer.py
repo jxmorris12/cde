@@ -9,7 +9,7 @@ import wandb
 from gradcache import GradCache
 from dataset import BeirDataset
 from helpers import RerankHelper, TensorRunningAverages
-from sampler import RedditSampler
+from sampler import Sampler
 
 
 def inputs_for_key(inputs: Dict[str, torch.Tensor], key: str):
@@ -21,14 +21,21 @@ class CustomTrainer(transformers.Trainer):
     retrieval_datasets: Dict[str, datasets.Dataset]
     embedder_tokenizer: transformers.PreTrainedTokenizer
     dataset_tokenizer:  transformers.PreTrainedTokenizer
+    train_sampler: Sampler
+    val_sampler: Sampler
 
     def __init__(self, *args,
                  embedder_tokenizer: transformers.PreTrainedTokenizer,
                  dataset_tokenizer:  transformers.PreTrainedTokenizer,
-                 retrieval_datasets: Dict[str, datasets.Dataset], **kwargs
+                 retrieval_datasets: Dict[str, datasets.Dataset],
+                 _train_sampler: Sampler,
+                 _val_sampler: Sampler,
+                  **kwargs
                 ):
         super().__init__(*args, **kwargs)
         self.retrieval_datasets = retrieval_datasets
+        self._train_sampler = train_sampler
+        self._val_sampler = eval_sampler
         self._signature_columns = [
             "idx",
             "document_input_ids", "document_attention_mask",
@@ -44,19 +51,11 @@ class CustomTrainer(transformers.Trainer):
         self._extra_logs = TensorRunningAverages()
     
     def _get_train_sampler(self) -> torch.utils.data.Sampler:
-        return RedditSampler(
-            dataset=self.train_dataset, 
-            batch_size=self.args.per_device_train_batch_size,
-            shuffle=True,
-        )
+        self._train_sampler.shuffle()
+        return self._train_sampler
     
     def _get_eval_sampler(self, eval_dataset: datasets.Dataset) -> torch.utils.data.Sampler:
-        return RedditSampler(
-            eval_dataset, 
-            batch_size=self.args.per_device_eval_batch_size,
-            shuffle=False,
-            max_num_batches=512,
-        )
+        return self._get_eval_sampler
     
     def _log_extra(self, key: str, val: torch.Tensor):
         self._extra_logs.update(key, val)

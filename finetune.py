@@ -136,8 +136,7 @@ def main():
         raise ValueError(f'Unsupported dataset {data_args.dataset}')
 
     model_config = ModelConfig(**vars(model_args))
-    model_cls = get_model_class('biencoder') # TODO: argparse.
-    # model_cls = get_model_class('dataset_transformer') # TODO: argparse.
+    model_cls = get_model_class(model_args.architecture)
     model = model_cls(
         config=model_config,
         embedder=embedder,
@@ -158,6 +157,8 @@ def main():
         return_tensors='pt',
         max_length=model_args.max_seq_length,
     )
+
+    import pdb; pdb.set_trace()
 
     trainer = CustomTrainer(
         data_collator=collator,

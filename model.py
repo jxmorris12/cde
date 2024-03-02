@@ -378,11 +378,11 @@ class BiEncoder(transformers.PreTrainedModel):
 
 
 def get_model_class(name: str):
-    if name == 'mlp':
+    if name == 'two_head_mlp':
         return TwoEmbeddersWithMLP
-    elif name == 'encoder_decoder':
+    elif name == 'encoder_decoder_de':
         return EncoderDecoderWithDatasetEmbedder
-    elif name == 'dataset_transformer':
+    elif name == 'query_independent_dt':
         return DatasetTransformer
     elif name == 'biencoder':
         return BiEncoder

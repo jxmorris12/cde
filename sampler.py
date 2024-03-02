@@ -1,37 +1,159 @@
-from typing import Dict, Iterable, Optional, Union
+from typing import Dict, Iterable, List, Optional, Union
 
+import abc
 import collections
+import math
+import os
+import pickle
 import random
 import torch
 
-from dataset import NomicDataset, RedditDataset
+import datasets
+import tqdm
 
-class RedditSampler(torch.utils.data.Sampler):
-    """Samples randomly from subreddits during training."""
+from cluster_helpers import embed_for_clustering, kmeans, SHOULD_MAXIMIZE_CLUSTER_DISTANCE_FOR_MODEL
+from dataset import NomicDataset, RedditDataset
+from helpers import md5_hash_kwargs
+
+
+TTI_CACHE_DIR = os.environ.get(
+    "TTI_CACHE_DIR", "/scratch/jxm/tti"
+)
+
+
+def get_cache_location_from_kwargs(**kwargs):
+    cache_location = os.path.join(
+        TTI_CACHE_DIR, "cluster"
+    )
+    return os.path.join(cache_location, md5_hash_kwargs(**kwargs))
+
+
+def _cluster_dataset_uncached(
+        dataset: datasets.Dataset, 
+        query_to_doc: bool,
+        model: str,
+        query_key: str,
+        document_key: str,
+        batch_size: int,
+    ) -> Dict[int, List[int]]:
+    document_ids = dataset[document_key]
+    if query_to_doc:
+        query_ids = dataset[query_key]
+    else:
+        query_ids = document_ids
+    
+    q, X = embed_for_clustering(
+        query_ids=query_ids,
+        document_ids=document_ids,
+        model=model
+    )
+    
+    k = math.ceil(len(X) / batch_size)
+    _, assignments = kmeans(
+        q=q, 
+        X=X,
+        equal=False,
+        k=k,
+        maximize=SHOULD_MAXIMIZE_CLUSTER_DISTANCE_FOR_MODEL[model]
+    )
+    # stack assignments to list.
+    assignments_dict = collections.defaultdict(list)
+    for i in tqdm.trange(len(assignments), desc="collecting assigments", leave=False):
+        assignments_dict[i].append(assignments[i])
+    return assignments_dict
+    
+def cluster_dataset(
+        dataset: datasets.Dataset, 
+        query_to_doc: bool,
+        model: str,
+        query_key: str,
+        document_key: str,
+        batch_size: int,
+    ) -> Dict[int, List[int]]:
+    # TODO: Turn this caching logic into a nice decorator?
+    clustering_hash = get_cache_location_from_kwargs(
+        dataset_fingerprint=dataset._fingerprint,
+        document_key=document_key,
+        query_key=query_key,
+        batch_size=batch_size,
+        model=model,
+        query_to_doc=query_to_doc,
+    )
+    if os.path.exists(clustering_hash):
+        return pickle.load(open(clustering_hash, "rb"))
+    else:
+        result = _cluster_dataset_uncached(
+            dataset=dataset,
+            model=model,
+            query_to_doc=query_to_doc,
+            query_key=query_key,
+            document_key=document_key,
+            batch_size=batch_size,
+        )
+        pickle.dump(result, open(clustering_hash, "wb"))
+        return result
+
+
+
+
+
+class Sampler(abc.ABC, torch.utils.data.Sampler):
+    @abc.abstractmethod
+    def shuffle(self) -> None:
+        """Called between epochs."""
+        pass
+
+    @abc.abstractmethod
+    def __iter__(self) -> Iterable[Dict]:
+        raise NotImplementedError()
+    
+    @abc.abstractmethod
+    def __len__(self) -> int:
+        raise NotImplementedError()
+
+
+class RandomSampler(Sampler):
+    """Samples randomly from a dataset during training."""
+    def __iter__(self):
+        raise NotImplementedError()
+    
+    def __len__(self) -> int:
+        raise NotImplementedError()
+
+
+class FixedSubdomainSampler(Sampler):
+    """Samples randomly from pre-specified domain (subreddits, dataset) during training.
+    
+    Must have fixed dictionary of subdomains `subdomain_idxs`.
+    """
     dataset: Union[NomicDataset, RedditDataset]
     batch_size: int
     max_num_batches: Optional[int]
+    batch_assignments: Dict[int, Iterable[int]]
     def __init__(
             self, 
-            dataset: Union[NomicDataset, RedditDataset], batch_size: int, 
-            shuffle: bool, max_num_batches: Optional[int] = None,
+            dataset: Union[NomicDataset, RedditDataset], 
+            batch_size: int, 
+            shuffle: bool, 
+            max_num_batches: Optional[int] = None,
         ):
         self.dataset = dataset
         self.batch_size = batch_size
         self.max_num_batches = max_num_batches
 
         len_minus_batch = lambda L: len(L) - (len(L) % batch_size)
+        assert hasattr(self.dataset, 'subdomain_idxs')
         num_questions = { k: len_minus_batch(v) for k,v in self.dataset.subdomain_idxs.items() }
-        self.subreddit_batches = [x for k,v in num_questions.items() for x in [k] * v]
+        self.batch_assignments = [x for k, v in num_questions.items() for x in [k] * v]
         identity = lambda x: x
         self.shuffle_func = random.shuffle if shuffle else identity
 
     def __iter__(self) -> Iterable[Dict]:
         # randomly sample questions per-subreddit (w/o replacement)
         subreddit_idx_pointer = collections.defaultdict(lambda: 0)
-        self.shuffle_func(self.subreddit_batches)
+        self.shuffle_func(self.batch_assignments)
 
-        for i, subreddit_idx in enumerate(self.subreddit_batches):
+        for i, subreddit_idx in enumerate(self.batch_assignments):
             # manually track length and stop
             if (i * self.batch_size) >= len(self):
                 break
@@ -51,6 +173,26 @@ class RedditSampler(torch.utils.data.Sampler):
 
     def __len__(self) -> int:
         if self.max_num_batches:
-            return min(len(self.subreddit_batches), self.max_num_batches) * self.batch_size
+            return min(len(self.batch_assignments), self.max_num_batches) * self.batch_size
         else:
-            return len(self.subreddit_batches) * self.batch_size
+            return len(self.batch_assignments) * self.batch_size
+
+
+class AutoClusterSampler(FixedSubdomainSampler):
+    dataset: datasets.Dataset
+    def __init__(
+            self, 
+            dataset: datasets.Dataset, 
+            query_to_doc: bool, 
+            batch_size: int,
+            model: str,
+        ):
+        self.dataset = dataset
+        self.batch_assignments = cluster_dataset(
+            dataset=dataset,
+            model=model,
+            query_key="document_input_ids",
+            document_key="query_input_ids",
+            query_to_doc=query_to_doc,
+            batch_size=batch_size,
+        )

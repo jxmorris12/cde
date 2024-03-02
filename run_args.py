@@ -59,9 +59,9 @@ class ModelArguments:
         metadata={"help": "embedder name for reranking"}
     )
     architecture: str = field(
-        default="query_dependent",
+        default="biencoder",
         metadata = {
-            "choices": ["query_dependent", "query_independent", "biencoder_extended", "biencoder"],
+            "choices": ["biencoder", "query_independent_dt", "two_head_mlp", "encoder_decoder_de"],
         }
     )
     limit_layers: Optional[int] = field(
@@ -87,6 +87,20 @@ class DataArguments:
         default="nomic", metadata={
             "help": "The name of the dataset to use:",
             "choices": ["synthetic_words", "reddit_supervised", "reddit_unsupervised", "nomic"]
+        }
+    )
+    clustering_model: str = field(
+        default="bm25",
+        metadata={
+            "help": "Model to use for clustering",
+            "choices": ["bm25", "nomic_embed"],
+        }
+    )
+    clustering_query_to_doc: bool = field(
+        default=False,
+        metadata={
+            "help": "Whether to use query-doc weightings for clustering, or just queries",
+            "choices": [True, False],
         }
     )
     def __post_init__(self):

@@ -696,7 +696,7 @@ def load_reddit_train_and_val(
         data_folder: str,
         perc: float = 0.9,
         supervised: bool = False
-    ) -> Tuple[torch.utils.data.Dataset, torch.utils.data.Dataset]:
+    ) -> Tuple[datasets.Dataset, datasets.Dataset]:
 
     data_folder_scratch = (
         data_folder.replace(
@@ -749,7 +749,7 @@ def load_reddit_train_and_val(
     return train, eval
 
 
-def load_synthetic_words_dataset():
+def load_synthetic_words_dataset() -> Tuple[datasets.Dataset, datasets.Dataset]:
     train = SyntheticWordsDataset()
     eval = SyntheticWordsDataset()
     eval.max_size = 64 * 8
