@@ -8,9 +8,8 @@ import wandb
 
 from gradcache import GradCache
 from dataset import BeirDataset
-from helpers import RerankHelper
+from helpers import RerankHelper, TensorRunningAverages
 from sampler import RedditSampler
-from utils import TensorRunningAverages
 
 
 def inputs_for_key(inputs: Dict[str, torch.Tensor], key: str):
