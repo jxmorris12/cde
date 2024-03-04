@@ -67,7 +67,6 @@ def _cluster_dataset_uncached(
     _, assignments = kmeans(
         q=q, 
         X=X,
-        equal=False,
         k=k,
         maximize=SHOULD_MAXIMIZE_CLUSTER_DISTANCE_FOR_MODEL[model]
     )

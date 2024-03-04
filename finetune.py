@@ -135,6 +135,19 @@ def main():
         eval_dataset = None
     else:
         raise ValueError(f'Unsupported dataset {data_args.dataset}')
+    
+    train_sampler = get_sampler(
+        data_args=data_args,
+        dataset=train_dataset,
+        batch_size=training_args.per_device_train_batch_size,
+        shuffle=True,
+    )
+    eval_sampler = get_sampler(
+        data_args=data_args,
+        dataset=train_dataset,
+        batch_size=training_args.per_device_eval_batch_size,
+        shuffle=False,
+    )
 
     model_config = ModelConfig(**vars(model_args))
     model_cls = get_model_class(model_args.architecture)
@@ -157,19 +170,6 @@ def main():
         padding='longest',
         return_tensors='pt',
         max_length=model_args.max_seq_length,
-    )
-    
-    train_sampler = get_sampler(
-        data_args=data_args,
-        dataset=train_dataset,
-        batch_size=training_args.per_device_train_batch_size,
-        shuffle=True,
-    )
-    eval_sampler = get_sampler(
-        data_args=data_args,
-        dataset=train_dataset,
-        batch_size=training_args.per_device_eval_batch_size,
-        shuffle=False,
     )
 
     trainer = CustomTrainer(
