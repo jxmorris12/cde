@@ -38,6 +38,7 @@ def embed_for_clustering(
 
 
 def slice_sparse_tensor_rows(t: torch.sparse.Tensor, min_row: int, max_row: int) -> torch.sparse.Tensor:
+    t = t.coalesce()
     row_idxs = t.indices()[0]
     index_mask = (min_row <= row_idxs) & (row_idxs < max_row)
 
@@ -50,7 +51,7 @@ def slice_sparse_tensor_rows(t: torch.sparse.Tensor, min_row: int, max_row: int)
 
 
 @torch.no_grad
-def maxsim(X: torch.Tensor, centroids: torch.Tensor, maximize: bool, chunk_size: int = 20_000) -> torch.Tensor:
+def maxsim(X: torch.Tensor, y: torch.Tensor, maximize: bool, chunk_size: int = 20_000) -> torch.Tensor:
     device = X.device
     n_samples = X.shape[0]
     max_sim_v = torch.empty(n_samples, device=device, dtype=X.dtype)
@@ -62,7 +63,7 @@ def maxsim(X: torch.Tensor, centroids: torch.Tensor, maximize: bool, chunk_size:
             continue
         start, end = i * chunk_size, min((i + 1) * chunk_size, n_samples)
         sub_x = slice_sparse_tensor_rows(X, start, end)
-        sub_sim = sub_x @ centroids # TODO – Implement sparse max here to save mem!
+        sub_sim = sub_x @ y # TODO – Implement sparse max here to save mem!
         sub_sim = sub_sim.to_dense()
         if maximize:
             sub_max_sim_v, sub_max_sim_i = sub_sim.max(dim=-1)
@@ -75,7 +76,46 @@ def maxsim(X: torch.Tensor, centroids: torch.Tensor, maximize: bool, chunk_size:
     return max_sim_v, max_sim_i
 
 
-        
+@torch.no_grad
+def kmeans(
+        q: torch.Tensor,
+        X: torch.Tensor, 
+        k: int,
+        max_iters: int = 100, 
+        tol: float = 1e-4, 
+        maximize: bool = True,
+        initialization_strategy: str = "kmeans++",
+        seed: int = 42
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    if torch.cuda.is_available():
+        q = q.cuda()
+        X = X.cuda()
+    q = q.half()
+    X = X.half()
+    torch.manual_seed(seed)
+    # Initialize centroids randomly
+    print(f"kmeans called with k={k} / q.shape={q.shape} X.shape={X.shape}")
+
+    print(f"initializing with strategy [{initialization_strategy}]")
+    centroid_idxs = torch.randperm(X.size(0))[:k]
+    centroids = torch.stack([X[k] for k in centroid_idxs])
+    if initialization_strategy == "kmeans++":
+        for j in tqdm.trange(1, k):
+            current_centroids = slice_sparse_tensor_rows(centroids, 0, j)
+            # Compute distances from each datapoints closest centroid
+            d, _ = maxsim(
+                X=X, y=current_centroids.T, maximize=maximize
+            )
+
+            # Take the one that is furthest
+            if maximize:
+                best_centroid_idx = d.argmin()
+            else:
+                best_centroid_idx = d.argmax()
+
+            centroids[j] = X[best_centroid_idx].to_dense()
+    else:
+        pass # random is done
 
     last_centroid_shift = float("inf")
     
@@ -83,7 +123,7 @@ def maxsim(X: torch.Tensor, centroids: torch.Tensor, maximize: bool, chunk_size:
     print("running kmeans on device:", X.device)
     for j in pbar:
         _, assignments = maxsim(
-            q, centroids.T, maximize=maximize
+            X=q, y=centroids.T, maximize=maximize
         )
         idxs = torch.tensor([[idx, a] for idx, a in zip(range(len(X)), assignments)])
         vals = torch.ones(len(X))
