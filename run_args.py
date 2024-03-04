@@ -90,7 +90,7 @@ class DataArguments:
             "choices": ["synthetic_words", "reddit_supervised", "reddit_unsupervised", "nomic"]
         }
     )
-    sampler_strategy: str = field(
+    sampling_strategy: str = field(
         default="random",
         metadata={
             "help": "sampling strategy for batches",

@@ -306,6 +306,10 @@ class RedditDataset(torch.utils.data.Dataset):
         self.subdomain_idxs = {}
         self.reset_dataset_idx()
     
+    @property
+    def fingerprint(self) -> str:
+        return self.dataset._fingerprint
+    
     def tokenize(self, tokenizer: transformers.PreTrainedTokenizer, max_length: int) -> None:
         # reddit data comes pre-tokenized
         pass
@@ -368,6 +372,12 @@ class RedditDatasetWithSupervisedQuestions(RedditDataset):
         self._dataset_tokenizer_name = 'bert'
 
         self.size = None
+
+    @property
+    def fingerprint(self) -> str:
+        return "__".join(
+            [self.dataset._fingerprint + self.question_dataset._fingerprint]
+        )
 
     def reset_dataset_idx(self) -> int:
         if not len(self.subdomain_idxs.keys()):
@@ -435,6 +445,15 @@ class RedditDatasetWithSupervisedQuestions(RedditDataset):
 class NomicDataset:
     def __init__(self):
         data_folder = '/home/jxm3/research/retrieval/tti3/data/nomic_embed_supervised'
+        data_folder_scratch = (
+            data_folder.replace(
+                "/home/jxm3/research/retrieval/tti3", 
+                "/scratch/jxm3/tti3"
+            )
+        )
+        if os.path.exists(data_folder_scratch):
+            print(f"Updating Nomic data folder from {data_folder} to {data_folder_scratch}; hopefully will be faster")
+            data_folder = data_folder_scratch
         # Load questions
         self.subdomain_idxs = pickle.load(
             open(os.path.join(data_folder, 'subdomain_idxs.p'), 'rb'))
@@ -447,6 +466,10 @@ class NomicDataset:
         self._dataset_tokenizer_name = 'bert'
 
         self.size = None
+
+    @property
+    def fingerprint(self) -> str:
+        return self.dataset._fingerprint
 
     def reset_dataset_idx(self) -> int:
         pass # Not needed with smart sampler
@@ -697,7 +720,6 @@ def load_reddit_train_and_val(
         perc: float = 0.9,
         supervised: bool = False
     ) -> Tuple[datasets.Dataset, datasets.Dataset]:
-
     data_folder_scratch = (
         data_folder.replace(
             "/home/jxm3/research/retrieval/tti3", 

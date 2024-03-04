@@ -38,15 +38,28 @@ def _cluster_dataset_uncached(
         document_key: str,
         batch_size: int,
     ) -> Dict[int, List[int]]:
-    document_ids = dataset[document_key]
-    if query_to_doc:
-        query_ids = dataset[query_key]
+
+    print("processing and tokenizing corpus...")
+    max_doc_length = 128
+    def ptl(t):
+        if len(t) < max_doc_length:
+            nz = max_doc_length - len(t) 
+            t = torch.cat((t, torch.zeros((nz,))), dim=0)
+        return t
+    
+    document_input_ids = dataset.dataset[document_key]
+    document_input_ids = [ptl(t) for t in tqdm.auto.tqdm(document_input_ids)]
+    if query_to_doc: 
+        query_input_ids = dataset.dataset[query_key]
+        query_input_ids = [ptl(t) for t in tqdm.auto.tqdm(document_input_ids)]
     else:
-        query_ids = document_ids
+        query_input_ids = document_input_ids
+    document_input_ids = torch.stack(document_input_ids)
+    query_input_ids = torch.stack(query_input_ids)
     
     q, X = embed_for_clustering(
-        query_ids=query_ids,
-        document_ids=document_ids,
+        query_ids=query_input_ids,
+        document_ids=document_input_ids,
         model=model
     )
     
@@ -74,7 +87,7 @@ def cluster_dataset(
     ) -> Dict[int, List[int]]:
     # TODO: Turn this caching logic into a nice decorator?
     clustering_hash = get_cache_location_from_kwargs(
-        dataset_fingerprint=dataset._fingerprint,
+        dataset_fingerprint=dataset.fingerprint,
         document_key=document_key,
         query_key=query_key,
         batch_size=batch_size,
@@ -202,8 +215,8 @@ class AutoClusterSampler(FixedSubdomainSampler):
         self.batch_assignments = cluster_dataset(
             dataset=dataset,
             model=model,
-            query_key="document_input_ids",
-            document_key="query_input_ids",
+            query_key=dataset._document_input_ids_key,
+            document_key=dataset._query_input_ids_key,
             query_to_doc=query_to_doc,
             batch_size=batch_size,
         )
@@ -215,7 +228,7 @@ def get_sampler(
     shuffle: bool,
     data_args,
 ) -> Sampler:
-    strategy = data_args.sampler_strategy
+    strategy = data_args.sampling_strategy
     if strategy == "random":
         return RandomSampler(
             dataset=dataset, 
@@ -230,6 +243,7 @@ def get_sampler(
         )
     elif strategy == "cluster":
         return AutoClusterSampler(
+            dataset=dataset, 
             batch_size=batch_size,
             query_to_doc=data_args.clustering_query_to_doc, 
             model=data_args.clustering_model,
