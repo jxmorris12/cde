@@ -195,7 +195,7 @@ class TrainingArguments(transformers.TrainingArguments):
             print("disabling wandb.")
             os.environ["WANDB_MODE"] = "disabled"
         ############################################################################
-        num_workers = int(len(os.sched_getaffinity(0)) / torch.cuda.device_count())
+        num_workers = int(len(os.sched_getaffinity(0)) / max(1, torch.cuda.device_count()))
         # num_workers = 0 # For debugging
         # num_workers = 1 # For debugging
         ############################################################################

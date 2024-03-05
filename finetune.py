@@ -15,7 +15,6 @@ from run_args import ModelArguments, DataArguments, TrainingArguments
 from sampler import get_sampler
 from trainer import CustomTrainer
 
-assert torch.cuda.device_count() > 0, "can't train without CUDA"
 
 logger = logging.getLogger(__name__)
 
@@ -188,6 +187,7 @@ def main():
     checkpoint = get_checkpoint(training_args)
     logging.info("train() loaded checkpoint %s", checkpoint)
     # trainer.evaluate_retrieval_datasets()
+    assert torch.cuda.device_count() > 0, "can't train without CUDA"
     trainer.train(resume_from_checkpoint=checkpoint)
 
 
