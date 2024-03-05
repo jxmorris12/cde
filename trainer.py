@@ -1,6 +1,7 @@
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import datasets
+import os
 import torch
 import transformers
 
@@ -139,22 +140,38 @@ class CustomTrainer(transformers.Trainer):
         data = list(map(list, zip(*data)))
         return wandb.Table(columns=names, data=data)
 
+    @property
+    def _is_main_worker(self) -> bool:
+        return (
+            (self.args.local_rank <= 0) and 
+            (int(os.environ.get("LOCAL_RANK", 0)) <= 0)
+        )
+
     
     def train(self, *args, **kwargs):
-        # On beginning of train, log tables of examples.
-        train_table: wandb.Table = self._get_examples_table(
-            super().get_train_dataloader()
-        )
-        if self.eval_dataset is not None:
-            eval_table: wandb.Table = self._get_examples_table(
-                super().get_eval_dataloader()
+        if self._is_main_worker:
+            # On beginning of train, log tables of examples.
+            train_table: wandb.Table = self._get_examples_table(
+                super().get_train_dataloader()
             )
-        else:
-            eval_table = None
-        wandb.log({
-            "examples/train": train_table,
-            "examples/eval": eval_table,
-        })
+            if self.eval_dataset is not None:
+                eval_table: wandb.Table = self._get_examples_table(
+                    super().get_eval_dataloader()
+                )
+            else:
+                eval_table = None
+            wandb_run_id = self.args.exp_name
+            print("starting wandb run with name", wandb_run_id)
+            wandb.init(
+                project="tti-nomic",
+                name=wandb_run_id,
+                # resume=True,
+            )
+            wandb.watch(self.model)
+            wandb.log({
+                "examples/train": train_table,
+                "examples/eval": eval_table,
+            })
         super().train(*args, **kwargs)
         
     def training_step(self, model: torch.nn.Module, inputs: Dict[str, Union[torch.Tensor, Any]]) -> torch.Tensor:

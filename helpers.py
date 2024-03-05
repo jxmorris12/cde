@@ -165,6 +165,7 @@ def download_url(url: str, save_path: str, chunk_size: int = 1024):
 
 
 def unzip(zip_file: str, out_dir: str):
+    print("unzipping =>", zip_file)
     zip_ = zipfile.ZipFile(zip_file, "r")
     zip_.extractall(path=out_dir)
     zip_.close()

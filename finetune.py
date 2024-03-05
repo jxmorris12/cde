@@ -8,7 +8,10 @@ import transformers
 import wandb
 
 from collate import DocumentQueryCollatorWithPadding
-from dataset import load_reddit_train_and_val, load_synthetic_words_dataset, NomicDataset
+from dataset import (
+    load_reddit_train_and_val, load_synthetic_words_dataset, 
+    BeirDataset, NomicDataset
+)
 from helpers import ModelConfig
 from model import get_model_class
 from run_args import ModelArguments, DataArguments, TrainingArguments
@@ -87,13 +90,13 @@ def main():
     dataset_backbone = transformers.AutoModel.from_pretrained(model_args.dataset_embedder, trust_remote_code=True)
     dataset_tokenizer = transformers.AutoTokenizer.from_pretrained(model_args.dataset_embedder)
 
-    # beir_dataset_names = [
+    beir_dataset_names = [
     #     # these are the 5 smallest beir datasets...
     #     # 'arguana', # problem: query-doc IDs don't match? (TODO: investigate...)
-    #     'nfcorpus',
-    #     'scidocs', 
-    #     'scifact',
-    #     'fiqa',
+        'nfcorpus',
+        'scidocs', 
+        'scifact',
+        'fiqa',
     #     ########
     #     'msmarco', # this is the *real* eval set...
     #     'trec-covid',
@@ -102,16 +105,15 @@ def main():
     #     # Other ones are certainly too big for repeated eval
     #     # 'webis-touche2020',
     #     # 'fever', 'quora',
-    # ]
-    # beir_dict = {} # TMP
-    # # beir_dict = {
-    # #     d: BeirDataset(dataset=d, embedder=model_args.embedder_rerank) for d in beir_dataset_names
-    # # }
-    # retrieval_datasets = {
-    #     **{f"BeIR/{k}": v for k,v in beir_dict.items()}
-    # }
-    # for k, v in retrieval_datasets.items():
-    #     v.tokenize(tokenizer=embedder_tokenizer, max_length=model_args.max_seq_length)
+    ]
+    beir_dict = {
+        d: BeirDataset(dataset=d, embedder=model_args.embedder_rerank) for d in beir_dataset_names
+    }
+    retrieval_datasets = {
+        **{f"BeIR/{k}": v for k,v in beir_dict.items()}
+    }
+    for k, v in retrieval_datasets.items():
+        v.tokenize(tokenizer=embedder_tokenizer, max_length=model_args.max_seq_length)
 
     if data_args.dataset == 'synthetic_words':
         train_dataset, eval_dataset = load_synthetic_words_dataset()
@@ -159,14 +161,7 @@ def main():
         dataset_embedder=dataset_embedder,
         dataset_backbone=dataset_backbone,
     )
-    wandb_run_id = training_args.exp_name
-    print("starting wandb run with name", wandb_run_id)
-    wandb.init(
-        project="dataset-transformer-reddit-2",
-        name=wandb_run_id,
-        # resume=True,
-    )
-    wandb.watch(model)
+
     collator = DocumentQueryCollatorWithPadding(
         tokenizer=embedder_tokenizer,
         padding='longest',
@@ -189,7 +184,7 @@ def main():
 
     checkpoint = get_checkpoint(training_args)
     logging.info("train() loaded checkpoint %s", checkpoint)
-    # trainer.evaluate_retrieval_datasets()
+    trainer.evaluate_retrieval_datasets()
     trainer.train(resume_from_checkpoint=checkpoint)
 
 

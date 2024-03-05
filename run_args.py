@@ -161,6 +161,10 @@ class TrainingArguments(transformers.TrainingArguments):
         default=64, metadata={"help": "Batch size per GPU/TPU core/CPU for evaluation."}
     )
     evaluation_strategy: str = "steps"
+    logging_steps: int = field(
+        default=50, 
+        metadata={"help": "Log every X updates steps."}
+    )
     eval_steps: int = field(
         default=2000, 
         metadata={"help": "Run an evaluation every X steps."}
@@ -205,9 +209,12 @@ class TrainingArguments(transformers.TrainingArguments):
             print("disabling wandb.")
             os.environ["WANDB_MODE"] = "disabled"
         ############################################################################
-        num_cpus = min(32, len(os.sched_getaffinity(0)))
-        num_workers = max(1, int(num_cpus / torch.cuda.device_count()))
-        num_workers = 0 # For debugging
+        num_devices = max(1, torch.cuda.device_count())
+        num_cpus = min(64, len(os.sched_getaffinity(0)))
+        num_workers = int(num_cpus / num_devices)
+        self.eval_steps = int(self.eval_steps / num_devices)
+        self.save_steps = int(self.save_steps / num_devices)
+        print(f"training with eval_steps = {self.eval_steps}")
         ############################################################################
         self.dataloader_num_workers = num_workers
         self.dataloader_persistent_workers = (num_workers > 0)
