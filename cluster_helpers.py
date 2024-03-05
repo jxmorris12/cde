@@ -41,15 +41,24 @@ def kmeans(
         tol: float = 1e-4, 
         equal: bool = False,
         maximize: bool = True,
+        initialization: str = "kmeans++", # ["kmeans++", "random"]
         seed: int = 42
     ) -> Tuple[torch.Tensor, torch.Tensor]:
     torch.manual_seed(seed)
     # Initialize centroids randomly
-    centroid_idxs = torch.randperm(X.size(0))[:k]
-    centroids = torch.stack([X[k] for k in centroid_idxs]).to_dense()
+
+    print(f"initializing with algorithm [{initialization}]")
+    if initialization == "random":
+        centroid_idxs = torch.randperm(X.size(0))[:k]
+        centroids = torch.stack([X[k] for k in centroid_idxs]).to_dense()
+    else:
+        # placeholder
+        centroid_idxs = torch.randperm(X.size(0))[:k]
+
     last_centroid_shift = float("inf")
     
     pbar = tqdm.auto.trange(max_iters)
+    print("running kmeans on device:", X.device)
     for j in pbar:
         # Assign each point to the nearest centroid
         distances = (q @ centroids.T).to_dense()
