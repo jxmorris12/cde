@@ -36,7 +36,7 @@ class CustomTrainer(transformers.Trainer):
         super().__init__(*args, **kwargs)
         self.retrieval_datasets = retrieval_datasets
         self._train_sampler = train_sampler
-        self._val_sampler = eval_sampler
+        self._eval_sampler = eval_sampler
         self._signature_columns = [
             "idx",
             "document_input_ids", "document_attention_mask",
@@ -57,7 +57,7 @@ class CustomTrainer(transformers.Trainer):
         return self._train_sampler
     
     def _get_eval_sampler(self, eval_dataset: datasets.Dataset) -> torch.utils.data.Sampler:
-        return self._get_eval_sampler
+        return self._eval_sampler
     
     def _log_extra(self, key: str, val: torch.Tensor):
         self._extra_logs.update(key, val)
@@ -344,15 +344,11 @@ class CustomTrainer(transformers.Trainer):
                 model = model.to(dtype=torch.bfloat16, device=self.args.device)
         model.eval()
         
-        reranker = RerankHelper(model=self.model, tokenizer=self.embedder_tokenizer)
-
-        # TODO cache this if it's slow
-        # index_name = ""
-        # hostname = "rush-compute-01"
-        # username = "elastic"
-        # password = "FjZD_LI-=AJOtsfpq9U*"
-
-        # url = f"https://{username}:{password}@rush-compute-01.tech.cornell.edu:9200""
+        reranker = RerankHelper(
+            model=self.model, 
+            tokenizer=self.embedder_tokenizer, 
+            batch_size=self.args.eval_batch_size
+        )
 
         # Rerank top-100 results using the reranker provided
         rerank_results_model = reranker.rerank(
@@ -365,11 +361,26 @@ class CustomTrainer(transformers.Trainer):
         )
 
         #### Evaluate your retrieval using NDCG@k, MAP@K ...
-        ndcg, _map, recall, precision = EvaluateRetrieval.evaluate(eval_dataset.qrels, rerank_results_model, [1, 5, 10, 100])
+        ndcg, _map, recall, precision = EvaluateRetrieval.evaluate(
+            eval_dataset.qrels, rerank_results_model, [1, 5, 10, 100]
+        )
         return {
             **ndcg, **_map, **recall, **precision
         }
 
+    def evaluate(
+        self,
+        eval_dataset: Optional[Union[datasets.Dataset, Dict[str, datasets.Dataset]]] = None,
+        **kwargs
+    ) -> Dict[str, float]:
+        if eval_dataset is None and (self.eval_dataset is None):
+            # "Skipping eval – no eval dataset found"
+            return {}
+        else:
+            return super().evaluate(
+                eval_dataset=eval_dataset,
+                **kwargs
+            )
 
     def evaluate_retrieval_datasets(self) -> Dict[str, float]:
         all_metrics = {}
@@ -399,11 +410,21 @@ class CustomTrainer(transformers.Trainer):
 
         # check should_evaluate bool because it'll be reset by call to super()..
         should_evaluate = self.control.should_evaluate
+        print("MLSE =>", should_evaluate)
         
         # do all the other stuff
         super()._maybe_log_save_evaluate(*args, **kwargs)
 
         # do my custom eval
         if should_evaluate:
+            # TODO: implement multi-gpu retrieval evaluation.
+            print(f"((evaluating: {torch.distributed.get_rank()}))")
             self.evaluate_retrieval_datasets()
+            print("(done)")
+            # try:
+            #     # wait for main worker
+            #     torch.distributed.barrier()
+            # except ValueError:
+            #     # not distributed mode
+            #     pass
 

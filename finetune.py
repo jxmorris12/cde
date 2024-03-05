@@ -179,12 +179,11 @@ def main():
         embedder_tokenizer=embedder_tokenizer,
         train_sampler=train_sampler,
         eval_sampler=eval_sampler,
-        retrieval_datasets={},
+        retrieval_datasets=retrieval_datasets,
     )
-
     checkpoint = get_checkpoint(training_args)
     logging.info("train() loaded checkpoint %s", checkpoint)
-    trainer.evaluate_retrieval_datasets()
+    # trainer.evaluate_retrieval_datasets()
     trainer.train(resume_from_checkpoint=checkpoint)
 
 

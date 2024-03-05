@@ -6,6 +6,7 @@ import json
 import hashlib
 import itertools
 import logging
+import math
 import multiprocessing
 import os
 import pickle
@@ -30,6 +31,22 @@ def get_world_size() -> int:
     except (RuntimeError, ValueError):
         return 1
 
+def gather(t):
+    # torch.distributed.nn.all_gather scales by world size since the reduce op is SUM
+    # https://github.com/pytorch/pytorch/issues/58005
+    # only should use torch.distributed.nn.all_gather if we implement a `local_loss`
+    # like: https://github.com/mlfoundations/open_clip/issues/616
+    world_size = get_world_size()
+    if world_size == 1:
+        return t
+
+    if t.ndim == 0:
+        t = t.unsqueeze(0)
+
+    gathered = [torch.empty_like(t) for _ in range(world_size)]
+    torch.distributed.all_gather(gathered, t)
+    gathered[get_rank()] = t
+    return torch.cat(gathered, dim=0)
 
 def get_num_proc() -> int:
     world_size: int = get_world_size()
@@ -186,15 +203,29 @@ def download_url_and_unzip(url: str, out_dir: str, chunk_size: int = 1024) -> st
     
     return os.path.join(out_dir, dataset.replace(".zip", ""))
 
+def get_world_size() -> int:
+    try:
+        return torch.distributed.get_world_size()
+    except (RuntimeError, ValueError):
+        return 1
+
+
+def get_rank() -> int:
+    try:
+        return torch.distributed.get_rank()
+    except (RuntimeError, ValueError):
+        return 0
+
 
 class RerankHelper:
     """Wraps our model and does reranking.
     
     Template: https://github.com/beir-cellar/beir/blob/main/beir/reranking/rerank.py#L7
     """
-    def __init__(self, model, tokenizer):
+    def __init__(self, model, tokenizer, batch_size: int):
         self.model = model
         self.tokenizer = tokenizer
+        self.batch_size = batch_size
     
     def _score(self, query_embedding: torch.Tensor, corpus_embeddings: torch.Tensor) -> float:
         with torch.no_grad():
@@ -203,6 +234,7 @@ class RerankHelper:
                 document_embeddings=corpus_embeddings
             )
         return scores.flatten().cpu().tolist()
+        
     
     def rerank(self, 
                corpus: Dict[str, Dict[str, str]], 
@@ -220,22 +252,28 @@ class RerankHelper:
         
         #### Starting to Rerank using cross-attention
         logging.info("Starting To Rerank Top-{}....".format(top_k))
+
+        big_neg_number = -10**10
         
-        for query_id in tqdm.tqdm(results, desc="evaluating dataset"):
-            # TODO do this in batch!
+        rank = get_rank()
+        world_size = get_world_size()
+        query_keys = sorted(list(results.keys()))
+        doc_id_to_key = collections.defaultdict(dict)
+        for j, query_id in tqdm.tqdm(enumerate(query_keys), total=len(query_keys), desc="evaluating dataset"):
+            topk_docs = sorted(results[query_id].items(), key=lambda item: item[1], reverse=True)[:top_k]
+            for doc_j, (doc_id, _) in enumerate(topk_docs):
+                doc_id_to_key[query_id][doc_j] = doc_id
+
+            if (j % world_size) != rank:
+                # poor man's distributed sampler
+                continue
             query_text = queries[query_idx_dict[query_id]]["text"]
-            minicorpus = []
-            minicorpus_text = []
-            if len(results[query_id]) > top_k:
-                for (doc_id, _) in sorted(results[query_id].items(), key=lambda item: item[1], reverse=True)[:top_k]:
-                    pair_ids.append([query_id, doc_id])
-                    minicorpus.append(corpus_embeddings[corpus_idx_dict[doc_id]]["embeds"])
-                    minicorpus_text.append(corpus[corpus_idx_dict[doc_id]]["text"])
-            else:
-                for doc_id in results[query_id]:
-                    pair_ids.append([query_id, doc_id])
-                    minicorpus.append(corpus_embeddings[corpus_idx_dict[doc_id]]["embeds"])
-                    minicorpus_text.append(corpus[corpus_idx_dict[doc_id]]["text"])
+            documents_text = []
+            for doc_j, (doc_id, _) in enumerate(topk_docs):
+                # pair_ids.append([int(query_id), int(doc_id)])
+                pair_ids.append([(j, doc_j)])
+                doc_j += 1
+                documents_text.append(corpus[corpus_idx_dict[doc_id]]["text"])
 
             query_inputs = self.tokenizer(
                 [query_text],
@@ -245,12 +283,13 @@ class RerankHelper:
                 return_tensors="pt",
             ).to(device)
             document_inputs = self.tokenizer(
-                minicorpus_text,
+                documents_text,
                 padding=True,
                 truncation=True,
                 max_length=self.model.config.max_seq_length,
                 return_tensors="pt",
             ).to(device)
+            
             with torch.no_grad():
                 query_embedding = self.model(
                     input_ids=query_inputs.input_ids,
@@ -267,11 +306,40 @@ class RerankHelper:
             
             biencoder_score = torch.nn.functional.cosine_similarity(query_embedding, document_embeddings).flatten().cpu().tolist()
             rerank_scores_biencoder.extend(biencoder_score)
+        
+        pair_ids = torch.tensor(pair_ids, device=device)
+        rerank_scores_biencoder = torch.tensor(rerank_scores_biencoder, device=device)
+        
+        max_length = int(math.ceil(top_k * len(query_keys) / world_size) * 2)
+
+        # add dummy elements to make same shapes for gather.
+        extra_ones_pair = (
+            torch.ones((max_length - len(pair_ids), *pair_ids.shape[1:]), device=device, dtype=torch.long)) * big_neg_number
+        pair_ids = torch.cat(
+            (pair_ids, extra_ones_pair),
+            dim=0
+        )
+        extra_ones_rerank = torch.ones((max_length - len(rerank_scores_biencoder), *rerank_scores_biencoder.shape[1:]), device=device, dtype=torch.float32) * big_neg_number
+        rerank_scores_biencoder = torch.cat(
+            (rerank_scores_biencoder, extra_ones_rerank),
+            dim=0
+        )
+
+        pair_ids = gather(pair_ids).cpu()
+        rerank_scores_biencoder = gather(rerank_scores_biencoder).cpu()
+
+        pair_ids = pair_ids.reshape((-1, 2))
+        rerank_scores_biencoder = rerank_scores_biencoder.flatten()
+
+        pair_ids = pair_ids[pair_ids[:, 0] > big_neg_number].tolist()
+        rerank_scores_biencoder = rerank_scores_biencoder[rerank_scores_biencoder > big_neg_number].tolist()
 
         #### Reranking results
         rerank_results_biencoder = {query_id: {} for query_id in results}
         for pair, biencoder_score in zip(pair_ids, rerank_scores_biencoder):
-            query_id, doc_id = pair[0], pair[1]
+            query_j, doc_j = pair[0], pair[1]
+            query_id = query_keys[query_j]
+            doc_id = doc_id_to_key[query_id][doc_j]
             rerank_results_biencoder[query_id][doc_id] = biencoder_score
 
         return rerank_results_biencoder
