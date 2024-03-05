@@ -207,7 +207,7 @@ class TrainingArguments(transformers.TrainingArguments):
         ############################################################################
         num_cpus = min(32, len(os.sched_getaffinity(0)))
         num_workers = max(1, int(num_cpus / torch.cuda.device_count()))
-        # num_workers = 0 # For debugging
+        num_workers = 0 # For debugging
         ############################################################################
         self.dataloader_num_workers = num_workers
         self.dataloader_persistent_workers = (num_workers > 0)
@@ -221,3 +221,6 @@ class TrainingArguments(transformers.TrainingArguments):
         print(f"outputting model to directory: {self.output_dir}")
         print(f"setting dataloader_drop_last from {self.dataloader_drop_last} -> {True}")
         self.dataloader_drop_last = True
+        ############################################################################
+        self.ddp_find_unused_parameters = False
+        self.ddp_broadcast_buffers = False

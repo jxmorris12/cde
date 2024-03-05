@@ -42,6 +42,8 @@ class CustomTrainer(transformers.Trainer):
             "negative_document_input_ids", "negative_document_attention_mask",
             "dataset_input_ids", "dataset_attention_mask",
             "batch_dataset_input_ids", "batch_dataset_attention_mask",
+            "batch_dataset_input_ids", "batch_dataset_attention_mask",
+            "negative_document_input_ids", "negative_document_attention_mask",
             "query_input_ids", "query_attention_mask",
         ]
         self.embedder_tokenizer = embedder_tokenizer 
@@ -159,8 +161,6 @@ class CustomTrainer(transformers.Trainer):
         # Reset dataloader index
         self.train_dataloader.dataset.reset_dataset_idx()
 
-        print("\t(keys)", inputs.keys())
-        print("training_step", inputs["document_input_ids"].shape)
         if not self.use_gc:
             return super().training_step(model=model, inputs=inputs)
 
@@ -189,11 +189,19 @@ class CustomTrainer(transformers.Trainer):
 
         one_hot_labels = (idx[:, None] == idx[None, :]).float()
         labels = one_hot_labels / one_hot_labels.sum(dim=1)
+        if scores.shape[1] > labels.shape[1]:
+            # add zeros for hard negatives
+            # TODO: implement deduplication here.
+            hn_zeros = torch.zeros(
+                (scores.shape[0], scores.shape[1] - labels.shape[1]),
+                dtype=labels.dtype, device=labels.device
+            )
+            labels = torch.cat((labels, hn_zeros), dim=1)
+            one_hot_labels = torch.cat((one_hot_labels, hn_zeros), dim=1)
 
         loss = torch.nn.functional.cross_entropy(
             scores, labels, label_smoothing=0.0
         )
-        print("scores.shape:", scores.shape, "labels.shape:", labels.shape)
         if (loss.isnan()):
             raise RuntimeError("Loss is nan!")
         
@@ -274,6 +282,8 @@ class CustomTrainer(transformers.Trainer):
                 )
                 for k in ["input_ids", "attention_mask"]
             }
+            all_document_inputs["dataset_input_ids"] = document_inputs["dataset_input_ids"]
+            all_document_inputs["dataset_attention_mask"] = document_inputs["dataset_attention_mask"]
         else:
             all_document_inputs = document_inputs
 
@@ -283,7 +293,9 @@ class CustomTrainer(transformers.Trainer):
             e1 = model(**query_inputs)
             e2 = model(**all_document_inputs)
             return self._contrastive_loss(
-                e1, e2, idx=inputs["idx"])
+                e1, e2, 
+                idx=inputs["idx"]
+            )
     
     # Custom retrieval evalution code
     def _retrieval_evaluate(
@@ -360,9 +372,7 @@ class CustomTrainer(transformers.Trainer):
             all_metrics.update(metrics)
 
         if len(all_metrics):
-            print("<evaluate_retrieval_datasets>")
-            print(all_metrics)
-            print("</evaluate_retrieval_datasets>")
+            print("evaluate_retrieval_datasets =>", all_metrics)
         return all_metrics
 
     def _maybe_log_save_evaluate(self, *args, **kwargs):

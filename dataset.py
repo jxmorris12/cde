@@ -26,6 +26,11 @@ from helpers import (
     tokenize_dataset, 
 )
 
+def get_cache_dir() -> str:
+    script_directory = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(script_directory, "data")
+
+
 def load_msmarco_hard_negatives_uncached() -> Dict[str, Dict[str, Any]]:
     """Loads hard negative passage for MSMARCO.
 
@@ -91,6 +96,7 @@ def load_msmarco_hard_negatives() -> Dict[str, Dict[str, Any]]:
     
     return train_queries
 
+
 def get_ance_results(dataset: str, corpus, queries) -> Dict:
     if len(corpus) > 100_000:
         print(f"Auto-skipping ANCE evaluation of {dataset} -- corpus too large.")
@@ -142,8 +148,7 @@ def load_beir_uncached(dataset: str, split: str) -> Tuple[datasets.Dataset, data
 def embed_with_cache(embedder: str, cache_name: str, texts: List[str]) -> datasets.Dataset:
     embedder_cache_path = embedder.replace('/', '__')
     # cache_folder = datasets.config.HF_DATASETS_CACHE
-    cache_folder = "/scratch/jxm3"
-    cache_folder = os.path.join(cache_folder, 'corpus_embeddings', embedder_cache_path)
+    cache_folder = os.path.join(get_cache_dir(), 'corpus_embeddings', embedder_cache_path)
     os.makedirs(cache_folder, exist_ok=True)
     cache_path = os.path.join(cache_folder, cache_name) #  + "_small")
 
@@ -445,16 +450,7 @@ class RedditDatasetWithSupervisedQuestions(RedditDataset):
 class NomicDataset:
     num_hard_negatives: int
     def __init__(self, num_hard_negatives: int = 0):
-        data_folder = '/home/jxm3/research/retrieval/tti3/data/nomic_embed_supervised'
-        data_folder_scratch = (
-            data_folder.replace(
-                "/home/jxm3/research/retrieval/tti3", 
-                "/scratch/jxm3/tti3"
-            )
-        )
-        if os.path.exists(data_folder_scratch):
-            print(f"Updating Nomic data folder from {data_folder} to {data_folder_scratch}; hopefully will be faster")
-            data_folder = data_folder_scratch
+        data_folder = os.path.join(get_cache_dir(), "nomic_embed_supervised")
         # Load questions
         self.subdomain_idxs = pickle.load(
             open(os.path.join(data_folder, 'subdomain_idxs.p'), 'rb'))
@@ -481,22 +477,22 @@ class NomicDataset:
     @property
     def _query_input_ids_key(self) -> str:
         """The key in the dataset for question input IDs (tokenizer-specific)."""
-        return f'query_input_ids_{self._embedder_tokenizer_name}'
+        return f'query_input_ids__{self._embedder_tokenizer_name}'
     
     @property
     def _document_input_ids_key(self) -> str:
         """The key in the dataset for document input IDs (tokenizer-specific)."""
-        return f'document_input_ids_{self._embedder_tokenizer_name}'
+        return f'document_input_ids__{self._embedder_tokenizer_name}'
     
     @property
     def _negative_document_input_ids_key(self) -> str:
         """The key in the dataset for document input IDs (tokenizer-specific)."""
-        return f'document_input_ids_{self._embedder_tokenizer_name}'
+        return f'hn_input_ids__{self._embedder_tokenizer_name}'
     
     @property
     def _dataset_input_ids_key(self) -> str:
         """The key in the dataset for dataset input IDs (tokenizer-specific)."""
-        return f'document_input_ids_{self._dataset_tokenizer_name}'
+        return f'document_input_ids__{self._dataset_tokenizer_name}'
     
     def first(self) -> Dict[str, torch.Tensor]:
         subdomain_query_idxs = list(next(iter(self.subdomain_idxs.values())))
@@ -508,7 +504,9 @@ class NomicDataset:
         query_input_ids = query_ex[self._query_input_ids_key]
         document_input_ids = self.dataset[query_id][self._document_input_ids_key]
         hn_document_input_ids = self.dataset[query_id][self._negative_document_input_ids_key]
-        hn_document_input_ids = hn_document_input_ids[:, :self.num_hard_negatives]
+        hn_document_input_ids = hn_document_input_ids[:self.num_hard_negatives]
+        if not isinstance(hn_document_input_ids, torch.Tensor):
+            hn_document_input_ids = torch.tensor(hn_document_input_ids)
         #
         subdomain_id = query_ex['dataset']
         random_idx_within_subdomain = random.choice(self.subdomain_idxs[subdomain_id])
@@ -529,8 +527,8 @@ class NomicDataset:
             'document_input_ids': document_input_ids,
             'document_attention_mask': (document_input_ids != self.pad_token_id).int(),
             ######################################################################
-            'hn_document_input_ids': hn_document_input_ids,
-            'hn_document_attention_mask': (hn_document_input_ids != self.pad_token_id).int(),
+            'negative_document_input_ids': hn_document_input_ids,
+            'negative_document_attention_mask': (hn_document_input_ids != self.pad_token_id).int(),
             ######################################################################
         }
 
