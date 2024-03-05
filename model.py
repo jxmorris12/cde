@@ -340,9 +340,7 @@ class BiEncoder(transformers.PreTrainedModel):
         self.mlp = torch.nn.Sequential(
             torch.nn.Linear(self.hidden_size, self.hidden_size),
             torch.nn.GELU(),
-            torch.nn.Linear(self.hidden_size, self.hidden_size * 2),
-            torch.nn.GELU(),
-            torch.nn.Linear(self.hidden_size * 2, self.hidden_size),
+            torch.nn.Linear(self.hidden_size, self.hidden_size),
         )
 
         if config.disable_dropout:

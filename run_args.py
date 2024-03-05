@@ -166,7 +166,7 @@ class TrainingArguments(transformers.TrainingArguments):
         metadata={"help": "Log every X updates steps."}
     )
     eval_steps: int = field(
-        default=2000, 
+        default=4000, 
         metadata={"help": "Run an evaluation every X steps."}
     )
 
@@ -192,7 +192,7 @@ class TrainingArguments(transformers.TrainingArguments):
     )
     lr_scheduler_type: str = "constant_with_warmup"
     warmup_steps: int = field(
-        default=2_000,
+        default=1_600,
         metadata={
             "help": "Linear warmup over warmup_steps."
         }
@@ -214,7 +214,8 @@ class TrainingArguments(transformers.TrainingArguments):
         num_workers = int(num_cpus / num_devices)
         self.eval_steps = int(self.eval_steps / num_devices)
         self.save_steps = int(self.save_steps / num_devices)
-        print(f"training with eval_steps = {self.eval_steps}")
+        self.warmup_steps = int(self.warmup_steps / num_devices)
+        print(f"training with eval_steps = {self.eval_steps} / warmup_steps = {self.warmup_steps}")
         ############################################################################
         self.dataloader_num_workers = num_workers
         self.dataloader_persistent_workers = (num_workers > 0)
