@@ -28,7 +28,7 @@ def embed_for_clustering(
         bm25 = TokenizedBM25(vocab_size=vocab_size)
         bm25.index(document_ids)
         queries = bm25.docs_to_bags(query_ids).to_sparse_coo()
-        corpus = bm25._corpus.to_sparse_coo()
+        corpus = bm25._corpus_scores.to_sparse_coo()
         return queries, corpus
     elif model == "nomic_embed":
         # TODO compute embeddings here
@@ -51,7 +51,7 @@ def slice_sparse_tensor_rows(t: torch.sparse.Tensor, min_row: int, max_row: int)
 
 
 @torch.no_grad
-def maxsim(X: torch.Tensor, y: torch.Tensor, maximize: bool, chunk_size: int = 40_000) -> torch.Tensor:
+def maxsim(X: torch.Tensor, y: torch.Tensor, maximize: bool, chunk_size: int = 10_000) -> torch.Tensor:
     device = X.device
     n_samples = X.shape[0]
     max_sim_v = torch.empty(n_samples, device=device, dtype=X.dtype)
@@ -101,20 +101,26 @@ def kmeans(
     if initialization_strategy == "kmeans++":
         first_centroid = X[centroid_idxs[0]]
         centroids = [first_centroid]
-        d = torch.sparse.mm(X, first_centroid[None].T).to_dense()
+        centroids_used_mask = torch.zeros(len(X), device=X.device)
+        centroids_used_mask[centroid_idxs[0]] = 1
+        d = torch.sparse.mm(X, first_centroid[None].T).to_dense().flatten()
         for j in tqdm.trange(1, k):
             most_recent_centroid = centroids[-1]
             # Compute distances from each datapoints closest centroid
-            d2 = torch.sparse.mm(X, most_recent_centroid[None].T).to_dense()
+            d2 = torch.sparse.mm(q, most_recent_centroid[None].T).to_dense().flatten()
 
             # Take the one that is furthest and make it the next centroid
             if maximize:
-                d = d.min(d2)
-                best_centroid_idx = d.argmin()
-            else:
                 d = d.max(d2)
+                d = d + (centroids_used_mask * 10e10)
+                best_centroid_idx = d.argmin()
+                centroids_used_mask[best_centroid_idx] = 1
+            else:
+                d = d.min(d2)
+                d = d + (centroids_used_mask * -10e10)
                 best_centroid_idx = d.argmax()
-
+                centroids_used_mask[best_centroid_idx] = 1
+            tqdm.tqdm.write(f"--> got centroid {best_centroid_idx} with dist: {d[best_centroid_idx]:.3f}")
             centroids.append(X[best_centroid_idx])
         centroids = torch.stack(centroids)
     else:
@@ -129,6 +135,7 @@ def kmeans(
         _, assignments = maxsim(
             X=q, y=centroids.T, maximize=maximize
         )
+        torch.cuda.empty_cache() # needs to happen after maxsim for some reason.
         idxs = torch.tensor([[idx, a] for idx, a in zip(range(len(X)), assignments)])
         vals = torch.ones(len(X))
         sparse_assignment_matrix = (
