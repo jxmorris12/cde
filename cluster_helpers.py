@@ -51,7 +51,7 @@ def slice_sparse_tensor_rows(t: torch.sparse.Tensor, min_row: int, max_row: int)
 
 
 @torch.no_grad
-def maxsim(X: torch.Tensor, y: torch.Tensor, maximize: bool, chunk_size: int = 20_000) -> torch.Tensor:
+def maxsim(X: torch.Tensor, y: torch.Tensor, maximize: bool, chunk_size: int = 40_000) -> torch.Tensor:
     device = X.device
     n_samples = X.shape[0]
     max_sim_v = torch.empty(n_samples, device=device, dtype=X.dtype)
@@ -90,32 +90,36 @@ def kmeans(
     if torch.cuda.is_available():
         q = q.cuda()
         X = X.cuda()
-    q = q.half()
-    X = X.half()
+    q = q.float()
+    X = X.float()
     torch.manual_seed(seed)
     # Initialize centroids randomly
     print(f"kmeans called with k={k} / q.shape={q.shape} X.shape={X.shape}")
 
     print(f"initializing with strategy [{initialization_strategy}]")
     centroid_idxs = torch.randperm(X.size(0))[:k]
-    centroids = torch.stack([X[k] for k in centroid_idxs])
     if initialization_strategy == "kmeans++":
+        first_centroid = X[centroid_idxs[0]]
+        centroids = [first_centroid]
+        d = torch.sparse.mm(X, first_centroid[None].T).to_dense()
         for j in tqdm.trange(1, k):
-            current_centroids = slice_sparse_tensor_rows(centroids, 0, j)
+            most_recent_centroid = centroids[-1]
             # Compute distances from each datapoints closest centroid
-            d, _ = maxsim(
-                X=X, y=current_centroids.T, maximize=maximize
-            )
+            d2 = torch.sparse.mm(X, most_recent_centroid[None].T).to_dense()
 
-            # Take the one that is furthest
+            # Take the one that is furthest and make it the next centroid
             if maximize:
+                d = d.min(d2)
                 best_centroid_idx = d.argmin()
             else:
+                d = d.max(d2)
                 best_centroid_idx = d.argmax()
 
-            centroids[j] = X[best_centroid_idx].to_dense()
+            centroids.append(X[best_centroid_idx])
+        centroids = torch.stack(centroids)
     else:
-        pass # random is done
+        # random initialization
+        centroids = torch.stack([X[k] for k in centroid_idxs])
 
     last_centroid_shift = float("inf")
     
