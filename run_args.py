@@ -133,7 +133,7 @@ class TrainingArguments(transformers.TrainingArguments):
         metadata={"help": "whether to use GradCache"}
     )
     num_train_epochs: float = field(
-        default=100.0, 
+        default=3.0, 
         metadata={
             "required": False,
             "help": "Number of epochs for training"
@@ -155,6 +155,10 @@ class TrainingArguments(transformers.TrainingArguments):
         default=64, metadata={"help": "Batch size per GPU/TPU core/CPU for evaluation."}
     )
     evaluation_strategy: str = "steps"
+    eval_steps: int = field(
+        default=2000, 
+        metadata={"help": "Run an evaluation every X steps."}
+    )
 
     max_batch_size_fits_in_memory: int = field(
         default=64, 

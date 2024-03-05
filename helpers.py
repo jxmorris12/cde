@@ -186,7 +186,6 @@ def download_url_and_unzip(url: str, out_dir: str, chunk_size: int = 1024) -> st
     return os.path.join(out_dir, dataset.replace(".zip", ""))
 
 
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 class RerankHelper:
     """Wraps our model and does reranking.
     
@@ -211,7 +210,7 @@ class RerankHelper:
                query_embeddings: datasets.Dataset,
                results: Dict[str, Dict[str, float]],
                top_k: int) -> Dict[str, Dict[str, float]]:
-        
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         pair_ids = []
         rerank_scores_biencoder = []
 

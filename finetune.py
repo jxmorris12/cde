@@ -188,7 +188,6 @@ def main():
 
     checkpoint = get_checkpoint(training_args)
     logging.info("train() loaded checkpoint %s", checkpoint)
-    trainer.evaluate_retrieval_datasets()
     # trainer.evaluate_retrieval_datasets()
     assert torch.cuda.device_count() > 0, "can't train without CUDA"
     trainer.train(resume_from_checkpoint=checkpoint)

@@ -159,6 +159,8 @@ class CustomTrainer(transformers.Trainer):
         # Reset dataloader index
         self.train_dataloader.dataset.reset_dataset_idx()
 
+        print("\t(keys)", inputs.keys())
+        print("training_step", inputs["document_input_ids"].shape)
         if not self.use_gc:
             return super().training_step(model=model, inputs=inputs)
 
@@ -191,6 +193,7 @@ class CustomTrainer(transformers.Trainer):
         loss = torch.nn.functional.cross_entropy(
             scores, labels, label_smoothing=0.0
         )
+        print("scores.shape:", scores.shape, "labels.shape:", labels.shape)
         if (loss.isnan()):
             raise RuntimeError("Loss is nan!")
         
@@ -263,7 +266,6 @@ class CustomTrainer(transformers.Trainer):
             document_inputs["dataset_attention_mask"] = dataset_inputs["attention_mask"]
             query_inputs["dataset_input_ids"] = dataset_inputs["input_ids"]
             query_inputs["dataset_attention_mask"] = dataset_inputs["attention_mask"]
-
 
         if len(negative_document_inputs):
             all_document_inputs = {
