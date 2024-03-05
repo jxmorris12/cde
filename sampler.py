@@ -165,7 +165,7 @@ class RandomSampler(Sampler):
             yield i
         
     def __len__(self) -> int:
-        print("Length:", self.num_samples)
+        print("Dataloader length:", self.num_samples, "// rank:", self.rank, "world size:", self.world_size, "total:", self.total_size)
         return self.num_samples
 
 

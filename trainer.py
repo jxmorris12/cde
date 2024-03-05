@@ -87,12 +87,20 @@ class CustomTrainer(transformers.Trainer):
             self.gc = None
         
     def get_train_dataloader(self) -> torch.utils.data.DataLoader:
-        train_dataloader = super().get_train_dataloader()
-        # Need to store current dataloader for access so we can use it
-        # to reset the current dataset index
+        self._train_sampler.set_epoch(self.state.epoch or 0)
+        train_dataloader = torch.utils.data.DataLoader(
+            self.train_dataset,
+            collate_fn=self.data_collator,
+            shuffle=False, # shuffling happens in the sampler
+            batch_size=self.args.per_device_train_batch_size,
+            drop_last=self.args.dataloader_drop_last,
+            num_workers=self.args.dataloader_num_workers,
+            pin_memory=self.args.dataloader_pin_memory,
+            sampler=self._train_sampler
+        )
         self.train_dataloader = train_dataloader
         return train_dataloader
-
+        
     def get_eval_dataloader(self, eval_dataset: Optional[torch.utils.data.Dataset]) -> torch.utils.data.DataLoader:
         """This is a clever bit of code that will do evaluation with
         a different dataset per evaluation batch.
@@ -107,7 +115,7 @@ class CustomTrainer(transformers.Trainer):
         eval_dataloader = torch.utils.data.DataLoader(
             eval_dataset,
             sampler=self._get_eval_sampler(eval_dataset),
-            batch_size=self.args.eval_batch_size,
+            batch_size=self.args.per_device_eval_batch_size,
             collate_fn=data_collator,
             drop_last=self.args.dataloader_drop_last,
             num_workers=self.args.dataloader_num_workers,
