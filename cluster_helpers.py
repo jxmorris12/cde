@@ -1,5 +1,9 @@
-from typing import Tuple
+from typing import Callable, Tuple
 
+import math
+import psutil
+
+import scipy
 import torch
 import tqdm
 
@@ -33,68 +37,122 @@ def embed_for_clustering(
         raise ValueError(f"model {model} not supported")
 
 
+def slice_sparse_tensor_rows(t: torch.sparse.Tensor, min_row: int, max_row: int) -> torch.sparse.Tensor:
+    t = t.coalesce()
+    row_idxs = t.indices()[0]
+    index_mask = (min_row <= row_idxs) & (row_idxs < max_row)
+
+    num_rows = (max_row - min_row)
+    num_cols = t.shape[1]
+
+    idxs = t.indices()[:, index_mask]
+    vals = t.values()[index_mask]
+    return torch.sparse_coo_tensor(idxs, vals, size=(num_rows, num_cols)).coalesce()
+
+
+@torch.no_grad
+def maxsim(X: torch.Tensor, y: torch.Tensor, maximize: bool, chunk_size: int = 40_000) -> torch.Tensor:
+    device = X.device
+    n_samples = X.shape[0]
+    max_sim_v = torch.empty(n_samples, device=device, dtype=X.dtype)
+    max_sim_i = torch.empty(n_samples, device=device, dtype=torch.int64)
+    
+    splits = int(math.ceil(X.shape[0] / chunk_size))
+    for i in tqdm.auto.trange(splits, desc=f'maxsim with chunk_size={chunk_size} on {device}', leave=False):
+        if i*chunk_size >= n_samples:
+            continue
+        start, end = i * chunk_size, min((i + 1) * chunk_size, n_samples)
+        sub_x = slice_sparse_tensor_rows(X, start, end)
+        sub_sim = sub_x @ y # TODO – Implement sparse max here to save mem!
+        sub_sim = sub_sim.to_dense()
+        if maximize:
+            sub_max_sim_v, sub_max_sim_i = sub_sim.max(dim=-1)
+        else:
+            sub_max_sim_v, sub_max_sim_i = sub_sim.min(dim=-1)
+        del sub_sim
+        max_sim_v[start: end] = sub_max_sim_v
+        max_sim_i[start: end] = sub_max_sim_i
+
+    return max_sim_v, max_sim_i
+
+
+@torch.no_grad
 def kmeans(
         q: torch.Tensor,
         X: torch.Tensor, 
         k: int,
         max_iters: int = 100, 
         tol: float = 1e-4, 
-        equal: bool = False,
         maximize: bool = True,
         initialization: str = "kmeans++", # ["kmeans++", "random"]
         seed: int = 42
     ) -> Tuple[torch.Tensor, torch.Tensor]:
+    if torch.cuda.is_available():
+        q = q.cuda()
+        X = X.cuda()
+    q = q.float()
+    X = X.float()
     torch.manual_seed(seed)
     # Initialize centroids randomly
+    print(f"kmeans called with k={k} / q.shape={q.shape} X.shape={X.shape}")
 
-    print(f"initializing with algorithm [{initialization}]")
-    if initialization == "random":
-        centroid_idxs = torch.randperm(X.size(0))[:k]
-        centroids = torch.stack([X[k] for k in centroid_idxs]).to_dense()
+    print(f"initializing with strategy [{initialization_strategy}]")
+    centroid_idxs = torch.randperm(X.size(0))[:k]
+    if initialization_strategy == "kmeans++":
+        first_centroid = X[centroid_idxs[0]]
+        centroids = [first_centroid]
+        d = torch.sparse.mm(X, first_centroid[None].T).to_dense()
+        for j in tqdm.trange(1, k):
+            most_recent_centroid = centroids[-1]
+            # Compute distances from each datapoints closest centroid
+            d2 = torch.sparse.mm(X, most_recent_centroid[None].T).to_dense()
+
+            # Take the one that is furthest and make it the next centroid
+            if maximize:
+                d = d.min(d2)
+                best_centroid_idx = d.argmin()
+            else:
+                d = d.max(d2)
+                best_centroid_idx = d.argmax()
+
+            centroids.append(X[best_centroid_idx])
+        centroids = torch.stack(centroids)
     else:
-        # placeholder
-        centroid_idxs = torch.randperm(X.size(0))[:k]
+        # random initialization
+        centroids = torch.stack([X[k] for k in centroid_idxs])
 
     last_centroid_shift = float("inf")
     
     pbar = tqdm.auto.trange(max_iters)
     print("running kmeans on device:", X.device)
     for j in pbar:
-        # Assign each point to the nearest centroid
-        distances = (q @ centroids.T).to_dense()
-        if equal:
-            # equal cluster-sized KMeans can just involve solving the bipartite 
-            # matching problem at each step
-            # # TODO: use linear_sum_assignment or another matching algorithm?
-            # assignments = torch.zeros(len(X))
-            # i = 0
-            # while i < len(X):
-            #     assignments[
-            raise NotImplementedError()
-        else:
-            if maximize:
-                _, assignments = distances.max(dim=1)
-            else:
-                _, assignments = distances.min(dim=1)
-
+        _, assignments = maxsim(
+            X=q, y=centroids.T, maximize=maximize
+        )
         idxs = torch.tensor([[idx, a] for idx, a in zip(range(len(X)), assignments)])
         vals = torch.ones(len(X))
         sparse_assignment_matrix = (
             torch.sparse_coo_tensor(idxs.T, vals, torch.Size([len(X), k]))
-            # torch.sparse.FloatTensor(idxs.T, vals, torch.Size([len(X), k]))
-        ).to(X.device)
+        ).to(X.device).float()
         cluster_idxs = torch.arange(k, device=X.device)
-        num_assignments = (assignments[:, None] == cluster_idxs).sum(0)
+        cluster_idxs, cluster_counts = assignments.unique(return_counts=True)
+        num_assignments = torch.zeros((k,), dtype=cluster_idxs.dtype, device=cluster_idxs.device) - 1
+        # num_assignments[cluster_idxs] += cluster_counts
+        num_assignments.scatter_add_(dim=0, index=cluster_idxs, src=(cluster_counts + 1))
+        # num_assignments = (assignments[:, None] == cluster_idxs).sum(0)
         
-        centroid_sums = sparse_assignment_matrix.T @ X
+        centroid_sums = torch.sparse.mm(sparse_assignment_matrix.T, X)
         new_centroids = (
            centroid_sums.to_dense().double() / num_assignments[:, None]
         ).float()
+
+        print(f"iteration {j} num centroids used: {(num_assignments >= 0).sum()}/{k}")
         
+        # TODO: Handle dead centroids through re-initialization.
         # don't replace a centroid if it got zero
         new_centroids = torch.where(
-            (num_assignments == 0)[:, None], centroids, new_centroids
-        )
+            (num_assignments < 0)[:, None], centroids.to_dense(), new_centroids.to_dense()
+        ).to_sparse_coo()
         
         total_centroid_shift = (centroids - new_centroids).pow(2).sum(1).sum()
         if torch.isnan(total_centroid_shift):
@@ -108,4 +166,5 @@ def kmeans(
         if shift_diff < tol:
             print(f"stopping early due to tolerance hit. completed {j} iterations.")
             break
+    breakpoint()
     return centroids.cpu(), assignments.cpu()

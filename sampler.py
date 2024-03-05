@@ -27,6 +27,7 @@ def get_cache_location_from_kwargs(**kwargs):
     cache_location = os.path.join(
         TTI_CACHE_DIR, "cluster"
     )
+    os.makedirs(cache_location, exist_ok=True)
     return os.path.join(cache_location, md5_hash_kwargs(**kwargs))
 
 
@@ -67,7 +68,6 @@ def _cluster_dataset_uncached(
     _, assignments = kmeans(
         q=q, 
         X=X,
-        equal=False,
         k=k,
         maximize=SHOULD_MAXIMIZE_CLUSTER_DISTANCE_FOR_MODEL[model]
     )
