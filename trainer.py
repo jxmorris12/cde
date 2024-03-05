@@ -192,6 +192,7 @@ class CustomTrainer(transformers.Trainer):
         return loss.detach() / self.args.gradient_accumulation_steps
 
     def _contrastive_loss(self, e1: torch.Tensor, e2: torch.Tensor, idx: torch.Tensor) -> torch.Tensor:
+        # TODO: How does this handle hard negatives?
         e1 = e1 / e1.norm(p=2, dim=1, keepdim=True) # Query
         e2 = e2 / e2.norm(p=2, dim=1, keepdim=True) # Document
         scores = e1 @ e2.T
@@ -292,23 +293,19 @@ class CustomTrainer(transformers.Trainer):
             query_inputs["dataset_input_ids"] = dataset_inputs["input_ids"]
             query_inputs["dataset_attention_mask"] = dataset_inputs["attention_mask"]
 
-        if len(negative_document_inputs):
-            all_document_inputs = {
-                k: (
-                    torch.cat((document_inputs[k], negative_document_inputs[k]), dim=0)
-                )
-                for k in ["input_ids", "attention_mask"]
-            }
-            all_document_inputs["dataset_input_ids"] = document_inputs["dataset_input_ids"]
-            all_document_inputs["dataset_attention_mask"] = document_inputs["dataset_attention_mask"]
-        else:
-            all_document_inputs = document_inputs
 
         if self.use_gc:
-            return self.gc(query_inputs, all_document_inputs, no_sync_except_last=False)
+            return self.gc(query_inputs, document_inputs, negative_document_inputs, no_sync_except_last=False)
         else:
             e1 = model(**query_inputs)
-            e2 = model(**all_document_inputs)
+            e2 = model(**document_inputs)
+
+            if len(negative_document_inputs):
+                negative_document_inputs["dataset_input_ids"] = document_inputs["dataset_input_ids"]
+                negative_document_inputs["dataset_attention_mask"] = document_inputs["dataset_attention_mask"]
+                e2_hn = model(**negative_document_inputs)
+                e2 = torch.cat((e2, e2_hn), dim=0)
+
             return self._contrastive_loss(
                 e1, e2, 
                 idx=inputs["idx"]
@@ -410,7 +407,6 @@ class CustomTrainer(transformers.Trainer):
 
         # check should_evaluate bool because it'll be reset by call to super()..
         should_evaluate = self.control.should_evaluate
-        print("MLSE =>", should_evaluate)
         
         # do all the other stuff
         super()._maybe_log_save_evaluate(*args, **kwargs)
@@ -418,13 +414,5 @@ class CustomTrainer(transformers.Trainer):
         # do my custom eval
         if should_evaluate:
             # TODO: implement multi-gpu retrieval evaluation.
-            print(f"((evaluating: {torch.distributed.get_rank()}))")
             self.evaluate_retrieval_datasets()
-            print("(done)")
-            # try:
-            #     # wait for main worker
-            #     torch.distributed.barrier()
-            # except ValueError:
-            #     # not distributed mode
-            #     pass
 

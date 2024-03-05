@@ -214,7 +214,6 @@ class TrainingArguments(transformers.TrainingArguments):
         num_cpus = min(64, len(os.sched_getaffinity(0)))
         num_workers = int(num_cpus / num_devices)
         self.eval_steps = int(self.eval_steps / num_devices)
-        self.eval_steps = 2
         self.save_steps = int(self.save_steps / num_devices)
         self.warmup_steps = int(self.warmup_steps / num_devices)
         print(f"training with eval_steps = {self.eval_steps} / warmup_steps = {self.warmup_steps}")

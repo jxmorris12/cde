@@ -13,7 +13,7 @@ import tqdm
 
 from cluster_helpers import embed_for_clustering, kmeans, SHOULD_MAXIMIZE_CLUSTER_DISTANCE_FOR_MODEL
 from dataset import NomicDataset, RedditDataset
-from helpers import md5_hash_kwargs
+from helpers import md5_hash_kwargs, get_rank, get_world_size
 
 
 TTI_CACHE_DIR = os.environ.get(
@@ -121,7 +121,20 @@ class Sampler(abc.ABC, torch.utils.data.Sampler):
         self.batch_size = batch_size
         self.max_num_batches = max_num_batches
         self.shuffle_func = random.shuffle if shuffle else identity
+        # https://github.com/pytorch/pytorch/blob/main/torch/utils/data/distributed.py#L68
+        self.rank = get_rank()
+        self.world_size = get_world_size()
+        self.num_samples = math.ceil(len(self.dataset) / self.world_size)
+        self.total_size = self.num_samples * self.world_size
+        self.seed = 42
+        self.epoch = 0
     
+    def _get_indices(self) -> Iterable[int]:
+        # TODO respect self.shuffle.
+        g = torch.Generator()
+        g.manual_seed(self.seed + self.epoch)
+        return torch.randperm(len(self.dataset), generator=g).tolist()
+
     @abc.abstractmethod
     def __iter__(self) -> Iterable[Dict]:
         raise NotImplementedError()
@@ -130,23 +143,33 @@ class Sampler(abc.ABC, torch.utils.data.Sampler):
     def __len__(self) -> int:
         raise NotImplementedError()
 
+    def set_epoch(self, epoch: int) -> None:
+        r"""
+        Set the epoch for this sampler.
+
+        When :attr:`shuffle=True`, this ensures all replicas
+        use a different random ordering for each epoch. Otherwise, the next iteration of this
+        sampler will yield the same ordering.
+
+        Args:
+            epoch (int): Epoch number.
+        """
+        self.epoch = epoch
+
 
 class RandomSampler(Sampler):
-    """Samples randomly from a dataset during training."""
-    def __iter__(self):
-        idxs = list(range(len(self)))
-        self.shuffle_func(idxs)
-        for i in idxs:
+    """Samples randomly from a dataset during training."""    
+    def __iter__(self):  
+        idxs = self._get_indices()
+        for i in idxs[self.rank:self.total_size:self.world_size]:
             yield i
         
     def __len__(self) -> int:
-        return (
-            self.max_num_batches * self.batch_size 
-            if self.max_num_batches else len(self.dataset)
-        )
+        print("Length:", self.num_samples)
+        return self.num_samples
 
 
-class FixedSubdomainSampler(Sampler):
+class FixedSubdomainSampler(RandomSampler):
     """Samples randomly from pre-specified domain (subreddits, dataset) during training.
     
     Must have fixed dictionary of subdomains `subdomain_idxs`.
@@ -160,46 +183,22 @@ class FixedSubdomainSampler(Sampler):
             dataset: Union[NomicDataset, RedditDataset], 
             batch_size: int, 
             shuffle: bool, 
-            max_num_batches: Optional[int] = None,
         ):
-        self.dataset = dataset
-        self.batch_size = batch_size
-        self.max_num_batches = max_num_batches
-
-        len_minus_batch = lambda L: len(L) - (len(L) % batch_size)
+        super().__init__(
+            dataset=dataset, 
+            batch_size=batch_size, 
+            shuffle=shuffle,
+            max_num_batches=None,
+        )
         assert hasattr(self.dataset, 'subdomain_idxs')
-        num_questions = { k: len_minus_batch(v) for k,v in self.dataset.subdomain_idxs.items() }
-        self.batch_assignments = [x for k, v in num_questions.items() for x in [k] * v]
-        self.shuffle_func = random.shuffle if shuffle else identity
-
-    def __iter__(self) -> Iterable[Dict]:
-        # randomly sample questions per-subreddit (w/o replacement)
-        subreddit_idx_pointer = collections.defaultdict(lambda: 0)
-        self.shuffle_func(self.batch_assignments)
-
-        for i, subreddit_idx in enumerate(self.batch_assignments):
-            # manually track length and stop
-            if (i * self.batch_size) >= len(self):
-                break
-
-            pointer = subreddit_idx_pointer[subreddit_idx]
-            if pointer == 0:
-                self.shuffle_func(self.dataset.subdomain_idxs[subreddit_idx])
-            subreddit_idx_pointer[subreddit_idx] += 1
-            questions = self.dataset.subdomain_idxs[subreddit_idx]
-
-            if (pointer + 1) * self.batch_size > len(questions):
-                # drop small batches
-                continue
-            else:
-                for j in range(pointer * self.batch_size, (pointer + 1) * self.batch_size):
-                    yield questions[j]
-
-    def __len__(self) -> int:
-        if self.max_num_batches:
-            return min(len(self.batch_assignments), self.max_num_batches) * self.batch_size
-        else:
-            return len(self.batch_assignments) * self.batch_size
+        self.batch_assignments = self.dataset.subdomain_idxs.items()
+    
+    def _get_batch_indices(self) -> Iterable[int]:
+        # TODO respect self.shuffle.
+        g = torch.Generator()
+        g.manual_seed(self.seed + self.epoch)
+        batch_idxs = torch.randperm(len(self.batch_assignments), generator=g).tolist()
+        return [j for b in batch_idxs for j in b]
 
 
 class AutoClusterSampler(FixedSubdomainSampler):
