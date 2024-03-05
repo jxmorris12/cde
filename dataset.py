@@ -26,6 +26,12 @@ from helpers import (
     tokenize_dataset, 
 )
 
+
+def get_cache_folder() -> str:
+    root_folder = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(root_folder, "data")
+
+
 def load_msmarco_hard_negatives_uncached() -> Dict[str, Dict[str, Any]]:
     """Loads hard negative passage for MSMARCO.
 
@@ -142,7 +148,7 @@ def load_beir_uncached(dataset: str, split: str) -> Tuple[datasets.Dataset, data
 def embed_with_cache(embedder: str, cache_name: str, texts: List[str]) -> datasets.Dataset:
     embedder_cache_path = embedder.replace('/', '__')
     # cache_folder = datasets.config.HF_DATASETS_CACHE
-    cache_folder = "/scratch/jxm3"
+    cache_folder = get_cache_folder()
     cache_folder = os.path.join(cache_folder, 'corpus_embeddings', embedder_cache_path)
     os.makedirs(cache_folder, exist_ok=True)
     cache_path = os.path.join(cache_folder, cache_name) #  + "_small")
@@ -444,16 +450,9 @@ class RedditDatasetWithSupervisedQuestions(RedditDataset):
 
 class NomicDataset:
     def __init__(self):
-        data_folder = '/home/jxm3/research/retrieval/tti3/data/nomic_embed_supervised'
-        data_folder_scratch = (
-            data_folder.replace(
-                "/home/jxm3/research/retrieval/tti3", 
-                "/scratch/jxm3/tti3"
-            )
+        data_folder = os.path.join(
+            get_cache_folder(), "nomic_embed_supervised"
         )
-        if os.path.exists(data_folder_scratch):
-            print(f"Updating Nomic data folder from {data_folder} to {data_folder_scratch}; hopefully will be faster")
-            data_folder = data_folder_scratch
         # Load questions
         self.subdomain_idxs = pickle.load(
             open(os.path.join(data_folder, 'subdomain_idxs.p'), 'rb'))
@@ -480,22 +479,22 @@ class NomicDataset:
     @property
     def _query_input_ids_key(self) -> str:
         """The key in the dataset for question input IDs (tokenizer-specific)."""
-        return f'query_input_ids_{self._embedder_tokenizer_name}'
+        return f'query_input_ids__{self._embedder_tokenizer_name}'
     
     @property
     def _document_input_ids_key(self) -> str:
         """The key in the dataset for document input IDs (tokenizer-specific)."""
-        return f'document_input_ids_{self._embedder_tokenizer_name}'
+        return f'document_input_ids__{self._embedder_tokenizer_name}'
     
     @property
     def _negative_document_input_ids_key(self) -> str:
         """The key in the dataset for document input IDs (tokenizer-specific)."""
-        return f'document_input_ids_{self._embedder_tokenizer_name}'
+        return f'document_input_ids__{self._embedder_tokenizer_name}'
     
     @property
     def _dataset_input_ids_key(self) -> str:
         """The key in the dataset for dataset input IDs (tokenizer-specific)."""
-        return f'document_input_ids_{self._dataset_tokenizer_name}'
+        return f'document_input_ids__{self._dataset_tokenizer_name}'
     
     def first(self) -> Dict[str, torch.Tensor]:
         subdomain_query_idxs = list(next(iter(self.subdomain_idxs.values())))
@@ -720,16 +719,6 @@ def load_reddit_train_and_val(
         perc: float = 0.9,
         supervised: bool = False
     ) -> Tuple[datasets.Dataset, datasets.Dataset]:
-    data_folder_scratch = (
-        data_folder.replace(
-            "/home/jxm3/research/retrieval/tti3", 
-            "/scratch/jxm3/tti3"
-        )
-    )
-    if os.path.exists(data_folder_scratch):
-        print(f"Updating reddit data folder from {data_folder} to {data_folder_scratch}; hopefully will be faster")
-        data_folder = data_folder_scratch
-
     question_folder = os.path.join(data_folder, "questions64")
     if supervised:
         train = RedditDatasetWithSupervisedQuestions(

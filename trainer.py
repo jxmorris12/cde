@@ -293,7 +293,15 @@ class CustomTrainer(transformers.Trainer):
         # github.com/beir-cellar/beir/blob/main/examples/retrieval/evaluation/reranking/evaluate_bm25_ce_reranking.py
         from beir.retrieval.evaluation import EvaluateRetrieval
 
-        dataloader = self.get_eval_dataloader(eval_dataset)
+        data_collator = self._get_collator_with_removed_columns(
+            self.data_collator, description="evaluation")
+        dataloader = torch.utils.data.DataLoader(
+            eval_dataset,
+            batch_size=self.args.eval_batch_size,
+            collate_fn=data_collator,
+            num_workers=self.args.dataloader_num_workers,
+            pin_memory=self.args.dataloader_pin_memory,
+        )
         model = self._wrap_model(self.model, training=False, dataloader=dataloader)
 
         # if full fp16 or bf16 eval is wanted and this funciton isn't called
@@ -316,7 +324,7 @@ class CustomTrainer(transformers.Trainer):
         # url = f"https://{username}:{password}@rush-compute-01.tech.cornell.edu:9200""
 
         # Rerank top-100 results using the reranker provided
-        rerank_results_model, rerank_results_biencoder = reranker.rerank(
+        rerank_results_model = reranker.rerank(
             eval_dataset.corpus, 
             eval_dataset.corpus_embeddings,
             eval_dataset.queries, 
@@ -327,17 +335,8 @@ class CustomTrainer(transformers.Trainer):
 
         #### Evaluate your retrieval using NDCG@k, MAP@K ...
         ndcg, _map, recall, precision = EvaluateRetrieval.evaluate(eval_dataset.qrels, rerank_results_model, [1, 5, 10, 100])
-        embed_ndcg, embed_map, embed_recall, embed_precision = EvaluateRetrieval.evaluate(eval_dataset.qrels, rerank_results_biencoder, [1, 5, 10, 100])
-
-        model_metrics = {
-            **ndcg, **_map, **recall, **precision
-        }
-        biencoder_metrics = {
-            **embed_ndcg, **embed_map, **embed_recall, **embed_precision
-        }
-        biencoder_metrics = { f"embed/{k}": v for k,v in biencoder_metrics.items() }
         return {
-            **model_metrics, **biencoder_metrics
+            **ndcg, **_map, **recall, **precision
         }
 
 
@@ -357,6 +356,11 @@ class CustomTrainer(transformers.Trainer):
             self._memory_tracker.stop_and_update_metrics(metrics)
             self.log(metrics)
             all_metrics.update(metrics)
+
+        if len(all_metrics):
+            print("<evaluate_retrieval_datasets>")
+            print(all_metrics)
+            print("</evaluate_retrieval_datasets>")
         return all_metrics
 
     def _maybe_log_save_evaluate(self, *args, **kwargs):
