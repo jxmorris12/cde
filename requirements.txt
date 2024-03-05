@@ -1,5 +1,8 @@
 accelerate
+beir
+bm25_pt
 datasets
+einops
 evaluate
 numpy
 pytrec_eval
@@ -7,3 +10,4 @@ tokenizers
 torch
 tqdm
 transformers
+wandb
