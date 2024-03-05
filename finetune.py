@@ -8,16 +8,14 @@ import transformers
 import wandb
 
 from collate import DocumentQueryCollatorWithPadding
-from dataset import (
-    load_reddit_train_and_val, load_synthetic_words_dataset, 
-    BeirDataset, NomicDataset
-)
+from dataset import load_reddit_train_and_val, load_synthetic_words_dataset, NomicDataset
 from helpers import ModelConfig
 from model import get_model_class
 from run_args import ModelArguments, DataArguments, TrainingArguments
 from sampler import get_sampler
 from trainer import CustomTrainer
 
+assert torch.cuda.device_count() > 0, "can't train without CUDA"
 
 logger = logging.getLogger(__name__)
 
@@ -89,30 +87,31 @@ def main():
     dataset_backbone = transformers.AutoModel.from_pretrained(model_args.dataset_embedder, trust_remote_code=True)
     dataset_tokenizer = transformers.AutoTokenizer.from_pretrained(model_args.dataset_embedder)
 
-    beir_dataset_names = [
-        # these are the 5 smallest beir datasets...
-        # 'arguana', # problem: query-doc IDs don't match? (TODO: investigate...)
-        'nfcorpus',
-        # 'scidocs', 
-        # 'scifact',
-        # 'fiqa',
-        ########
-        # 'msmarco', # TODO: figure out if this is the *real* eval set...
-        # 'trec-covid',
-        # 'signal1m',
-        # 'robust04',
-        # Other ones are certainly too big for repeated eval
-        # 'webis-touche2020',
-        # 'fever', 'quora',
-    ]
-    beir_dict = {
-        d: BeirDataset(dataset=d, embedder=model_args.embedder_rerank) for d in beir_dataset_names
-    }
-    retrieval_datasets = {
-        **{f"BeIR/{k}": v for k,v in beir_dict.items()}
-    }
-    for _, v in retrieval_datasets.items():
-        v.tokenize(tokenizer=embedder_tokenizer, max_length=model_args.max_seq_length)
+    # beir_dataset_names = [
+    #     # these are the 5 smallest beir datasets...
+    #     # 'arguana', # problem: query-doc IDs don't match? (TODO: investigate...)
+    #     'nfcorpus',
+    #     'scidocs', 
+    #     'scifact',
+    #     'fiqa',
+    #     ########
+    #     'msmarco', # this is the *real* eval set...
+    #     'trec-covid',
+    #     'signal1m',
+    #     'robust04',
+    #     # Other ones are certainly too big for repeated eval
+    #     # 'webis-touche2020',
+    #     # 'fever', 'quora',
+    # ]
+    # beir_dict = {} # TMP
+    # # beir_dict = {
+    # #     d: BeirDataset(dataset=d, embedder=model_args.embedder_rerank) for d in beir_dataset_names
+    # # }
+    # retrieval_datasets = {
+    #     **{f"BeIR/{k}": v for k,v in beir_dict.items()}
+    # }
+    # for k, v in retrieval_datasets.items():
+    #     v.tokenize(tokenizer=embedder_tokenizer, max_length=model_args.max_seq_length)
 
     if data_args.dataset == 'synthetic_words':
         train_dataset, eval_dataset = load_synthetic_words_dataset()
@@ -132,7 +131,9 @@ def main():
             supervised=False,
         )
     elif data_args.dataset == 'nomic':
-        train_dataset = NomicDataset()
+        train_dataset = NomicDataset(
+            num_hard_negatives=data_args.num_hard_negatives,
+        )
         eval_dataset = None
     else:
         raise ValueError(f'Unsupported dataset {data_args.dataset}')
@@ -183,13 +184,12 @@ def main():
         embedder_tokenizer=embedder_tokenizer,
         train_sampler=train_sampler,
         eval_sampler=eval_sampler,
-        retrieval_datasets=retrieval_datasets,
+        retrieval_datasets={},
     )
 
     checkpoint = get_checkpoint(training_args)
     logging.info("train() loaded checkpoint %s", checkpoint)
     # trainer.evaluate_retrieval_datasets()
-    assert torch.cuda.device_count() > 0, "can't train without CUDA"
     trainer.train(resume_from_checkpoint=checkpoint)
 
 

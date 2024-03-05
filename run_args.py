@@ -111,6 +111,12 @@ class DataArguments:
             "choices": [True, False],
         }
     )
+    num_hard_negatives: int = field(
+        default=0,
+        metadata={
+            "help": "Number of hard negatives for training",
+        }
+    )
     def __post_init__(self):
         pass
 
