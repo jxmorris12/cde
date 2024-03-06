@@ -254,6 +254,8 @@ class RerankHelper:
         logging.info("Starting To Rerank Top-{}....".format(top_k))
 
         big_neg_number = -10**10
+
+        model = self.model.to(torch.bfloat16)
         
         rank = get_rank()
         world_size = get_world_size()
@@ -291,13 +293,13 @@ class RerankHelper:
             ).to(device)
             
             with torch.no_grad():
-                query_embedding = self.model(
+                query_embedding = model(
                     input_ids=query_inputs.input_ids,
                     attention_mask=query_inputs.attention_mask,
                     dataset_input_ids=document_inputs.input_ids,
                     dataset_attention_mask=document_inputs.attention_mask,
                 ).flatten()
-                document_embeddings = self.model(
+                document_embeddings = model(
                     input_ids=document_inputs.input_ids,
                     attention_mask=document_inputs.attention_mask,
                     dataset_input_ids=document_inputs.input_ids,

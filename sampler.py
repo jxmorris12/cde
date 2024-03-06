@@ -202,14 +202,19 @@ class FixedSubdomainSampler(RandomSampler):
         # TODO respect self.shuffle.
         g = torch.Generator()
         g.manual_seed(self.seed + self.epoch)
+        # 1. Concatenate all datasets from all batches (which should be pre-shuffled once)
         all_assignments = torch.tensor([v for L in self.batch_assignments.values() for v in L])
         effective_length = len(self.dataset) - (len(self.dataset) % self.batch_size)
+        # 2. Trim off the end (effectively drop_last=True)
         all_assignments = all_assignments[:effective_length]
         num_batches = int(effective_length // self.batch_size)
+        # 3. Reshape into batches
         all_assignments = all_assignments.reshape(
             (num_batches, self.batch_size)
         )
+        # 4. Randomly reorder batches
         batch_perm = torch.randperm(num_batches, generator=g)
+        # 5. Flatten and return
         return all_assignments[batch_perm].flatten().tolist()
 
     def __iter__(self):  
