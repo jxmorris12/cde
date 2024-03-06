@@ -202,10 +202,12 @@ class RerankHelper:
     
     Template: https://github.com/beir-cellar/beir/blob/main/beir/reranking/rerank.py#L7
     """
-    def __init__(self, model, tokenizer, batch_size: int):
+    def __init__(self, model: torch.nn.Module, tokenizer: transformers.PreTrainedTokenizer, batch_size: int, max_seq_length: int, name: str):
         self.model = model
         self.tokenizer = tokenizer
         self.batch_size = batch_size
+        self.max_seq_length = max_seq_length
+        self.name = name
     
     def _score(self, query_embedding: torch.Tensor, corpus_embeddings: torch.Tensor) -> float:
         with torch.no_grad():
@@ -233,14 +235,12 @@ class RerankHelper:
         logging.info("Starting To Rerank Top-{}....".format(top_k))
 
         big_neg_number = -10**10
-
-        model = self.model.to(torch.bfloat16)
         
         rank = get_rank()
         world_size = get_world_size()
         query_keys = sorted(list(results.keys()))
         doc_id_to_key = collections.defaultdict(dict)
-        for j, query_id in tqdm_if_main_worker(enumerate(query_keys), total=len(query_keys), desc="evaluating dataset"):
+        for j, query_id in tqdm_if_main_worker(enumerate(query_keys), total=len(query_keys), desc=f"evaluating {self.name}"):
             topk_docs = sorted(results[query_id].items(), key=lambda item: item[1], reverse=True)[:top_k]
             for doc_j, (doc_id, _) in enumerate(topk_docs):
                 doc_id_to_key[query_id][doc_j] = doc_id
@@ -260,32 +260,35 @@ class RerankHelper:
                 [query_text],
                 padding=True,
                 truncation=True,
-                max_length=self.model.config.max_seq_length,
+                max_length=self.max_seq_length,
                 return_tensors="pt",
             ).to(device)
             document_inputs = self.tokenizer(
                 documents_text,
                 padding=True,
                 truncation=True,
-                max_length=self.model.config.max_seq_length,
+                max_length=self.max_seq_length,
                 return_tensors="pt",
             ).to(device)
             
             with torch.no_grad():
-                query_embedding = model(
+                query_embedding = self.model(
                     input_ids=query_inputs.input_ids,
                     attention_mask=query_inputs.attention_mask,
                     dataset_input_ids=document_inputs.input_ids,
                     dataset_attention_mask=document_inputs.attention_mask,
                 ).flatten()
-                document_embeddings = model(
+                document_embeddings = self.model(
                     input_ids=document_inputs.input_ids,
                     attention_mask=document_inputs.attention_mask,
                     dataset_input_ids=document_inputs.input_ids,
                     dataset_attention_mask=document_inputs.attention_mask,
                 )
             
-            biencoder_score = torch.nn.functional.cosine_similarity(query_embedding, document_embeddings).flatten().cpu().tolist()
+            biencoder_score = torch.nn.functional.cosine_similarity(
+                query_embedding, 
+                document_embeddings
+            ).flatten().cpu().tolist()
             rerank_scores_biencoder.extend(biencoder_score)
         
         pair_ids = torch.tensor(pair_ids, device=device)

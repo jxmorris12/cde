@@ -34,6 +34,7 @@ class CustomTrainer(transformers.Trainer):
                   **kwargs
                 ):
         super().__init__(*args, **kwargs)
+        self.max_seq_length = self.model.config.max_seq_length
         self.retrieval_datasets = retrieval_datasets
         self._train_sampler = train_sampler
         self._eval_sampler = eval_sampler
@@ -203,7 +204,7 @@ class CustomTrainer(transformers.Trainer):
         # of multiplying the cosine similarity score by 20 for
         # better optimization (Thakur et al., 2021)."
         # 
-        scores *= 20  # TODO argparse: self.args.contrastive_temperature.exp()
+        scores *= self.model.temp
 
         assert scores.shape == one_hot_labels.shape
         labels = one_hot_labels / one_hot_labels.sum(dim=1, keepdim=True)
@@ -319,6 +320,7 @@ class CustomTrainer(transformers.Trainer):
     def _retrieval_evaluate(
             self,
             eval_dataset: BeirDataset,
+            model: torch.nn.Module,
             metric_key_prefix: str,
         ) -> Dict[str, float]:
         # github.com/jxmorris12/tti/blob/master/trainer.py
@@ -334,21 +336,19 @@ class CustomTrainer(transformers.Trainer):
             num_workers=self.args.dataloader_num_workers,
             pin_memory=self.args.dataloader_pin_memory,
         )
-        model = self._wrap_model(self.model, training=False, dataloader=dataloader)
+        model = self._wrap_model(model, training=False, dataloader=dataloader)
 
         # if full fp16 or bf16 eval is wanted and this funciton isn't called
         # while ``train`` is running, cast it to the right dtype first and then put on device
-        if not self.is_in_train:
-            if self.args.fp16_full_eval:
-                model = model.to(dtype=torch.float16, device=self.args.device)
-            elif self.args.bf16_full_eval:
-                model = model.to(dtype=torch.bfloat16, device=self.args.device)
+        model = model.to(dtype=torch.bfloat16, device=self.args.device)
         model.eval()
         
         reranker = RerankHelper(
-            model=self.model, 
+            model=model, 
             tokenizer=self.embedder_tokenizer, 
-            batch_size=self.args.eval_batch_size
+            batch_size=self.args.eval_batch_size,
+            max_seq_length=self.max_seq_length,
+            name=metric_key_prefix,
         )
 
         # Rerank top-100 results using the reranker provided
@@ -383,12 +383,13 @@ class CustomTrainer(transformers.Trainer):
                 **kwargs
             )
 
-    def evaluate_retrieval_datasets(self) -> Dict[str, float]:
+    def evaluate_retrieval_datasets(self, model: torch.nn.Module) -> Dict[str, float]:
         all_metrics = {}
         for eval_dataset_name, eval_dataset in self.retrieval_datasets.items():
             metric_key_prefix = f"eval_{eval_dataset_name}"
             metrics = self._retrieval_evaluate(
                 eval_dataset=eval_dataset,
+                model=model,
                 metric_key_prefix=metric_key_prefix,
             )
                 # Prefix all keys with metric_key_prefix + '_'
@@ -404,7 +405,7 @@ class CustomTrainer(transformers.Trainer):
             print("evaluate_retrieval_datasets =>", all_metrics)
         return all_metrics
 
-    def _maybe_log_save_evaluate(self, *args, **kwargs):
+    def _maybe_log_save_evaluate(self, tr_loss: float, grad_norm: float, model: torch.nn.Module, *args, **kwargs):
         ####   (have to hook in here to call my special function)
         # 
         # evaluate on retrieval datasets!
@@ -413,10 +414,10 @@ class CustomTrainer(transformers.Trainer):
         should_evaluate = self.control.should_evaluate
         
         # do all the other stuff
-        super()._maybe_log_save_evaluate(*args, **kwargs)
+        super()._maybe_log_save_evaluate(tr_loss, grad_norm, model, *args, **kwargs)
 
         # do my custom eval
         if should_evaluate:
             # TODO: implement multi-gpu retrieval evaluation.
-            self.evaluate_retrieval_datasets()
+            self.evaluate_retrieval_datasets(model=model)
 

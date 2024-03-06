@@ -76,6 +76,12 @@ class ModelArguments:
             "help": "Weighting between document and dataset embedding for dataset transformer"
         }
     )
+    contrastive_temp: float = field(
+        default=20,
+        metadata={
+            "help": "temperature for contrastive learning",
+        }
+    )
 
 @dataclass
 class DataArguments:

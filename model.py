@@ -342,6 +342,7 @@ class BiEncoder(transformers.PreTrainedModel):
             torch.nn.GELU(),
             torch.nn.Linear(self.hidden_size, self.hidden_size),
         )
+        self.temp = config.contrastive_temp
 
         if config.disable_dropout:
             disable_dropout(self)
