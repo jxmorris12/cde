@@ -120,12 +120,12 @@ class Sampler(abc.ABC, torch.utils.data.Sampler):
         self.dataset = dataset
         self.batch_size = batch_size
         self.max_num_batches = max_num_batches
-        self.shuffle_func = random.shuffle if shuffle else identity
         # https://github.com/pytorch/pytorch/blob/main/torch/utils/data/distributed.py#L68
         self.rank = get_rank()
         self.world_size = get_world_size()
         self.num_samples = math.ceil(len(self.dataset) / self.world_size)
         self.total_size = self.num_samples * self.world_size
+        self.shuffle = shuffle
         self.seed = 42
         self.epoch = 0
     
@@ -191,14 +191,33 @@ class FixedSubdomainSampler(RandomSampler):
             max_num_batches=None,
         )
         assert hasattr(self.dataset, 'subdomain_idxs')
-        self.batch_assignments = self.dataset.subdomain_idxs.items()
+        self.batch_assignments = self.dataset.subdomain_idxs
+        g = torch.Generator()
+        g.manual_seed(self.seed)
+        for k in self.batch_assignments.keys():
+            random.Random(self.seed).shuffle(self.batch_assignments[k])
+        assert sum(map(len, self.batch_assignments.values())) == len(dataset)
     
-    def _get_batch_indices(self) -> Iterable[int]:
+    def _get_indices(self) -> List[int]:
         # TODO respect self.shuffle.
         g = torch.Generator()
         g.manual_seed(self.seed + self.epoch)
-        batch_idxs = torch.randperm(len(self.batch_assignments), generator=g).tolist()
-        return [j for b in batch_idxs for j in b]
+        all_assignments = torch.tensor([v for L in self.batch_assignments.values() for v in L])
+        effective_length = len(self) - (len(self) % self.batch_size)
+        all_assignments = all_assignments[:effective_length]
+        num_batches = int(effective_length // self.batch_size)
+        all_assignments = all_assignments.reshape(
+            (num_batches, self.batch_size)
+        )
+        batch_perm = torch.randperm(num_batches, generator=g)
+        return all_assignments[batch_perm].flatten().tolist()
+
+    def __iter__(self):  
+        piece_size = int(math.ceil(self.total_size / self.world_size))
+        piece_start = piece_size * self.rank
+        idxs = self._get_indices()
+        for i in idxs[piece_start:piece_start+piece_size]:
+            yield i
 
 
 class AutoClusterSampler(FixedSubdomainSampler):

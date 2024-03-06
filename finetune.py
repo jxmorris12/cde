@@ -12,7 +12,7 @@ from dataset import (
     load_reddit_train_and_val, load_synthetic_words_dataset, 
     BeirDataset, NomicDataset
 )
-from helpers import ModelConfig
+from helpers import load_embedder_and_tokenizer, ModelConfig
 from model import get_model_class
 from run_args import ModelArguments, DataArguments, TrainingArguments
 from sampler import get_sampler
@@ -21,7 +21,6 @@ from trainer import CustomTrainer
 assert torch.cuda.device_count() > 0, "can't train without CUDA"
 
 logger = logging.getLogger(__name__)
-
 
 def get_checkpoint(training_args) -> Optional[str]:
     last_checkpoint = None
@@ -84,11 +83,15 @@ def main():
         datefmt='%Y-%m-%d %H:%M:%S',
         level=logging.INFO
     )
-    embedder = transformers.AutoModel.from_pretrained(model_args.embedder, trust_remote_code=True)
-    embedder_tokenizer = transformers.AutoTokenizer.from_pretrained(model_args.embedder)
-    dataset_embedder = transformers.AutoModel.from_pretrained(model_args.dataset_embedder, trust_remote_code=True)
-    dataset_backbone = transformers.AutoModel.from_pretrained(model_args.dataset_embedder, trust_remote_code=True)
-    dataset_tokenizer = transformers.AutoTokenizer.from_pretrained(model_args.dataset_embedder)
+    embedder, embedder_tokenizer = load_embedder_and_tokenizer(
+        model_args.embedder,
+    )
+    dataset_embedder, dataset_tokenizer = load_embedder_and_tokenizer(
+        model_args.dataset_embedder,
+    )
+    dataset_backbone, dataset_tokenizer = load_embedder_and_tokenizer(
+        model_args.dataset_embedder,
+    )
 
     beir_dataset_names = [
     #     # these are the 5 smallest beir datasets...

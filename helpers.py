@@ -552,3 +552,18 @@ class TensorRunningAverages:
             metrics[key] = self.get(key)
             self.clear(key)
         return metrics
+
+def load_embedder_and_tokenizer(name: str) -> Tuple:
+    if name.startswith("nomic"):
+        # Load NomicBert from contrastors repo
+        import sys
+        sys.path.append("/home/paperspace/contrastors-dev/src")
+        from contrastors.models.encoder import NomicBertModel
+        model = NomicBertModel.from_pretrained(
+            name, add_pooling_layer=False
+        )
+    else:
+        model = transformers.AutoModel.from_pretrained(name, trust_remote_code=True)
+    tokenizer = transformers.AutoTokenizer.from_pretrained(name)
+    return model, tokenizer
+    

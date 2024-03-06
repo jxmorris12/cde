@@ -171,6 +171,7 @@ class CustomTrainer(transformers.Trainer):
             wandb_run_id = self.args.exp_name
             print("starting wandb run with name", wandb_run_id)
             wandb.init(
+                entity="jack-morris",
                 project="tti-nomic",
                 name=wandb_run_id,
                 # resume=True,
