@@ -13,19 +13,15 @@ import tqdm
 
 from cluster_helpers import embed_for_clustering, kmeans, SHOULD_MAXIMIZE_CLUSTER_DISTANCE_FOR_MODEL
 from dataset import NomicDataset, RedditDataset
-from helpers import md5_hash_kwargs, get_rank, get_world_size
+from helpers import get_tti_cache_dir, get_rank, get_world_size, md5_hash_kwargs, tqdm_if_main_worker
 
-
-TTI_CACHE_DIR = os.environ.get(
-    "TTI_CACHE_DIR", "/scratch/jxm/tti"
-)
 
 identity = lambda x: x
 
 
 def get_cache_location_from_kwargs(**kwargs):
     cache_location = os.path.join(
-        TTI_CACHE_DIR, "cluster"
+        get_tti_cache_dir(), "cluster"
     )
     os.makedirs(cache_location, exist_ok=True)
     return os.path.join(cache_location, md5_hash_kwargs(**kwargs))
@@ -74,7 +70,7 @@ def _cluster_dataset_uncached(
     # stack assignments to list.
     assignments_dict = collections.defaultdict(list)
     for i in tqdm.trange(len(assignments), desc="collecting assigments", leave=False):
-        assignments_dict[i].append(assignments[i])
+        assignments_dict[i].append(assignments[i].item())
     return assignments_dict
     
 def cluster_dataset(
@@ -94,6 +90,7 @@ def cluster_dataset(
         model=model,
         query_to_doc=query_to_doc,
     )
+    print("checking for cluster at file", clustering_hash)
     if os.path.exists(clustering_hash):
         return pickle.load(open(clustering_hash, "rb"))
     else:
@@ -105,6 +102,7 @@ def cluster_dataset(
             document_key=document_key,
             batch_size=batch_size,
         )
+        breakpoint()
         pickle.dump(result, open(clustering_hash, "wb"))
         return result
 
@@ -233,10 +231,16 @@ class AutoClusterSampler(FixedSubdomainSampler):
             dataset: datasets.Dataset, 
             query_to_doc: bool, 
             batch_size: int,
+            shuffle: bool,
             model: str,
         ):
+        super().__init__(
+            dataset=dataset, 
+            batch_size=batch_size, 
+            shuffle=shuffle,
+        )
         self.dataset = dataset
-        self.batch_assignments = cluster_dataset(
+        cluster_assignments = cluster_dataset(
             dataset=dataset,
             model=model,
             query_key=dataset._document_input_ids_key,
@@ -244,6 +248,12 @@ class AutoClusterSampler(FixedSubdomainSampler):
             query_to_doc=query_to_doc,
             batch_size=batch_size,
         )
+        assert len(self.dataset) == len(cluster_assignments)
+        self.batch_assignments = collections.defaultdict(list)
+        for i, cluster in tqdm_if_main_worker(cluster_assignments.items()):
+            if isinstance(cluster, list): cluster = cluster[0]
+            self.batch_assignments[cluster].append(i)
+        print(f"got {len(self.batch_assignments)} clusters")
 
 
 def get_sampler(
@@ -269,6 +279,7 @@ def get_sampler(
         return AutoClusterSampler(
             dataset=dataset, 
             batch_size=batch_size,
+            shuffle=shuffle,
             query_to_doc=data_args.clustering_query_to_doc, 
             model=data_args.clustering_model,
         )

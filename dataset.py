@@ -21,14 +21,11 @@ import tqdm
 from helpers import (
     datasets_fast_load_from_disk,
     download_url, download_url_and_unzip, 
+    get_tti_cache_dir,
     get_num_proc,
     independent_crop,
     tokenize_dataset, 
 )
-
-def get_cache_dir() -> str:
-    script_directory = os.path.dirname(os.path.abspath(__file__))
-    return os.path.join(script_directory, "data")
 
 
 def load_msmarco_hard_negatives_uncached() -> Dict[str, Dict[str, Any]]:
@@ -148,7 +145,7 @@ def load_beir_uncached(dataset: str, split: str) -> Tuple[datasets.Dataset, data
 def embed_with_cache(embedder: str, cache_name: str, texts: List[str]) -> datasets.Dataset:
     embedder_cache_path = embedder.replace('/', '__')
     # cache_folder = datasets.config.HF_DATASETS_CACHE
-    cache_folder = os.path.join(get_cache_dir(), 'corpus_embeddings', embedder_cache_path)
+    cache_folder = os.path.join(get_tti_cache_dir(), 'corpus_embeddings', embedder_cache_path)
     os.makedirs(cache_folder, exist_ok=True)
     cache_path = os.path.join(cache_folder, cache_name) #  + "_small")
 
@@ -450,7 +447,7 @@ class RedditDatasetWithSupervisedQuestions(RedditDataset):
 class NomicDataset:
     num_hard_negatives: int
     def __init__(self, num_hard_negatives: int = 0):
-        data_folder = os.path.join(get_cache_dir(), "nomic_embed_supervised")
+        data_folder = os.path.join(get_tti_cache_dir(), "nomic_embed_supervised")
         # Load questions
         self.subdomain_idxs = pickle.load(
             open(os.path.join(data_folder, 'subdomain_idxs.p'), 'rb'))

@@ -21,6 +21,11 @@ import tqdm
 import transformers
 
 
+def get_tti_cache_dir() -> str:
+    script_directory = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(script_directory, "data")
+
+
 def get_dataset_name(d: datasets.Dataset) -> str:
     return f"{d.builder_name}.{d.config_name}[{d.split}]"
 
@@ -417,6 +422,7 @@ def load_dataset_tables(
                 pool.map(datasets.table.MemoryMappedTable.from_file, files),
                 desc=f"Loading {len(files)} files with {num_workers} workers",
                 total=len(files),
+                colour="e0e0e0"
             )
         )
     return result

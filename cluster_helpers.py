@@ -53,7 +53,7 @@ def slice_sparse_tensor_rows(t: torch.sparse.Tensor, min_row: int, max_row: int)
 
 
 @torch.no_grad
-def maxsim(X: torch.Tensor, y: torch.Tensor, maximize: bool, chunk_size: int = 2_000) -> torch.Tensor:
+def maxsim(X: torch.Tensor, y: torch.Tensor, maximize: bool, chunk_size: int = 3_000) -> torch.Tensor:
     device = X.device
     n_samples = X.shape[0]
     max_sim_v = torch.empty(n_samples, device=device, dtype=X.dtype)
@@ -88,9 +88,9 @@ def kmeans(
         X: torch.Tensor, 
         k: int,
         max_iters: int = 100, 
-        tol: float = 1e-4, 
+        tol: float = 1e-3, 
         maximize: bool = True,
-        initialization: str = "kmeans++", # ["kmeans++", "random"]
+        initialization_strategy: str = "kmeans++", # ["kmeans++", "random"]
         seed: int = 42
     ) -> Tuple[torch.Tensor, torch.Tensor]:
     if torch.cuda.is_available():
@@ -152,9 +152,7 @@ def kmeans(
         cluster_idxs = torch.arange(k, device=X.device)
         cluster_idxs, cluster_counts = assignments.unique(return_counts=True)
         num_assignments = torch.zeros((k,), dtype=cluster_idxs.dtype, device=cluster_idxs.device) - 1
-        # num_assignments[cluster_idxs] += cluster_counts
         num_assignments.scatter_add_(dim=0, index=cluster_idxs, src=(cluster_counts + 1))
-        # num_assignments = (assignments[:, None] == cluster_idxs).sum(0)
         
         centroid_sums = torch.sparse.mm(sparse_assignment_matrix.T, X)
         new_centroids = (

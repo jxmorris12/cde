@@ -191,7 +191,7 @@ class CustomTrainer(transformers.Trainer):
             loss = loss.mean()
         return loss.detach() / self.args.gradient_accumulation_steps
 
-    def _contrastive_loss(self, e1: torch.Tensor, e2: torch.Tensor, idx: torch.Tensor) -> torch.Tensor:
+    def _contrastive_loss(self, e1: torch.Tensor, e2: torch.Tensor, one_hot_labels: torch.Tensor) -> torch.Tensor:
         # TODO: How does this handle hard negatives?
         e1 = e1 / e1.norm(p=2, dim=1, keepdim=True) # Query
         e2 = e2 / e2.norm(p=2, dim=1, keepdim=True) # Document
@@ -205,17 +205,8 @@ class CustomTrainer(transformers.Trainer):
         # 
         scores *= 20  # TODO argparse: self.args.contrastive_temperature.exp()
 
-        one_hot_labels = (idx[:, None] == idx[None, :]).float()
+        assert scores.shape == one_hot_labels.shape
         labels = one_hot_labels / one_hot_labels.sum(dim=1)
-        if scores.shape[1] > labels.shape[1]:
-            # add zeros for hard negatives
-            # TODO: implement deduplication here.
-            hn_zeros = torch.zeros(
-                (scores.shape[0], scores.shape[1] - labels.shape[1]),
-                dtype=labels.dtype, device=labels.device
-            )
-            labels = torch.cat((labels, hn_zeros), dim=1)
-            one_hot_labels = torch.cat((one_hot_labels, hn_zeros), dim=1)
 
         loss = torch.nn.functional.cross_entropy(
             scores, labels, label_smoothing=0.0
@@ -300,15 +291,25 @@ class CustomTrainer(transformers.Trainer):
             e1 = model(**query_inputs)
             e2 = model(**document_inputs)
 
+            corpus_unique_ids = document_inputs["input_ids"].sum(dim=1)
             if len(negative_document_inputs):
                 negative_document_inputs["dataset_input_ids"] = document_inputs["dataset_input_ids"]
                 negative_document_inputs["dataset_attention_mask"] = document_inputs["dataset_attention_mask"]
                 e2_hn = model(**negative_document_inputs)
                 e2 = torch.cat((e2, e2_hn), dim=0)
+                negative_document_unique_ids =  negative_document_inputs["input_ids"].sum(dim=1)
+                corpus_unique_ids = torch.cat(
+                    (corpus_unique_ids, negative_document_unique_ids), dim=0
+                )
+            
+            # Create labels based on document IDs.
+            document_unique_ids = document_inputs["input_ids"].sum(dim=1)
+            one_hot_labels = (
+                document_unique_ids[:, None] == corpus_unique_ids[None, :])
 
             return self._contrastive_loss(
                 e1, e2, 
-                idx=inputs["idx"]
+                one_hot_labels=one_hot_labels
             )
     
     # Custom retrieval evalution code
