@@ -168,15 +168,6 @@ class CustomTrainer(transformers.Trainer):
                 )
             else:
                 eval_table = None
-            wandb_run_id = self.args.exp_name
-            print("starting wandb run with name", wandb_run_id)
-            wandb.init(
-                entity="jack-morris",
-                project="tti-nomic",
-                name=wandb_run_id,
-                # resume=True,
-            )
-            wandb.watch(self.model)
             wandb.log({
                 "examples/train": train_table,
                 "examples/eval": eval_table,

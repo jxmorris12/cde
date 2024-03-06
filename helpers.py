@@ -25,12 +25,6 @@ def get_dataset_name(d: datasets.Dataset) -> str:
     return f"{d.builder_name}.{d.config_name}[{d.split}]"
 
 
-def get_world_size() -> int:
-    try:
-        return torch.distributed.get_world_size()
-    except (RuntimeError, ValueError):
-        return 1
-
 def gather(t):
     # torch.distributed.nn.all_gather scales by world size since the reduce op is SUM
     # https://github.com/pytorch/pytorch/issues/58005
@@ -47,6 +41,7 @@ def gather(t):
     torch.distributed.all_gather(gathered, t)
     gathered[get_rank()] = t
     return torch.cat(gathered, dim=0)
+
 
 def get_num_proc() -> int:
     world_size: int = get_world_size()
@@ -85,7 +80,7 @@ def process_qrels_uncached(corpus: datasets.Dataset, qrels: datasets.Dataset) ->
         #
     
     if skipped_qrels > 0:
-        print(f'Warning: Skipped {skipped_qrels}/{len(qrels)} qrels.')
+        logging.warning(f'Warning: Skipped {skipped_qrels}/{len(qrels)} qrels.')
     
     return qrels_idxs, qrels_scores
 
@@ -110,33 +105,6 @@ def process_qrels(
         qrels_idxs, qrels_scores = pickle.load(open(cache_file, 'rb'))
     
     return qrels_idxs, qrels_scores
-
-
-def compute_token_counts_uncached(
-        tokenizer: transformers.AutoTokenizer,
-        dataset: datasets.Dataset,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
-    print(f'computing dataset token counts for: {get_dataset_name(dataset)}')
-
-    vocab_size = tokenizer.vocab_size
-    token_freqs = torch.zeros(
-        (vocab_size, ), dtype=int, requires_grad=False
-    )
-    document_token_freqs = torch.zeros(
-        (vocab_size, ), dtype=int, requires_grad=False
-    )
-
-    for ex in tqdm.tqdm(dataset, leave=False, colour='#E6E6FA'):
-        ex_valid_keys = ('document_input_ids' in ex) ^ ('text_input_ids' in ex)
-        assert ex_valid_keys, f'cannot compute histogram, got ex with keys {ex.keys()}'
-        key_name = 'document_input_ids' if ('document_input_ids' in ex) else 'text_input_ids'
-        input_ids = ex[key_name]
-        assert isinstance(input_ids, torch.Tensor), f'invalid input_ids {type(input_ids)}'
-        f = input_ids.bincount(minlength=vocab_size)
-        token_freqs += f
-        document_token_freqs += f.clamp(max=1)
-
-    return token_freqs, document_token_freqs
 
 
 def strip_extension(filename: str) -> str:
@@ -182,7 +150,7 @@ def download_url(url: str, save_path: str, chunk_size: int = 1024):
 
 
 def unzip(zip_file: str, out_dir: str):
-    print("unzipping =>", zip_file)
+    logging.info("unzipping =>", zip_file)
     zip_ = zipfile.ZipFile(zip_file, "r")
     zip_.extractall(path=out_dir)
     zip_.close()
@@ -215,6 +183,13 @@ def get_rank() -> int:
         return torch.distributed.get_rank()
     except (RuntimeError, ValueError):
         return 0
+    
+
+def tqdm_if_main_worker(iterable: Iterable, **kwargs) -> Iterable:
+    if get_rank() == 0:
+        return tqdm.tqdm(iterable, **kwargs)
+    else:
+        return iterable
 
 
 class RerankHelper:
@@ -234,7 +209,6 @@ class RerankHelper:
                 document_embeddings=corpus_embeddings
             )
         return scores.flatten().cpu().tolist()
-        
     
     def rerank(self, 
                corpus: Dict[str, Dict[str, str]], 
@@ -261,7 +235,7 @@ class RerankHelper:
         world_size = get_world_size()
         query_keys = sorted(list(results.keys()))
         doc_id_to_key = collections.defaultdict(dict)
-        for j, query_id in tqdm.tqdm(enumerate(query_keys), total=len(query_keys), desc="evaluating dataset"):
+        for j, query_id in tqdm_if_main_worker(enumerate(query_keys), total=len(query_keys), desc="evaluating dataset"):
             topk_docs = sorted(results[query_id].items(), key=lambda item: item[1], reverse=True)[:top_k]
             for doc_j, (doc_id, _) in enumerate(topk_docs):
                 doc_id_to_key[query_id][doc_j] = doc_id
@@ -439,7 +413,7 @@ def load_dataset_tables(
     
     with pool_cls(**pool_kwargs) as pool:
         result = list(
-            tqdm.tqdm(
+            tqdm_if_main_worker(
                 pool.map(datasets.table.MemoryMappedTable.from_file, files),
                 desc=f"Loading {len(files)} files with {num_workers} workers",
                 total=len(files),
@@ -449,7 +423,7 @@ def load_dataset_tables(
 
 
 def datasets_fast_load_from_disk(cache_path: str) -> datasets.Dataset:
-    print(f"fast_load_from_disk called with path:", cache_path)
+    logging.info(f"fast_load_from_disk called with path:", cache_path)
     dataset_info_path = os.path.join(cache_path, "dataset_info.json")
     with open(dataset_info_path, encoding="utf-8") as dataset_info_file:
         dataset_info = datasets.DatasetInfo.from_dict(json.load(dataset_info_file))

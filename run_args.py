@@ -166,7 +166,7 @@ class TrainingArguments(transformers.TrainingArguments):
         metadata={"help": "Log every X updates steps."}
     )
     eval_steps: int = field(
-        default=4000, 
+        default=10_000, 
         metadata={"help": "Run an evaluation every X steps."}
     )
 

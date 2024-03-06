@@ -12,7 +12,7 @@ from dataset import (
     load_reddit_train_and_val, load_synthetic_words_dataset, 
     BeirDataset, NomicDataset
 )
-from helpers import load_embedder_and_tokenizer, ModelConfig
+from helpers import get_rank, load_embedder_and_tokenizer, ModelConfig
 from model import get_model_class
 from run_args import ModelArguments, DataArguments, TrainingArguments
 from sampler import get_sampler
@@ -81,7 +81,7 @@ def main():
     logging.basicConfig(
         format='%(asctime)s - %(message)s',
         datefmt='%Y-%m-%d %H:%M:%S',
-        level=logging.INFO
+        level=logging.WARNING
     )
     embedder, embedder_tokenizer = load_embedder_and_tokenizer(
         model_args.embedder,
@@ -171,6 +171,16 @@ def main():
         return_tensors='pt',
         max_length=model_args.max_seq_length,
     )
+
+    if get_rank() == 0:
+        wandb_run_id = training_args.exp_name
+        print("starting wandb run with name", wandb_run_id)
+        wandb.init(
+            entity="jack-morris",
+            project="tti-nomic",
+            name=wandb_run_id,
+        )
+        wandb.watch(model)
 
     trainer = CustomTrainer(
         data_collator=collator,
