@@ -206,7 +206,9 @@ class CustomTrainer(transformers.Trainer):
         scores *= 20  # TODO argparse: self.args.contrastive_temperature.exp()
 
         assert scores.shape == one_hot_labels.shape
-        labels = one_hot_labels / one_hot_labels.sum(dim=1)
+        labels = one_hot_labels / one_hot_labels.sum(dim=1, keepdim=True)
+        num_collisions = (labels.sum(dim=1) > 1).sum()
+        num_unique_elements = len(labels) - num_collisions
 
         loss = torch.nn.functional.cross_entropy(
             scores, labels, label_smoothing=0.0
@@ -219,7 +221,8 @@ class CustomTrainer(transformers.Trainer):
 
         metrics = {
             "acc": acc.item(),
-            "stats_unique": idx.unique().numel(),
+            "stats_unique": num_unique_elements,
+            "stats_collisions": num_collisions,
             "stats_total_queries": len(e1),
             "stats_total_documents": len(e2),
             "batch_size": batch_size,
