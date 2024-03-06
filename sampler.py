@@ -203,7 +203,7 @@ class FixedSubdomainSampler(RandomSampler):
         g = torch.Generator()
         g.manual_seed(self.seed + self.epoch)
         all_assignments = torch.tensor([v for L in self.batch_assignments.values() for v in L])
-        effective_length = len(self) - (len(self) % self.batch_size)
+        effective_length = len(self.dataset) - (len(self.dataset) % self.batch_size)
         all_assignments = all_assignments[:effective_length]
         num_batches = int(effective_length // self.batch_size)
         all_assignments = all_assignments.reshape(
@@ -216,6 +216,7 @@ class FixedSubdomainSampler(RandomSampler):
         piece_size = int(math.ceil(self.total_size / self.world_size))
         piece_start = piece_size * self.rank
         idxs = self._get_indices()
+        print("rank", self.rank, "taking idxs", len(idxs), "from", piece_start, "to", piece_start+piece_size)
         for i in idxs[piece_start:piece_start+piece_size]:
             yield i
 
