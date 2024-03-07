@@ -101,10 +101,14 @@ def main():
         'scifact',
         'fiqa',
     #     ########
+        'robust04',
+        'trec-covid',
+        # 'signal1m',
+        'trec-news',
+        # 'dbpedia',
+        ########
+        # 'bioasq',
     #     'msmarco', # this is the *real* eval set...
-    #     'trec-covid',
-    #     'signal1m',
-    #     'robust04',
     #     # Other ones are certainly too big for repeated eval
     #     # 'webis-touche2020',
     #     # 'fever', 'quora',
@@ -130,7 +134,6 @@ def main():
         )
     elif data_args.dataset == 'reddit_unsupervised':
         train_dataset, eval_dataset = load_reddit_train_and_val(
-            # data_folder="/home/jxm3/research/retrieval/tti3/data/mini",
             data_folder="/home/jxm3/research/retrieval/tti3/data/full",
             perc=0.98, 
             supervised=False,

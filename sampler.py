@@ -102,7 +102,6 @@ def cluster_dataset(
             document_key=document_key,
             batch_size=batch_size,
         )
-        breakpoint()
         pickle.dump(result, open(clustering_hash, "wb"))
         return result
 
@@ -121,7 +120,7 @@ class Sampler(abc.ABC, torch.utils.data.Sampler):
         # https://github.com/pytorch/pytorch/blob/main/torch/utils/data/distributed.py#L68
         self.rank = get_rank()
         self.world_size = get_world_size()
-        self.num_samples = math.ceil(len(self.dataset) / self.world_size)
+        self.num_samples = math.floor(len(self.dataset) / self.world_size)
         self.total_size = self.num_samples * self.world_size
         self.shuffle = shuffle
         self.seed = 42

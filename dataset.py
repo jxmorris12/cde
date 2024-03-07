@@ -94,14 +94,32 @@ def load_msmarco_hard_negatives() -> Dict[str, Dict[str, Any]]:
     return train_queries
 
 
-def get_ance_results(dataset: str, corpus, queries) -> Dict:
-    if len(corpus) > 100_000:
-        print(f"Auto-skipping ANCE evaluation of {dataset} -- corpus too large.")
-        return {}
+def get_ance_results(dataset: str, data_path: str) -> Dict:
+    from beir.datasets.data_loader_hf import HFDataLoader
     from beir.retrieval import models
     from beir.retrieval.evaluation import EvaluateRetrieval
-    from beir.retrieval.search.dense import DenseRetrievalExactSearch as DRES
-    model = DRES(models.SentenceBERT("msmarco-roberta-base-ance-firstp"), batch_size=16, corpus_chunk_size=512*2)
+    use_parallel = True
+    if use_parallel:
+        # https://github.com/beir-cellar/beir/blob/f062f038c4bfd19a8ca942a9910b1e0d218759d4/examples/retrieval/evaluation/dense/evaluate_sbert_multi_gpu.py
+        from beir.retrieval.search.dense import DenseRetrievalParallelExactSearch as DRPES
+        model = DRPES(
+            models.SentenceBERT("msmarco-roberta-base-ance-firstp", max_seq_length=128), 
+            target_device=None, 
+            batch_size=512, 
+            corpus_chunk_size=2048,
+            sort_corpus=True
+        )
+        print("path =>", data_path)
+        corpus, queries, qrels = HFDataLoader(data_folder=data_path, streaming=False).load(split="test")
+        print(f"initialized DRPES with target_devices={model.target_devices}")
+    else:
+        from beir.retrieval.search.dense import DenseRetrievalExactSearch as DRES
+        model = DRES(
+            models.SentenceBERT("msmarco-roberta-base-ance-firstp", max_seq_length=128), 
+            batch_size=512, 
+            corpus_chunk_size=2048,
+        )
+        corpus, queries, qrels = beir.datasets.data_loader.GenericDataLoader(data_path).load(split="test")
     retriever = EvaluateRetrieval(model, score_function="dot")
     return retriever.retrieve(corpus, queries)
 
@@ -130,7 +148,7 @@ def load_beir_uncached(dataset: str, split: str) -> Tuple[datasets.Dataset, data
     corpus, queries, qrels = beir.datasets.data_loader.GenericDataLoader(data_path).load(split=split)
     # bm25_results = get_bm25_results(dataset=dataset, corpus=corpus, queries=queries)
     print("... getting ance results")
-    ance_results = get_ance_results(dataset=dataset, corpus=corpus, queries=queries)
+    ance_results = get_ance_results(dataset=dataset, data_path=data_path)
 
     corpus = datasets.Dataset.from_list(
         [{"id": k, "text": v["text"]} for k,v in corpus.items()])
@@ -157,7 +175,7 @@ def embed_with_cache(embedder: str, cache_name: str, texts: List[str]) -> datase
     print("[embed_with_cache] computing embeddings to save at path:", cache_path)
     from sentence_transformers import SentenceTransformer
     model = SentenceTransformer(embedder)
-    model.max_seq_length = 512
+    model.max_seq_length = 128
     embeddings = model.encode(texts, batch_size=64,  show_progress_bar=True)
 
     datasets_list = []
@@ -239,6 +257,7 @@ class BeirDataset(torch.utils.data.Dataset):
         return self.size
     
     def tokenize(self, tokenizer: transformers.PreTrainedTokenizer, max_length: int) -> None:
+        os.environ['TOKENIZERS_PARALLELISM'] = 'True'
         self.queries = tokenize_dataset(
             dataset=self.queries,
             tokenizer=tokenizer,

@@ -155,7 +155,7 @@ def download_url(url: str, save_path: str, chunk_size: int = 1024):
 
 
 def unzip(zip_file: str, out_dir: str):
-    logging.info("unzipping =>", zip_file)
+    print("unzipping =>", zip_file)
     zip_ = zipfile.ZipFile(zip_file, "r")
     zip_.extractall(path=out_dir)
     zip_.close()
@@ -240,7 +240,7 @@ class RerankHelper:
         world_size = get_world_size()
         query_keys = sorted(list(results.keys()))
         doc_id_to_key = collections.defaultdict(dict)
-        for j, query_id in tqdm_if_main_worker(enumerate(query_keys), total=len(query_keys), desc=f"evaluating {self.name}"):
+        for j, query_id in tqdm_if_main_worker(enumerate(query_keys), total=len(query_keys), desc=f"[{self.name}]"):
             topk_docs = sorted(results[query_id].items(), key=lambda item: item[1], reverse=True)[:top_k]
             for doc_j, (doc_id, _) in enumerate(topk_docs):
                 doc_id_to_key[query_id][doc_j] = doc_id

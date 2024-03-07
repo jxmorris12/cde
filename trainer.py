@@ -360,6 +360,7 @@ class CustomTrainer(transformers.Trainer):
             results=eval_dataset.ance_results, 
             top_k=self.args.eval_rerank_topk
         )
+        model = model.to(dtype=torch.float32, device=self.args.device)
 
         #### Evaluate your retrieval using NDCG@k, MAP@K ...
         ndcg, _map, recall, precision = EvaluateRetrieval.evaluate(
@@ -392,7 +393,7 @@ class CustomTrainer(transformers.Trainer):
                 model=model,
                 metric_key_prefix=metric_key_prefix,
             )
-                # Prefix all keys with metric_key_prefix + '_'
+            # Prefix all keys with metric_key_prefix + '_'
             for key in list(metrics.keys()):
                 if not key.startswith(f"{metric_key_prefix}_"):
                     metrics[f"{metric_key_prefix}_{key}"] = metrics.pop(key)

@@ -3,6 +3,7 @@ from typing import Dict
 import collections
 import os
 import pickle
+import yaml
 
 import datasets
 import tqdm
@@ -17,9 +18,10 @@ os.environ["TOKENIZERS_PARALLELISM"] = str(int(USE_MP))
 
 max_num_hn = 7
 token_max_length = 128
+add_prefixes = True
 
 def main():
-    data_folder = f"data/nomic_embed_supervised"
+    data_folder = os.path.join("data", "nomic_embed_supervised")
     os.makedirs(data_folder, exist_ok=True)
     output_file = "test.dataset"
 
@@ -29,6 +31,27 @@ def main():
     print(f"downloading Nomic data; tokenizing to length {token_max_length}")
     output_dataset = datasets.load_dataset("nomic-ai/nomic_embed_supervised")["train"]
     print("got data")
+
+    yaml_path = os.path.join(data_folder, "dataset_info.yaml")
+    dataset_info = yaml.safe_load(open(yaml_path, "r"))
+    dataset_info = dataset_info["datasets"]
+
+
+    query_prefixes = {}
+    document_prefixes = {}
+    for d in dataset_info:
+        name = d["name"]
+        if d["query_only"]:
+            query_prefixes[name] = d["query_prefix"]
+            document_prefixes[name] = d["query_prefix"] # TODO: Check with Zach to make sure this is right.
+        else:
+            query_prefixes[name] = d["query_prefix"]
+            document_prefixes[name] = d.get["document_prefix"]
+
+    # Add prefixes
+    if add_prefixes:
+        breakpoint()
+
 
     # Tokenize
     def tokenize_ex(ex: Dict) -> Dict:
