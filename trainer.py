@@ -9,7 +9,7 @@ import wandb
 
 from gradcache import GradCache
 from dataset import BeirDataset
-from helpers import RerankHelper, TensorRunningAverages
+from helpers import get_rank, RerankHelper, TensorRunningAverages
 from sampler import Sampler
 
 
@@ -402,8 +402,9 @@ class CustomTrainer(transformers.Trainer):
             self.log(metrics)
             all_metrics.update(metrics)
 
-        if len(all_metrics):
-            print("evaluate_retrieval_datasets =>", all_metrics)
+        if len(all_metrics) and get_rank() == 0:
+            ndcg_str = "NDCG@10"
+            print("evaluate_retrieval_datasets =>", { k: v for k,v in all_metrics.items() if k.endswith(ndcg_str) })
         return all_metrics
 
     def _maybe_log_save_evaluate(self, tr_loss: float, grad_norm: float, model: torch.nn.Module, *args, **kwargs):

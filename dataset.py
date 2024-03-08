@@ -94,34 +94,42 @@ def load_msmarco_hard_negatives() -> Dict[str, Dict[str, Any]]:
     return train_queries
 
 
-def get_ance_results(dataset: str, data_path: str) -> Dict:
-    from beir.datasets.data_loader_hf import HFDataLoader
-    from beir.retrieval import models
-    from beir.retrieval.evaluation import EvaluateRetrieval
+def get_ance_results(dataset: str, data_path: str, model_name: str = "msmarco-roberta-base-ance-firstp") -> Dict:
     use_parallel = True
     if use_parallel:
-        # https://github.com/beir-cellar/beir/blob/f062f038c4bfd19a8ca942a9910b1e0d218759d4/examples/retrieval/evaluation/dense/evaluate_sbert_multi_gpu.py
-        from beir.retrieval.search.dense import DenseRetrievalParallelExactSearch as DRPES
-        model = DRPES(
-            models.SentenceBERT("msmarco-roberta-base-ance-firstp", max_seq_length=128), 
-            target_device=None, 
-            batch_size=512, 
-            corpus_chunk_size=2048,
-            sort_corpus=True
+        from sentence_transformers import SentenceTransformer
+        from mteb import HFDataLoader, RetrievalEvaluator        
+
+        model = SentenceTransformer(model_name)
+        model.max_seq_length = 128
+        pool = model.start_multi_process_pool()
+        def encode(queries, batch_size: int, **kwargs):
+            return model.encode_multi_process(queries, batch_size=batch_size, pool=pool)
+        model.encode = encode
+
+        corpus, queries, qrels = HFDataLoader(data_folder=data_path, streaming=False, keep_in_memory=False).load(split="test")
+        retriever = RetrievalEvaluator(
+            model,
+            score_function="dot",
         )
-        print("path =>", data_path)
-        corpus, queries, qrels = HFDataLoader(data_folder=data_path, streaming=False).load(split="test")
-        print(f"initialized DRPES with target_devices={model.target_devices}")
+        queries = {query['id']: query['text'] for query in queries}
+        corpus = {doc['id']: {'title': doc['title'] , 'text': doc['text']} for doc in corpus}
+        results = retriever(corpus, queries)
+        model.stop_multi_process_pool(pool)
+        return results
     else:
+        from beir.retrieval import models
         from beir.retrieval.search.dense import DenseRetrievalExactSearch as DRES
+        from beir.datasets.data_loader_hf import HFDataLoader
+        from beir.retrieval.evaluation import EvaluateRetrieval
         model = DRES(
             models.SentenceBERT("msmarco-roberta-base-ance-firstp", max_seq_length=128), 
             batch_size=512, 
             corpus_chunk_size=2048,
         )
         corpus, queries, qrels = beir.datasets.data_loader.GenericDataLoader(data_path).load(split="test")
-    retriever = EvaluateRetrieval(model, score_function="dot")
-    return retriever.retrieve(corpus, queries)
+        retriever = EvaluateRetrieval(model, score_function="dot")
+        return retriever.retrieve(corpus, queries)
 
 
 def load_beir_uncached(dataset: str, split: str) -> Tuple[datasets.Dataset, datasets.Dataset, Dict[str, Dict[str, int]], Dict]:
@@ -160,13 +168,12 @@ def load_beir_uncached(dataset: str, split: str) -> Tuple[datasets.Dataset, data
     return corpus, queries, qrels, ance_results
 
 
-def embed_with_cache(embedder: str, cache_name: str, texts: List[str]) -> datasets.Dataset:
-    embedder_cache_path = embedder.replace('/', '__')
+def embed_with_cache(model_name: str, cache_name: str, texts: List[str]) -> datasets.Dataset:
+    embedder_cache_path = model_name.replace('/', '__')
     # cache_folder = datasets.config.HF_DATASETS_CACHE
     cache_folder = os.path.join(get_tti_cache_dir(), 'corpus_embeddings', embedder_cache_path)
     os.makedirs(cache_folder, exist_ok=True)
     cache_path = os.path.join(cache_folder, cache_name) #  + "_small")
-
 
     if os.path.exists(cache_path):
         print("[embed_with_cache] Loading embeddings at path:", cache_path)
@@ -174,9 +181,11 @@ def embed_with_cache(embedder: str, cache_name: str, texts: List[str]) -> datase
 
     print("[embed_with_cache] computing embeddings to save at path:", cache_path)
     from sentence_transformers import SentenceTransformer
-    model = SentenceTransformer(embedder)
+    model = SentenceTransformer(model_name)
     model.max_seq_length = 128
-    embeddings = model.encode(texts, batch_size=64,  show_progress_bar=True)
+    pool = model.start_multi_process_pool()
+    embeddings = model.encode_multi_process(texts, batch_size=4096, pool=pool)
+    model.stop_multi_process_pool(pool)
 
     datasets_list = []
     max_dataset_size = 1_000_000

@@ -18,7 +18,6 @@ from run_args import ModelArguments, DataArguments, TrainingArguments
 from sampler import get_sampler
 from trainer import CustomTrainer
 
-assert torch.cuda.device_count() > 0, "can't train without CUDA"
 
 logger = logging.getLogger(__name__)
 
@@ -94,24 +93,24 @@ def main():
     )
 
     beir_dataset_names = [
-    #     # these are the 5 smallest beir datasets...
-    #     # 'arguana', # problem: query-doc IDs don't match? (TODO: investigate...)
+        # 'webis-touche2020',
+        # 'quora',
+        # 'arguana', # problem: query-doc IDs don't match? (TODO: investigate...)
         'nfcorpus',
-        'scidocs', 
-        'scifact',
-        'fiqa',
-    #     ########
-        'robust04',
-        'trec-covid',
+        # 'scidocs', 
+        # 'scifact',
+        # 'robust04',
+        # 'trec-covid',
         # 'signal1m',
-        'trec-news',
+        # 'fiqa',
+        # 'msmarco',
+        # 'trec-news',
+        # 'bioasq', # <--  too big? having issues...
+    #############################################
+    # these ones are broken
+        # 'fever',
         # 'dbpedia',
-        ########
-        # 'bioasq',
-    #     'msmarco', # this is the *real* eval set...
-    #     # Other ones are certainly too big for repeated eval
-    #     # 'webis-touche2020',
-    #     # 'fever', 'quora',
+
     ]
     beir_dict = {
         d: BeirDataset(dataset=d, embedder=model_args.embedder_rerank) for d in beir_dataset_names
@@ -119,7 +118,7 @@ def main():
     retrieval_datasets = {
         **{f"BeIR/{k}": v for k,v in beir_dict.items()}
     }
-    for k, v in retrieval_datasets.items():
+    for _, v in retrieval_datasets.items():
         v.tokenize(tokenizer=embedder_tokenizer, max_length=model_args.max_seq_length)
 
     if data_args.dataset == 'synthetic_words':
@@ -200,6 +199,8 @@ def main():
     checkpoint = get_checkpoint(training_args)
     logging.info("train() loaded checkpoint %s", checkpoint)
     trainer.evaluate_retrieval_datasets(model=model)
+    exit()
+    assert torch.cuda.device_count() > 0, "can't train without CUDA"
     trainer.train(resume_from_checkpoint=checkpoint)
 
 

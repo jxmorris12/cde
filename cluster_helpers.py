@@ -53,7 +53,7 @@ def slice_sparse_tensor_rows(t: torch.sparse.Tensor, min_row: int, max_row: int)
 
 
 @torch.no_grad
-def maxsim(X: torch.Tensor, y: torch.Tensor, maximize: bool, chunk_size: int = 3_000) -> torch.Tensor:
+def maxsim(X: torch.Tensor, y: torch.Tensor, maximize: bool, chunk_size: int = 1_000) -> torch.Tensor:
     device = X.device
     n_samples = X.shape[0]
     max_sim_v = torch.empty(n_samples, device=device, dtype=X.dtype)

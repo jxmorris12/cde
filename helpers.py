@@ -208,6 +208,7 @@ class RerankHelper:
         self.batch_size = batch_size
         self.max_seq_length = max_seq_length
         self.name = name
+        self.max_reranking_queries = 256
     
     def _score(self, query_embedding: torch.Tensor, corpus_embeddings: torch.Tensor) -> float:
         with torch.no_grad():
@@ -240,10 +241,14 @@ class RerankHelper:
         world_size = get_world_size()
         query_keys = sorted(list(results.keys()))
         doc_id_to_key = collections.defaultdict(dict)
-        for j, query_id in tqdm_if_main_worker(enumerate(query_keys), total=len(query_keys), desc=f"[{self.name}]"):
+        for j, query_id in tqdm_if_main_worker(enumerate(query_keys), total=min(self.max_reranking_queries, len(query_keys)), desc=f"[{self.name}]"):
             topk_docs = sorted(results[query_id].items(), key=lambda item: item[1], reverse=True)[:top_k]
             for doc_j, (doc_id, _) in enumerate(topk_docs):
                 doc_id_to_key[query_id][doc_j] = doc_id
+
+            if j > self.max_reranking_queries:
+                # print(f"{self.name} exiting after {j} / {len(query_keys)} queries")
+                break
 
             if (j % world_size) != rank:
                 # poor man's distributed sampler
@@ -294,7 +299,8 @@ class RerankHelper:
         pair_ids = torch.tensor(pair_ids, device=device)
         rerank_scores_biencoder = torch.tensor(rerank_scores_biencoder, device=device)
         
-        max_length = int(math.ceil(top_k * len(query_keys) / world_size) * 2)
+        num_queries = min(self.max_reranking_queries, len(queries))
+        max_length = int(math.ceil(top_k * num_queries / world_size) * 2)
 
         # add dummy elements to make same shapes for gather.
         extra_ones_pair = (
@@ -319,13 +325,13 @@ class RerankHelper:
         rerank_scores_biencoder = rerank_scores_biencoder[rerank_scores_biencoder > big_neg_number].tolist()
 
         #### Reranking results
-        rerank_results_biencoder = {query_id: {} for query_id in results}
+        rerank_results_biencoder = collections.defaultdict(dict)
         for pair, biencoder_score in zip(pair_ids, rerank_scores_biencoder):
             query_j, doc_j = pair[0], pair[1]
             query_id = query_keys[query_j]
             doc_id = doc_id_to_key[query_id][doc_j]
             rerank_results_biencoder[query_id][doc_id] = biencoder_score
-
+        
         return rerank_results_biencoder
 
 

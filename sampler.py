@@ -37,8 +37,7 @@ def _cluster_dataset_uncached(
     ) -> Dict[int, List[int]]:
 
     print("processing and tokenizing corpus...")
-    max_doc_length = 128
-    def ptl(t):
+    def ptl(t, max_doc_length: int = 128):
         if len(t) < max_doc_length:
             nz = max_doc_length - len(t) 
             t = torch.cat((t, torch.zeros((nz,))), dim=0)
@@ -48,7 +47,7 @@ def _cluster_dataset_uncached(
     document_input_ids = [ptl(t) for t in tqdm.auto.tqdm(document_input_ids)]
     if query_to_doc: 
         query_input_ids = dataset.dataset[query_key]
-        query_input_ids = [ptl(t) for t in tqdm.auto.tqdm(document_input_ids)]
+        query_input_ids = [ptl(t) for t in tqdm.auto.tqdm(query_input_ids)]
     else:
         query_input_ids = document_input_ids
     document_input_ids = torch.stack(document_input_ids)
@@ -252,7 +251,6 @@ class AutoClusterSampler(FixedSubdomainSampler):
         for i, cluster in tqdm_if_main_worker(cluster_assignments.items()):
             if isinstance(cluster, list): cluster = cluster[0]
             self.batch_assignments[cluster].append(i)
-        print(f"got {len(self.batch_assignments)} clusters")
 
 
 def get_sampler(
