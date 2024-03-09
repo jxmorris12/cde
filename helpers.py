@@ -30,7 +30,7 @@ def get_dataset_name(d: datasets.Dataset) -> str:
     return f"{d.builder_name}.{d.config_name}[{d.split}]"
 
 
-def gather(t):
+def gather(t: torch.Tensor) -> torch.Tensor:
     # torch.distributed.nn.all_gather scales by world size since the reduce op is SUM
     # https://github.com/pytorch/pytorch/issues/58005
     # only should use torch.distributed.nn.all_gather if we implement a `local_loss`
@@ -46,6 +46,23 @@ def gather(t):
     torch.distributed.all_gather(gathered, t)
     gathered[get_rank()] = t
     return torch.cat(gathered, dim=0)
+
+def gather_sum(t: torch.Tensor) -> torch.Tensor:
+    # torch.distributed.nn.all_gather scales by world size since the reduce op is SUM
+    # https://github.com/pytorch/pytorch/issues/58005
+    # only should use torch.distributed.nn.all_gather if we implement a `local_loss`
+    # like: https://github.com/mlfoundations/open_clip/issues/616
+    world_size = get_world_size()
+    if world_size == 1:
+        return t
+
+    if t.ndim == 0:
+        t = t.unsqueeze(0)
+
+    gathered = [torch.empty_like(t) for _ in range(world_size)]
+    torch.distributed.all_gather(gathered, t)
+    gathered = torch.stack(gathered, dim=0)
+    return gathered.sum(dim=0) # Sum across workers
 
 
 def get_num_proc() -> int:
@@ -65,6 +82,7 @@ def process_qrels_uncached(corpus: datasets.Dataset, qrels: datasets.Dataset) ->
     skipped_qrels = 0
 
     for ex in tqdm.tqdm(qrels, desc='processing qrels', colour='#964B00', leave=False):
+        #
         # example:
         # {
         #  'query-id': 1, 
@@ -208,7 +226,7 @@ class RerankHelper:
         self.batch_size = batch_size
         self.max_seq_length = max_seq_length
         self.name = name
-        self.max_reranking_queries = 256
+        self.max_reranking_queries = 500
     
     def _score(self, query_embedding: torch.Tensor, corpus_embeddings: torch.Tensor) -> float:
         with torch.no_grad():
@@ -246,8 +264,7 @@ class RerankHelper:
             for doc_j, (doc_id, _) in enumerate(topk_docs):
                 doc_id_to_key[query_id][doc_j] = doc_id
 
-            if j > self.max_reranking_queries:
-                # print(f"{self.name} exiting after {j} / {len(query_keys)} queries")
+            if j >= self.max_reranking_queries:
                 break
 
             if (j % world_size) != rank:
@@ -431,7 +448,7 @@ def load_dataset_tables(
                 pool.map(datasets.table.MemoryMappedTable.from_file, files),
                 desc=f"Loading {len(files)} files with {num_workers} workers",
                 total=len(files),
-                colour="e0e0e0"
+                colour="#e0e0e0"
             )
         )
     return result

@@ -67,11 +67,8 @@ def main():
     # torch._logging.set_logs(dynamo=logging.DEBUG)
     # torch._dynamo.config.verbose = True
 
-    # Allow W&B to start slowly.
-    os.environ["WANDB__SERVICE_WAIT"] = "30" # This used to be 300 but was causing errors for me.
-    os.environ["_WANDB_STARTUP_DEBUG"] = "true"
-
-    # Fast data processing at risk of deadlocks...
+    os.environ["WANDB__SERVICE_WAIT"] = "30"
+    # os.environ["_WANDB_STARTUP_DEBUG"] = "true"
     os.environ['TOKENIZERS_PARALLELISM'] = 'False'
 
     parser = transformers.HfArgumentParser((ModelArguments, DataArguments, TrainingArguments))
@@ -93,21 +90,21 @@ def main():
     )
 
     beir_dataset_names = [
-        # 'webis-touche2020',
-        # 'quora',
-        # 'arguana', # problem: query-doc IDs don't match? (TODO: investigate...)
-        'nfcorpus',
-        # 'scidocs', 
-        # 'scifact',
-        # 'robust04',
-        # 'trec-covid',
-        # 'signal1m',
-        # 'fiqa',
-        # 'msmarco',
-        # 'trec-news',
-        # 'bioasq', # <--  too big? having issues...
+         'webis-touche2020',
+         'quora',
+         'arguana', # problem: query-doc IDs don't match? (TODO: investigate...)
+         'nfcorpus',
+         'scidocs', 
+         'scifact',
+         'robust04',
+         'trec-covid',
+         'signal1m',
+         'fiqa',
+         'msmarco',
+         'trec-news',
+         'bioasq',
     #############################################
-    # these ones are broken
+    # these ones are broken, I think:
         # 'fever',
         # 'dbpedia',
 
@@ -118,8 +115,6 @@ def main():
     retrieval_datasets = {
         **{f"BeIR/{k}": v for k,v in beir_dict.items()}
     }
-    for _, v in retrieval_datasets.items():
-        v.tokenize(tokenizer=embedder_tokenizer, max_length=model_args.max_seq_length)
 
     if data_args.dataset == 'synthetic_words':
         train_dataset, eval_dataset = load_synthetic_words_dataset()
@@ -179,7 +174,7 @@ def main():
         print("starting wandb run with name", wandb_run_id)
         wandb.init(
             entity="jack-morris",
-            project="tti-nomic",
+            project="tti-nomic-2",
             name=wandb_run_id,
         )
         wandb.watch(model)
@@ -199,9 +194,9 @@ def main():
     checkpoint = get_checkpoint(training_args)
     logging.info("train() loaded checkpoint %s", checkpoint)
     trainer.evaluate_retrieval_datasets(model=model)
-    exit()
     assert torch.cuda.device_count() > 0, "can't train without CUDA"
     trainer.train(resume_from_checkpoint=checkpoint)
+    trainer.evaluate_retrieval_datasets(model=model)
 
 
 if __name__ == '__main__':

@@ -9,6 +9,8 @@ import tqdm
 
 from bm25_pt.bm25 import TokenizedBM25
 
+from helpers import gather_sum, get_rank, get_world_size, tqdm_if_main_worker
+
 
 # Whether to maximize distances
 # between points during clustering.
@@ -40,6 +42,7 @@ def embed_for_clustering(
 
 
 def slice_sparse_tensor_rows(t: torch.sparse.Tensor, min_row: int, max_row: int) -> torch.sparse.Tensor:
+    assert min_row < max_row, f"can't slice from row {min_row} to {max_row}"
     t = t.coalesce()
     row_idxs = t.indices()[0]
     index_mask = (min_row <= row_idxs) & (row_idxs < max_row)
@@ -56,28 +59,50 @@ def slice_sparse_tensor_rows(t: torch.sparse.Tensor, min_row: int, max_row: int)
 def maxsim(X: torch.Tensor, y: torch.Tensor, maximize: bool, chunk_size: int = 1_000) -> torch.Tensor:
     device = X.device
     n_samples = X.shape[0]
-    max_sim_v = torch.empty(n_samples, device=device, dtype=X.dtype)
-    max_sim_i = torch.empty(n_samples, device=device, dtype=torch.int64)
-    
-    splits = int(math.ceil(X.shape[0] / chunk_size))
-    for i in tqdm.auto.trange(splits, desc=f'maxsim with chunk_size={chunk_size} on {device}', leave=False, colour="red"):
-        if i*chunk_size >= n_samples:
-            continue
-        start, end = i * chunk_size, min((i + 1) * chunk_size, n_samples)
+
+    max_sim_v = torch.zeros(n_samples, device=device, dtype=X.dtype)
+    max_sim_i = torch.zeros(n_samples, device=device, dtype=torch.int64)
+
+    # TODO: Implement faster max (without going to dense tensors).
+    # TODO: Use multiple GPUs.
+    rank = get_rank()
+    world_size = get_world_size()
+
+    worker_worklist_size = int(math.ceil(n_samples / world_size))
+    splits_start_idx = worker_worklist_size * rank
+    splits_end_idx = worker_worklist_size * (rank + 1)
+
+    for i in tqdm_if_main_worker(
+            range(splits_start_idx, splits_end_idx, chunk_size), 
+            desc=f'maxsim with chunk_size={chunk_size} on {device}', 
+            leave=False, 
+            colour="magenta"
+        ):
+        start, end = i, min(i + chunk_size, n_samples)
         sub_x = slice_sparse_tensor_rows(X, start, end)
         if DEBUG_MEM: print(f"[maxsim] step {i} cuda mem free/total = {torch.cuda.mem_get_info()}")
         if DEBUG_MEM: print("sub_x.shape:", sub_x.shape, "//", "y.shape:", y.shape)
         sub_sim = sub_x @ y # TODO – Implement sparse max here to save mem!
-        sub_sim = sub_sim.to_dense()
+        sub_sim = sub_sim
         if maximize:
-            sub_max_sim_v, sub_max_sim_i = sub_sim.max(dim=-1)
+            sub_max_sim_v, sub_max_sim_i = sub_sim.to_dense().max(dim=-1)
         else:
-            sub_max_sim_v, sub_max_sim_i = sub_sim.min(dim=-1)
+            sub_max_sim_v, sub_max_sim_i = sub_sim.to_dense().min(dim=-1)
         del sub_sim
         del sub_x
         torch.cuda.empty_cache() # needs to happen after maxsim for some reason.
         max_sim_v[start: end] = sub_max_sim_v
         max_sim_i[start: end] = sub_max_sim_i
+    
+    # gather
+    max_sim_v = gather_sum(max_sim_v)
+    max_sim_i = gather_sum(max_sim_i)
+    k = y.shape[1]
+
+    assert max_sim_v.shape == (n_samples,)
+    assert max_sim_i.shape == (n_samples,)
+    assert max_sim_i.min() >= 0
+    assert max_sim_i.max() <= k
 
     return max_sim_v, max_sim_i
 
@@ -90,7 +115,7 @@ def kmeans(
         max_iters: int = 100, 
         tol: float = 1e-3, 
         maximize: bool = True,
-        initialization_strategy: str = "kmeans++", # ["kmeans++", "random"]
+        initialization_strategy: str = "random",  # "kmeans++", # ["kmeans++", "random"]
         seed: int = 42
     ) -> Tuple[torch.Tensor, torch.Tensor]:
     if torch.cuda.is_available():
@@ -114,7 +139,6 @@ def kmeans(
             most_recent_centroid = centroids[-1]
             # Compute distances from each datapoints closest centroid
             d2 = torch.sparse.mm(q, most_recent_centroid[None].T).to_dense().flatten()
-
             # Take the one that is furthest and make it the next centroid
             if maximize:
                 d = d.max(d2)
@@ -179,5 +203,7 @@ def kmeans(
         if shift_diff < tol:
             print(f"stopping early due to tolerance hit. completed {j} iterations.")
             break
-    breakpoint()
+    
+    if get_rank() == 0:
+        print("exiting kmeans with total shift", total_centroid_shift.item())
     return centroids.cpu(), assignments.cpu()

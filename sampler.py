@@ -2,6 +2,7 @@ from typing import Dict, Iterable, List, Optional, Union
 
 import abc
 import collections
+import logging
 import math
 import os
 import pickle
@@ -28,15 +29,14 @@ def get_cache_location_from_kwargs(**kwargs):
 
 
 def _cluster_dataset_uncached(
-        dataset: datasets.Dataset, 
+        dataset: Union[NomicDataset, RedditDataset], 
         query_to_doc: bool,
         model: str,
         query_key: str,
         document_key: str,
         batch_size: int,
     ) -> Dict[int, List[int]]:
-
-    print("processing and tokenizing corpus...")
+    print("Processing and tokenizing corpus for clustering...")
     def ptl(t, max_doc_length: int = 128):
         if len(t) < max_doc_length:
             nz = max_doc_length - len(t) 
@@ -161,7 +161,7 @@ class RandomSampler(Sampler):
             yield i
         
     def __len__(self) -> int:
-        print("Dataloader length:", self.num_samples, "// rank:", self.rank, "world size:", self.world_size, "total:", self.total_size)
+        logging.debug("Dataloader length: %d // rank: %d // world_size: %d // total: self.total_size", self.num_samples, self.rank, self.world_size, self.total_size)
         return self.num_samples
 
 
@@ -198,8 +198,10 @@ class FixedSubdomainSampler(RandomSampler):
         # TODO respect self.shuffle.
         g = torch.Generator()
         g.manual_seed(self.seed + self.epoch)
+        batch_lists = list(self.batch_assignments.values())
+        random.Random(self.seed + self.epoch).shuffle(batch_lists)
         # 1. Concatenate all datasets from all batches (which should be pre-shuffled once)
-        all_assignments = torch.tensor([v for L in self.batch_assignments.values() for v in L])
+        all_assignments = torch.tensor([v for L in batch_lists for v in L])
         effective_length = len(self.dataset) - (len(self.dataset) % self.batch_size)
         # 2. Trim off the end (effectively drop_last=True)
         all_assignments = all_assignments[:effective_length]
@@ -217,7 +219,7 @@ class FixedSubdomainSampler(RandomSampler):
         piece_size = int(math.ceil(self.total_size / self.world_size))
         piece_start = piece_size * self.rank
         idxs = self._get_indices()
-        print("rank", self.rank, "taking idxs", len(idxs), "from", piece_start, "to", piece_start+piece_size)
+        logging.debug("rank", self.rank, "taking idxs", len(idxs), "from", piece_start, "to", piece_start+piece_size)
         for i in idxs[piece_start:piece_start+piece_size]:
             yield i
 

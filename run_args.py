@@ -3,10 +3,11 @@ from typing import Optional
 from dataclasses import dataclass, field
 
 import datetime
+import logging
+import os
+
 import torch
 import transformers
-
-import os
 
 
 @dataclass
@@ -172,7 +173,7 @@ class TrainingArguments(transformers.TrainingArguments):
         metadata={"help": "Log every X updates steps."}
     )
     eval_steps: int = field(
-        default=10_000, 
+        default=20_000, 
         metadata={"help": "Run an evaluation every X steps."}
     )
 
@@ -182,11 +183,11 @@ class TrainingArguments(transformers.TrainingArguments):
     )
 
     eval_rerank_topk: int = field(
-        default=100,
+        default=128,
          metadata={"help": "Number of reranked examples during eval"}
     )
     save_strategy: str = "steps"
-    save_steps: int = 5000
+    save_steps: int = 12_000
     save_total_limit: int = 1  # Maximum number of checkpoints to save.
 
     exp_name: str = field(
@@ -198,10 +199,14 @@ class TrainingArguments(transformers.TrainingArguments):
     )
     lr_scheduler_type: str = "constant_with_warmup"
     warmup_steps: int = field(
-        default=1_600,
+        default=8_000,
         metadata={
             "help": "Linear warmup over warmup_steps."
         }
+    )
+    weight_decay: float = field(
+        default=0.01, 
+        metadata={"help": "Weight decay for AdamW if we apply some."}
     )
     def __setattr__(self, name, value):
         super(transformers.TrainingArguments, self).__setattr__(name, value)
@@ -233,8 +238,8 @@ class TrainingArguments(transformers.TrainingArguments):
         self.exp_name__no_date = "self.exp_name"
         self.exp_name = f"{formatted_date}-{self.exp_name}"
         self.output_dir = os.path.join("saves", self.exp_name)
-        print(f"outputting model to directory: {self.output_dir}")
-        print(f"setting dataloader_drop_last from {self.dataloader_drop_last} -> {True}")
+        logging.info(f"outputting model to directory: {self.output_dir}")
+        logging.info(f"setting dataloader_drop_last from {self.dataloader_drop_last} -> {True}")
         self.dataloader_drop_last = True
         ############################################################################
         self.ddp_find_unused_parameters = False
