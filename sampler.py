@@ -59,7 +59,7 @@ def _cluster_dataset_uncached(
         model=model
     )
     
-    k = math.ceil(len(X) / batch_size)
+    k = math.ceil(len(X) / batch_size / 2)
     _, assignments = kmeans(
         q=q, 
         X=X,
@@ -195,7 +195,6 @@ class FixedSubdomainSampler(RandomSampler):
         assert sum(map(len, self.batch_assignments.values())) == len(dataset)
     
     def _get_indices(self) -> List[int]:
-        # TODO respect self.shuffle.
         g = torch.Generator()
         g.manual_seed(self.seed + self.epoch)
         batch_lists = list(self.batch_assignments.values())

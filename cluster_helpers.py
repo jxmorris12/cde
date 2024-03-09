@@ -56,7 +56,7 @@ def slice_sparse_tensor_rows(t: torch.sparse.Tensor, min_row: int, max_row: int)
 
 
 @torch.no_grad
-def maxsim(X: torch.Tensor, y: torch.Tensor, maximize: bool, chunk_size: int = 1_000) -> torch.Tensor:
+def maxsim(X: torch.Tensor, y: torch.Tensor, maximize: bool, chunk_size: int = 4_000) -> torch.Tensor:
     device = X.device
     n_samples = X.shape[0]
 
@@ -72,12 +72,7 @@ def maxsim(X: torch.Tensor, y: torch.Tensor, maximize: bool, chunk_size: int = 1
     splits_start_idx = worker_worklist_size * rank
     splits_end_idx = worker_worklist_size * (rank + 1)
 
-    for i in tqdm_if_main_worker(
-            range(splits_start_idx, splits_end_idx, chunk_size), 
-            desc=f'maxsim with chunk_size={chunk_size} on {device}', 
-            leave=False, 
-            colour="magenta"
-        ):
+    for i in range(splits_start_idx, splits_end_idx, chunk_size):
         start, end = i, min(i + chunk_size, n_samples)
         sub_x = slice_sparse_tensor_rows(X, start, end)
         if DEBUG_MEM: print(f"[maxsim] step {i} cuda mem free/total = {torch.cuda.mem_get_info()}")
@@ -115,7 +110,7 @@ def kmeans(
         max_iters: int = 100, 
         tol: float = 1e-3, 
         maximize: bool = True,
-        initialization_strategy: str = "random",  # "kmeans++", # ["kmeans++", "random"]
+        initialization_strategy: str = "kmeans++", # ["kmeans++", "random"]
         seed: int = 42
     ) -> Tuple[torch.Tensor, torch.Tensor]:
     if torch.cuda.is_available():
@@ -124,18 +119,21 @@ def kmeans(
     q = q.float()
     X = X.float()
     torch.manual_seed(seed)
-    # Initialize centroids randomly
-    print(f"kmeans called with k={k} / q.shape={q.shape} X.shape={X.shape}")
 
-    print(f"initializing with strategy [{initialization_strategy}]")
-    centroid_idxs = torch.randperm(X.size(0))[:k]
+    # Initialize centroids randomly
+    if get_rank() == 0:
+        print(f"]kmeans] called with k={k} / q.shape={q.shape} X.shape={X.shape} / world_size = {get_world_size()}")
+        print(f"[kmeans] initializing with strategy [{initialization_strategy}]")
+    g = torch.Generator()
+    g.manual_seed(seed)
+    centroid_idxs = torch.randperm(X.size(0), generator=g)[:k]
     if initialization_strategy == "kmeans++":
         first_centroid = X[centroid_idxs[0]]
         centroids = [first_centroid]
         centroids_used_mask = torch.zeros(len(X), device=X.device)
         centroids_used_mask[centroid_idxs[0]] = 1
         d = torch.sparse.mm(X, first_centroid[None].T).to_dense().flatten()
-        for j in tqdm.trange(1, k, desc="initializing with kmeans++", colour="green"):
+        for j in tqdm_if_main_worker(range(1, k), desc="initializing with kmeans++", colour="green"):
             most_recent_centroid = centroids[-1]
             # Compute distances from each datapoints closest centroid
             d2 = torch.sparse.mm(q, most_recent_centroid[None].T).to_dense().flatten()
@@ -159,8 +157,7 @@ def kmeans(
 
     last_centroid_shift = float("inf")
     
-    pbar = tqdm.auto.trange(max_iters)
-    print("running kmeans on device:", X.device)
+    pbar = tqdm_if_main_worker(range(max_iters), desc="KMEANS ITER")
     for j in pbar:
         torch.cuda.empty_cache()
         if DEBUG_MEM: print(f"[kmeans] step {j} cuda mem free/total = {torch.cuda.mem_get_info()}")
@@ -198,7 +195,8 @@ def kmeans(
         last_centroid_shift = total_centroid_shift
         
         centroids = new_centroids
-        pbar.set_description(f"Dist: {total_centroid_shift:.2f} / Diff {shift_diff:.4f}")
+        if get_rank() == 0:
+            pbar.set_description(f"Dist: {total_centroid_shift:.2f} / Diff {shift_diff:.4f}")
         
         if shift_diff < tol:
             print(f"stopping early due to tolerance hit. completed {j} iterations.")
