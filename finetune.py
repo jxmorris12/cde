@@ -109,8 +109,10 @@ def main():
         # 'dbpedia',
 
     ]
+    # beir_dataset_names = ['trec-covid'] # tmp
     beir_dict = {
-        d: BeirDataset(dataset=d, embedder=model_args.embedder_rerank) for d in beir_dataset_names
+        d: BeirDataset(dataset=d, embedder=model_args.embedder_rerank) 
+        for d in sorted(beir_dataset_names)
     }
     retrieval_datasets = {
         **{f"BeIR/{k}": v for k,v in beir_dict.items()}

@@ -10,6 +10,9 @@ import torch
 import transformers
 
 
+from helpers import get_rank, get_world_size
+
+
 @dataclass
 class ModelArguments:
     """
@@ -108,7 +111,7 @@ class DataArguments:
         default="bm25",
         metadata={
             "help": "Model to use for clustering",
-            "choices": ["bm25", "nomic_embed"],
+            "choices": ["bm25", "gtr_base"],
         }
     )
     clustering_query_to_doc: bool = field(
@@ -227,7 +230,8 @@ class TrainingArguments(transformers.TrainingArguments):
         self.eval_steps = int(self.eval_steps / num_devices)
         self.save_steps = int(self.save_steps / num_devices)
         self.warmup_steps = int(self.warmup_steps / num_devices)
-        print(f"training with eval_steps = {self.eval_steps} / warmup_steps = {self.warmup_steps}")
+        if get_rank() == 0:
+            print(f"training with eval_steps = {self.eval_steps} / warmup_steps = {self.warmup_steps} / world_size {get_world_size()}")
         ############################################################################
         self.dataloader_num_workers = num_workers
         self.dataloader_persistent_workers = (num_workers > 0)

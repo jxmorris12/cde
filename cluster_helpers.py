@@ -1,14 +1,13 @@
-from typing import Callable, Tuple
+from typing import Tuple, Union
 
 import math
-import psutil
 
-import scipy
 import torch
 import tqdm
 
 from bm25_pt.bm25 import TokenizedBM25
 
+from dataset import embed_with_cache, NomicDataset, RedditDataset
 from helpers import gather_sum, get_rank, get_world_size, tqdm_if_main_worker
 
 
@@ -16,17 +15,19 @@ from helpers import gather_sum, get_rank, get_world_size, tqdm_if_main_worker
 # between points during clustering.
 SHOULD_MAXIMIZE_CLUSTER_DISTANCE_FOR_MODEL = {
     "bm25": True,
-    "nomic_embed": False,
+    "gtr_base": False,
 }
 
 DEBUG_MEM = False
 
 
 def embed_for_clustering(
+        dataset: Union[NomicDataset, RedditDataset], 
         query_ids: torch.Tensor,
         document_ids: torch.Tensor,
         model: str
     ) -> Tuple[torch.Tensor, torch.Tensor]:
+    # return torch.randn(len(dataset), 512), torch.randn(len(dataset), 512)
     if model == "bm25":
         vocab_size = int(document_ids.max() + 1)
         bm25 = TokenizedBM25(vocab_size=vocab_size)
@@ -34,9 +35,25 @@ def embed_for_clustering(
         queries = bm25.docs_to_bags(query_ids).to_sparse_coo()
         corpus = bm25._corpus_scores.to_sparse_coo()
         return queries, corpus
-    elif model == "nomic_embed":
-        # TODO compute embeddings here
-        raise NotImplementedError()
+    elif model == "gtr_base":
+        dataset_fingerprint =  dataset.dataset._fingerprint
+        if get_rank() == 0:
+            print(f"embedding {len(dataset.dataset)} queries...")
+        query_embeddings = embed_with_cache(
+            "sentence-transformers/gtr-t5-base", 
+            dataset_fingerprint + "_queries", 
+            dataset.dataset["query"],
+        )
+        query_embeddings = torch.tensor(query_embeddings["embeds"])
+        if get_rank() == 0:
+            print(f"embedding {len(dataset.dataset)} documents...")
+        corpus_embeddings = embed_with_cache(
+            "sentence-transformers/gtr-t5-base", 
+            dataset_fingerprint + "_documents", 
+            dataset.dataset["document"],
+        )
+        corpus_embeddings = torch.tensor(corpus_embeddings["embeds"])
+        return query_embeddings, corpus_embeddings
     else:
         raise ValueError(f"model {model} not supported")
 
@@ -55,8 +72,15 @@ def slice_sparse_tensor_rows(t: torch.sparse.Tensor, min_row: int, max_row: int)
     return torch.sparse_coo_tensor(idxs, vals, size=(num_rows, num_cols)).coalesce()
 
 
+def slice_tensor_rows(t: torch.Tensor, min_row: int, max_row: int) -> torch.Tensor:
+    if t.is_sparse:
+        return slice_sparse_tensor_rows(t=t, min_row=min_row, max_row=max_row)
+    else:
+        return t[min_row:max_row]
+
+
 @torch.no_grad
-def maxsim(X: torch.Tensor, y: torch.Tensor, maximize: bool, chunk_size: int = 4_000) -> torch.Tensor:
+def maxsim(X: torch.Tensor, y: torch.Tensor, maximize: bool, chunk_size: int = 8_000) -> torch.Tensor:
     device = X.device
     n_samples = X.shape[0]
 
@@ -74,7 +98,7 @@ def maxsim(X: torch.Tensor, y: torch.Tensor, maximize: bool, chunk_size: int = 4
 
     for i in range(splits_start_idx, splits_end_idx, chunk_size):
         start, end = i, min(i + chunk_size, n_samples)
-        sub_x = slice_sparse_tensor_rows(X, start, end)
+        sub_x = slice_tensor_rows(X, start, end)
         if DEBUG_MEM: print(f"[maxsim] step {i} cuda mem free/total = {torch.cuda.mem_get_info()}")
         if DEBUG_MEM: print("sub_x.shape:", sub_x.shape, "//", "y.shape:", y.shape)
         sub_sim = sub_x @ y # TODO – Implement sparse max here to save mem!
@@ -161,9 +185,10 @@ def kmeans(
     for j in pbar:
         torch.cuda.empty_cache()
         if DEBUG_MEM: print(f"[kmeans] step {j} cuda mem free/total = {torch.cuda.mem_get_info()}")
-        _, assignments = maxsim(
+        sims, assignments = maxsim(
             X=q, y=centroids.T, maximize=maximize
         )
+        avg_sim = sims.mean()
         x_idxs = torch.arange(len(X), device=assignments.device)
         idxs = torch.stack([x_idxs, assignments], dim=1)
         vals = torch.ones(len(X), device=assignments.device)
@@ -182,6 +207,7 @@ def kmeans(
 
         print(f"iteration {j} num centroids used: {(num_assignments >= 0).sum()}/{k}")
         
+        # TODO: compute & enforce elbow criterion.
         # TODO: Handle dead centroids through re-initialization.
         # don't replace a centroid if it got zero
         new_centroids = torch.where(
@@ -196,7 +222,7 @@ def kmeans(
         
         centroids = new_centroids
         if get_rank() == 0:
-            pbar.set_description(f"Dist: {total_centroid_shift:.2f} / Diff {shift_diff:.4f}")
+            pbar.set_description(f"Sim: {avg_sim} / Shift: {total_centroid_shift:.2f} / Diff {shift_diff:.4f}")
         
         if shift_diff < tol:
             print(f"stopping early due to tolerance hit. completed {j} iterations.")

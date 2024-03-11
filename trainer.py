@@ -208,8 +208,6 @@ class CustomTrainer(transformers.Trainer):
 
         assert scores.shape == one_hot_labels.shape
         labels = one_hot_labels / one_hot_labels.sum(dim=1, keepdim=True)
-        num_collisions = (labels.sum(dim=1) > 1).sum()
-        num_unique_elements = len(labels) - num_collisions
 
         loss = torch.nn.functional.cross_entropy(
             scores, labels, label_smoothing=0.0
@@ -222,8 +220,6 @@ class CustomTrainer(transformers.Trainer):
 
         metrics = {
             "acc": acc.item(),
-            "stats_unique": num_unique_elements,
-            "stats_collisions": num_collisions,
             "stats_total_queries": len(e1),
             "stats_total_documents": len(e2),
             "batch_size": batch_size,
@@ -290,7 +286,8 @@ class CustomTrainer(transformers.Trainer):
 
 
         if self.use_gc:
-            return self.gc(query_inputs, document_inputs, negative_document_inputs, no_sync_except_last=False)
+            return self.gc(
+                query_inputs, document_inputs, negative_document_inputs, no_sync_except_last=False)
         else:
             e1 = model(**query_inputs)
             e2 = model(**document_inputs)
@@ -301,7 +298,7 @@ class CustomTrainer(transformers.Trainer):
                 negative_document_inputs["dataset_attention_mask"] = document_inputs["dataset_attention_mask"]
                 e2_hn = model(**negative_document_inputs)
                 e2 = torch.cat((e2, e2_hn), dim=0)
-                negative_document_unique_ids =  negative_document_inputs["input_ids"].sum(dim=1)
+                negative_document_unique_ids = negative_document_inputs["input_ids"].sum(dim=1)
                 corpus_unique_ids = torch.cat(
                     (corpus_unique_ids, negative_document_unique_ids), dim=0
                 )
@@ -310,6 +307,31 @@ class CustomTrainer(transformers.Trainer):
             document_unique_ids = document_inputs["input_ids"].sum(dim=1)
             one_hot_labels = (
                 document_unique_ids[:, None] == corpus_unique_ids[None, :])
+            
+            # Aggregate labels for duplicate queries.
+            query_unique_ids = query_inputs["input_ids"].sum(dim=1)
+            # TODO: Diagnose why this gives tiny bit worse performance, even though seems theoretically correct..
+            # one_hot_labels = (
+            #     (query_unique_ids[:, None] == query_unique_ids[None, :]).float() @ one_hot_labels.float())
+            # one_hot_labels = one_hot_labels.bool()
+
+            num_unique_documents = corpus_unique_ids.unique().numel()
+            num_collisions = len(corpus_unique_ids) - num_unique_documents
+            # num_collisions = (one_hot_labels.sum(dim=1) > 1).sum()
+            # num_unique_documents = len(one_hot_labels) - num_collisions
+
+            num_unique_queries = query_unique_ids.unique().numel()
+            num_collisions_queries = len(one_hot_labels) - num_unique_queries
+
+            metrics = {
+                "stats_unique": num_unique_documents,
+                "stats_unique_queries": num_unique_queries,
+                "stats_collisions": num_collisions,
+                "stats_collisions_queries": num_collisions_queries,
+            }
+            if self.is_in_train:
+                for key, val in metrics.items():
+                    self._log_extra(key, val)
 
             return self._contrastive_loss(
                 e1, e2, 

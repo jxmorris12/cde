@@ -44,16 +44,17 @@ def _cluster_dataset_uncached(
         return t
     
     document_input_ids = dataset.dataset[document_key]
-    document_input_ids = [ptl(t) for t in tqdm.auto.tqdm(document_input_ids)]
+    document_input_ids = [ptl(t) for t in tqdm_if_main_worker(document_input_ids)]
     if query_to_doc: 
         query_input_ids = dataset.dataset[query_key]
-        query_input_ids = [ptl(t) for t in tqdm.auto.tqdm(query_input_ids)]
+        query_input_ids = [ptl(t) for t in tqdm_if_main_worker(query_input_ids)]
     else:
         query_input_ids = document_input_ids
     document_input_ids = torch.stack(document_input_ids)
     query_input_ids = torch.stack(query_input_ids)
     
     q, X = embed_for_clustering(
+        dataset=dataset,
         query_ids=query_input_ids,
         document_ids=document_input_ids,
         model=model

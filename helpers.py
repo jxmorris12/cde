@@ -326,7 +326,8 @@ class RerankHelper:
             (pair_ids, extra_ones_pair),
             dim=0
         )
-        extra_ones_rerank = torch.ones((max_length - len(rerank_scores_biencoder), *rerank_scores_biencoder.shape[1:]), device=device, dtype=torch.float32) * big_neg_number
+        extra_ones_rerank = torch.ones(
+            (max_length - len(rerank_scores_biencoder), *rerank_scores_biencoder.shape[1:]), device=device, dtype=torch.float32) * big_neg_number
         rerank_scores_biencoder = torch.cat(
             (rerank_scores_biencoder, extra_ones_rerank),
             dim=0
@@ -573,5 +574,6 @@ def load_embedder_and_tokenizer(name: str) -> Tuple:
     else:
         model = transformers.AutoModel.from_pretrained(name, trust_remote_code=True)
     tokenizer = transformers.AutoTokenizer.from_pretrained(name)
+    model = model.to(dtype=torch.float32)
     return model, tokenizer
     
