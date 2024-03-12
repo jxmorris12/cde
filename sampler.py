@@ -12,7 +12,8 @@ import torch
 import datasets
 import tqdm
 
-from cluster_helpers import embed_for_clustering, kmeans, SHOULD_MAXIMIZE_CLUSTER_DISTANCE_FOR_MODEL
+from cluster_helpers import embed_for_clustering, paired_kmeans, SHOULD_MAXIMIZE_CLUSTER_DISTANCE_FOR_MODEL
+from cluster_helpers_faiss import paired_kmeans_faiss
 from dataset import NomicDataset, RedditDataset
 from helpers import get_tti_cache_dir, get_rank, get_world_size, md5_hash_kwargs, tqdm_if_main_worker
 
@@ -37,36 +38,33 @@ def _cluster_dataset_uncached(
         batch_size: int,
     ) -> Dict[int, List[int]]:
     print("Processing and tokenizing corpus for clustering...")
-    def ptl(t, max_doc_length: int = 128):
-        if len(t) < max_doc_length:
-            nz = max_doc_length - len(t) 
-            t = torch.cat((t, torch.zeros((nz,))), dim=0)
-        return t
-    
-    document_input_ids = dataset.dataset[document_key]
-    document_input_ids = [ptl(t) for t in tqdm_if_main_worker(document_input_ids)]
-    if query_to_doc: 
-        query_input_ids = dataset.dataset[query_key]
-        query_input_ids = [ptl(t) for t in tqdm_if_main_worker(query_input_ids)]
-    else:
-        query_input_ids = document_input_ids
-    document_input_ids = torch.stack(document_input_ids)
-    query_input_ids = torch.stack(query_input_ids)
     
     q, X = embed_for_clustering(
         dataset=dataset,
-        query_ids=query_input_ids,
-        document_ids=document_input_ids,
-        model=model
+        query_key=query_key,
+        document_key=document_key,
+        model=model,
+        query_to_doc=query_to_doc,
     )
     
     k = math.ceil(len(X) / batch_size / 2)
-    _, assignments = kmeans(
-        q=q, 
-        X=X,
-        k=k,
-        maximize=SHOULD_MAXIMIZE_CLUSTER_DISTANCE_FOR_MODEL[model]
-    )
+
+    use_faiss = True
+    if use_faiss:
+        index_name = "__".join(dataset._fingerprint + model + "index")
+        _, assignments = paired_kmeans_faiss(
+            q=q,
+            X=X,
+            k=k,
+            maximize=SHOULD_MAXIMIZE_CLUSTER_DISTANCE_FOR_MODEL[model]
+        )
+    else:
+        _, assignments = paired_kmeans(
+            q=q, 
+            X=X,
+            k=k,
+            maximize=SHOULD_MAXIMIZE_CLUSTER_DISTANCE_FOR_MODEL[model]
+        )
     # stack assignments to list.
     assignments_dict = collections.defaultdict(list)
     for i in tqdm.trange(len(assignments), desc="collecting assigments", leave=False):
@@ -83,7 +81,7 @@ def cluster_dataset(
     ) -> Dict[int, List[int]]:
     # TODO: Turn this caching logic into a nice decorator?
     clustering_hash = get_cache_location_from_kwargs(
-        dataset_fingerprint=dataset.fingerprint,
+        dataset_fingerprint=dataset._fingerprint,
         document_key=document_key,
         query_key=query_key,
         batch_size=batch_size,

@@ -109,7 +109,7 @@ def main():
         # 'dbpedia',
 
     ]
-    # beir_dataset_names = ['trec-covid'] # tmp
+    beir_dataset_names = [] # tmp
     beir_dict = {
         d: BeirDataset(dataset=d, embedder=model_args.embedder_rerank) 
         for d in sorted(beir_dataset_names)
@@ -176,8 +176,16 @@ def main():
         print("starting wandb run with name", wandb_run_id)
         wandb.init(
             entity="jack-morris",
-            project="tti-nomic-2",
+            project="tti-nomic-3",
             name=wandb_run_id,
+    )
+        wandb.config.update(
+            {
+                **vars(model_args),
+                **vars(data_args),
+                **vars(training_args),
+            },
+            allow_val_change=True,
         )
         wandb.watch(model)
 

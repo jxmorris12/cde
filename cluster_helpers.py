@@ -1,4 +1,4 @@
-from typing import Tuple, Union
+from typing import Iterable, Tuple, Union
 
 import math
 
@@ -20,40 +20,56 @@ SHOULD_MAXIMIZE_CLUSTER_DISTANCE_FOR_MODEL = {
 
 DEBUG_MEM = False
 
+def pad_to_length(t, max_doc_length: int = 128):
+    if len(t) < max_doc_length:
+        nz = max_doc_length - len(t) 
+        t = torch.cat((t, torch.zeros((nz,))), dim=0)
+    return t
 
 def embed_for_clustering(
         dataset: Union[NomicDataset, RedditDataset], 
-        query_ids: torch.Tensor,
-        document_ids: torch.Tensor,
-        model: str
+        document_key: str,
+        query_key: str,
+        model: str,
+        query_to_doc: bool,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
     # return torch.randn(len(dataset), 512), torch.randn(len(dataset), 512)
     if model == "bm25":
-        vocab_size = int(document_ids.max() + 1)
+        document_input_ids = dataset.dataset[document_key]
+        document_input_ids = [pad_to_length(t) for t in tqdm_if_main_worker(document_input_ids)]
+        if query_to_doc: 
+            query_input_ids = dataset.dataset[query_key]
+            query_input_ids = [pad_to_length(t) for t in tqdm_if_main_worker(query_input_ids)]
+        else:
+            query_input_ids = document_input_ids
+        document_input_ids = torch.stack(document_input_ids)
+        query_input_ids = torch.stack(query_input_ids)
+        vocab_size = int(document_input_ids.max() + 1)
         bm25 = TokenizedBM25(vocab_size=vocab_size)
-        bm25.index(document_ids)
-        queries = bm25.docs_to_bags(query_ids).to_sparse_coo()
+        bm25.index(document_input_ids)
+        queries = bm25.docs_to_bags(query_input_ids).to_sparse_coo()
         corpus = bm25._corpus_scores.to_sparse_coo()
         return queries, corpus
     elif model == "gtr_base":
         dataset_fingerprint =  dataset.dataset._fingerprint
         if get_rank() == 0:
-            print(f"embedding {len(dataset.dataset)} queries...")
+            print(f"Embedding {len(dataset.dataset)} queries...")
         query_embeddings = embed_with_cache(
             "sentence-transformers/gtr-t5-base", 
             dataset_fingerprint + "_queries", 
-            dataset.dataset["query"],
+            dataset.dataset,
+            "query",
         )
-        query_embeddings = torch.tensor(query_embeddings["embeds"])
         if get_rank() == 0:
-            print(f"embedding {len(dataset.dataset)} documents...")
+            print(f"Embedding {len(dataset.dataset)} documents...")
         corpus_embeddings = embed_with_cache(
             "sentence-transformers/gtr-t5-base", 
             dataset_fingerprint + "_documents", 
-            dataset.dataset["document"],
+            dataset.dataset,
+            "document",
         )
-        corpus_embeddings = torch.tensor(corpus_embeddings["embeds"])
-        return query_embeddings, corpus_embeddings
+        print(f"Stacking {len(query_embeddings)} and {len(corpus_embeddings)} to tensors.")
+        return query_embeddings["embeds"], corpus_embeddings["embeds"]
     else:
         raise ValueError(f"model {model} not supported")
 
@@ -127,7 +143,7 @@ def maxsim(X: torch.Tensor, y: torch.Tensor, maximize: bool, chunk_size: int = 8
 
 
 @torch.no_grad
-def kmeans(
+def paired_kmeans(
         q: torch.Tensor,
         X: torch.Tensor, 
         k: int,
@@ -137,6 +153,13 @@ def kmeans(
         initialization_strategy: str = "kmeans++", # ["kmeans++", "random"]
         seed: int = 42
     ) -> Tuple[torch.Tensor, torch.Tensor]:
+    """Runs paired kmeans.
+
+    Returns:
+        - centroids – float torch.Tensor of shape (k, d) containing coordinates of discovered centroids
+        – assignments – long torch.Tensor of shape (len(q),) containing cluster indices of each datapoint in q
+
+    """
     if torch.cuda.is_available():
         q = q.cuda()
         X = X.cuda()
@@ -231,3 +254,4 @@ def kmeans(
     if get_rank() == 0:
         print("exiting kmeans with total shift", total_centroid_shift.item())
     return centroids.cpu(), assignments.cpu()
+

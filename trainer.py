@@ -310,10 +310,10 @@ class CustomTrainer(transformers.Trainer):
             
             # Aggregate labels for duplicate queries.
             query_unique_ids = query_inputs["input_ids"].sum(dim=1)
-            # TODO: Diagnose why this gives tiny bit worse performance, even though seems theoretically correct..
-            # one_hot_labels = (
-            #     (query_unique_ids[:, None] == query_unique_ids[None, :]).float() @ one_hot_labels.float())
-            # one_hot_labels = one_hot_labels.bool()
+            # TODO: Write out theory for these lines.
+            one_hot_labels = (
+                (query_unique_ids[:, None] == query_unique_ids[None, :]).float() @ one_hot_labels.float())
+            one_hot_labels = one_hot_labels.bool()
 
             num_unique_documents = corpus_unique_ids.unique().numel()
             num_collisions = len(corpus_unique_ids) - num_unique_documents

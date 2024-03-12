@@ -168,7 +168,7 @@ def load_beir_uncached(dataset: str, split: str) -> Tuple[datasets.Dataset, data
     return corpus, queries, qrels, ance_results
 
 
-def embed_with_cache(model_name: str, cache_name: str, texts: List[str]) -> datasets.Dataset:
+def embed_with_cache(model_name: str, cache_name: str, d: datasets.Dataset, col: str) -> datasets.Dataset:
     embedder_cache_path = model_name.replace('/', '__')
     # cache_folder = datasets.config.HF_DATASETS_CACHE
     cache_folder = os.path.join(get_tti_cache_dir(), 'corpus_embeddings', embedder_cache_path)
@@ -177,7 +177,11 @@ def embed_with_cache(model_name: str, cache_name: str, texts: List[str]) -> data
 
     if os.path.exists(cache_path):
         print("[embed_with_cache] Loading embeddings at path:", cache_path)
-        return datasets_fast_load_from_disk(cache_path)
+        d = datasets_fast_load_from_disk(cache_path)
+        d.set_format("pt")
+        return d
+    
+    texts = d[col]
 
     print("[embed_with_cache] computing embeddings to save at path:", cache_path)
     from sentence_transformers import SentenceTransformer
@@ -198,6 +202,7 @@ def embed_with_cache(model_name: str, cache_name: str, texts: List[str]) -> data
         i += max_dataset_size
     
     d = datasets.concatenate_datasets(datasets_list)
+    d.set_format("pt")
     d.save_to_disk(cache_path)
     return d
 
@@ -253,12 +258,14 @@ class BeirDataset(torch.utils.data.Dataset):
         print(f">> embedding dataset {dataset} split {split}")
         self.query_embeddings = embed_with_cache(
             embedder, f"{dataset}_queries" + ("" if split == "train" else f"_{split}"), 
-            self.queries["text"],
+            self.queries,
+            "text",
         )
         self.corpus_embeddings = embed_with_cache(
             embedder, 
             f"{dataset}_corpus" + ("" if split == "train" else f"_{split}"), 
-            self.corpus["text"],
+            self.corpus,
+            "text",
         )
         self.size = len(self.queries)
     
@@ -490,7 +497,7 @@ class NomicDataset:
         self.num_hard_negatives = num_hard_negatives
 
     @property
-    def fingerprint(self) -> str:
+    def _fingerprint(self) -> str:
         return self.dataset._fingerprint
 
     def reset_dataset_idx(self) -> int:
