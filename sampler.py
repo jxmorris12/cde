@@ -10,6 +10,7 @@ import random
 import torch
 
 import datasets
+import torch
 import tqdm
 
 from cluster_helpers import embed_for_clustering, paired_kmeans, SHOULD_MAXIMIZE_CLUSTER_DISTANCE_FOR_MODEL
@@ -19,6 +20,8 @@ from helpers import get_tti_cache_dir, get_rank, get_world_size, md5_hash_kwargs
 
 
 identity = lambda x: x
+
+USE_FAISS = True
 
 
 def get_cache_location_from_kwargs(**kwargs):
@@ -49,9 +52,7 @@ def _cluster_dataset_uncached(
     
     k = math.ceil(len(X) / batch_size / 2)
 
-    use_faiss = True
     if use_faiss:
-        index_name = "__".join(dataset._fingerprint + model + "index")
         _, assignments = paired_kmeans_faiss(
             q=q,
             X=X,
@@ -90,6 +91,8 @@ def cluster_dataset(
     )
     print("checking for cluster at file", clustering_hash)
     if os.path.exists(clustering_hash):
+        if get_world_size() > 1:
+            torch.distributed.barrier()
         return pickle.load(open(clustering_hash, "rb"))
     else:
         result = _cluster_dataset_uncached(
@@ -253,6 +256,45 @@ class AutoClusterSampler(FixedSubdomainSampler):
             self.batch_assignments[cluster].append(i)
 
 
+class AutoClusterByDomainSampler(FixedSubdomainSampler):
+    dataset: datasets.Dataset
+    def __init__(
+            self, 
+            dataset: datasets.Dataset, 
+            query_to_doc: bool, 
+            batch_size: int,
+            shuffle: bool,
+            model: str,
+        ):
+        super().__init__(
+            dataset=dataset, 
+            batch_size=batch_size, 
+            shuffle=shuffle,
+        )
+        self.dataset = dataset
+        offset = 0
+        final_assignments = collections.defaultdict(list)
+        for _, data_idxs in self.batch_assignments.items():
+            mini_dataset = dataset.select(data_idxs)
+            cluster_assignments = cluster_dataset(
+                dataset=mini_dataset,
+                model=model,
+                query_key=dataset._document_input_ids_key,
+                document_key=dataset._query_input_ids_key,
+                query_to_doc=query_to_doc,
+                batch_size=batch_size,
+            )
+
+            for j, cluster in tqdm_if_main_worker(cluster_assignments.items(), leave=False):
+                if isinstance(cluster, list): cluster = cluster[0]
+                if isinstance(cluster, torch.Tensor): cluster = cluster.item()
+                final_assignments[cluster + offset].append(data_idxs[j])
+            offset += len(cluster_assignments)
+        assert len(self.dataset) == len(cluster_assignments)
+        self.batch_assignments = final_assignments
+        assert sum(map(len, self.batch_assignments.values())) == len(dataset)
+
+
 def get_sampler(
     dataset: datasets.Dataset,
     batch_size: int,
@@ -274,6 +316,14 @@ def get_sampler(
         )
     elif strategy == "cluster":
         return AutoClusterSampler(
+            dataset=dataset, 
+            batch_size=batch_size,
+            shuffle=shuffle,
+            query_to_doc=data_args.clustering_query_to_doc, 
+            model=data_args.clustering_model,
+        )
+    elif strategy == "cluster_in_domain":
+        return AutoClusterByDomainSampler(
             dataset=dataset, 
             batch_size=batch_size,
             shuffle=shuffle,

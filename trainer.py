@@ -192,7 +192,11 @@ class CustomTrainer(transformers.Trainer):
             loss = loss.mean()
         return loss.detach() / self.args.gradient_accumulation_steps
 
-    def _contrastive_loss(self, e1: torch.Tensor, e2: torch.Tensor, one_hot_labels: torch.Tensor) -> torch.Tensor:
+    def _contrastive_loss(
+                self, 
+                e1: torch.Tensor, e2: torch.Tensor, 
+                one_hot_labels: torch.Tensor
+            ) -> Tuple[torch.Tensor, torch.Tensor]:
         # TODO: How does this handle hard negatives?
         e1 = e1 / e1.norm(p=2, dim=1, keepdim=True) # Query
         e2 = e2 / e2.norm(p=2, dim=1, keepdim=True) # Document
@@ -227,7 +231,7 @@ class CustomTrainer(transformers.Trainer):
         if self.is_in_train:
             for key, val in metrics.items():
                 self._log_extra(key, val)
-        return loss
+        return loss, scores
     
     def prediction_step(
         self,
@@ -333,10 +337,13 @@ class CustomTrainer(transformers.Trainer):
                 for key, val in metrics.items():
                     self._log_extra(key, val)
 
-            return self._contrastive_loss(
+            loss, scores = self._contrastive_loss(
                 e1, e2, 
                 one_hot_labels=one_hot_labels
             )
+            # if self._is_main_worker: breakpoint()
+            # torch.distributed.barrier()
+            return loss
     
     # Custom retrieval evalution code
     def _retrieval_evaluate(

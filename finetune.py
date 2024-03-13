@@ -109,7 +109,7 @@ def main():
         # 'dbpedia',
 
     ]
-    beir_dataset_names = [] # tmp
+    # beir_dataset_names = [] # tmp
     beir_dict = {
         d: BeirDataset(dataset=d, embedder=model_args.embedder_rerank) 
         for d in sorted(beir_dataset_names)

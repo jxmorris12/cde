@@ -51,6 +51,7 @@ def embed_for_clustering(
         corpus = bm25._corpus_scores.to_sparse_coo()
         return queries, corpus
     elif model == "gtr_base":
+        assert query_to_doc
         dataset_fingerprint =  dataset.dataset._fingerprint
         if get_rank() == 0:
             print(f"Embedding {len(dataset.dataset)} queries...")
@@ -68,7 +69,6 @@ def embed_for_clustering(
             dataset.dataset,
             "document",
         )
-        print(f"Stacking {len(query_embeddings)} and {len(corpus_embeddings)} to tensors.")
         return query_embeddings["embeds"], corpus_embeddings["embeds"]
     else:
         raise ValueError(f"model {model} not supported")
