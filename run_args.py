@@ -104,7 +104,7 @@ class DataArguments:
         default="random",
         metadata={
             "help": "sampling strategy for batches",
-            "choices": ["random", "domain", "cluster"]
+            "choices": ["random", "domain", "cluster", "cluster_within_domain"]
         }
     )
     clustering_model: str = field(

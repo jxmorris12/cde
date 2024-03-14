@@ -10,7 +10,7 @@ import wandb
 from collate import DocumentQueryCollatorWithPadding
 from dataset import (
     load_reddit_train_and_val, load_synthetic_words_dataset, 
-    BeirDataset, NomicDataset
+    BeirDataset, NomicSupervisedDataset
 )
 from helpers import get_rank, load_embedder_and_tokenizer, ModelConfig
 from model import get_model_class
@@ -135,7 +135,7 @@ def main():
             supervised=False,
         )
     elif data_args.dataset == 'nomic':
-        train_dataset = NomicDataset(
+        train_dataset = NomicSupervisedDataset(
             num_hard_negatives=data_args.num_hard_negatives,
         )
         eval_dataset = None

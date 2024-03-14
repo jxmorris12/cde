@@ -39,8 +39,7 @@ def paired_kmeans_faiss(
     )
     kmeans.train(paired_vectors)
 
-    queries = torch.tensor(paired_vectors[:len(q)])
-
+    queries = paired_vectors[:len(q)]
     _distances, assignments = kmeans.index.search(queries, 1)
     assert assignments.shape == (q.shape[0], 1)
 

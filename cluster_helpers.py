@@ -2,12 +2,13 @@ from typing import Iterable, Tuple, Union
 
 import math
 
+import datasets
 import torch
 import tqdm
 
 from bm25_pt.bm25 import TokenizedBM25
 
-from dataset import embed_with_cache, NomicDataset, RedditDataset
+from dataset import embed_with_cache, NomicSupervisedDataset, RedditDataset
 from helpers import gather_sum, get_rank, get_world_size, tqdm_if_main_worker
 
 
@@ -27,7 +28,7 @@ def pad_to_length(t, max_doc_length: int = 128):
     return t
 
 def embed_for_clustering(
-        dataset: Union[NomicDataset, RedditDataset], 
+        dataset: datasets.Dataset, 
         document_key: str,
         query_key: str,
         model: str,
@@ -35,10 +36,10 @@ def embed_for_clustering(
     ) -> Tuple[torch.Tensor, torch.Tensor]:
     # return torch.randn(len(dataset), 512), torch.randn(len(dataset), 512)
     if model == "bm25":
-        document_input_ids = dataset.dataset[document_key]
+        document_input_ids = dataset[document_key]
         document_input_ids = [pad_to_length(t) for t in tqdm_if_main_worker(document_input_ids)]
         if query_to_doc: 
-            query_input_ids = dataset.dataset[query_key]
+            query_input_ids = dataset[query_key]
             query_input_ids = [pad_to_length(t) for t in tqdm_if_main_worker(query_input_ids)]
         else:
             query_input_ids = document_input_ids
@@ -52,21 +53,21 @@ def embed_for_clustering(
         return queries, corpus
     elif model == "gtr_base":
         assert query_to_doc
-        dataset_fingerprint =  dataset.dataset._fingerprint
+        dataset_fingerprint =  dataset._fingerprint
         if get_rank() == 0:
-            print(f"Embedding {len(dataset.dataset)} queries...")
+            print(f"Embedding {len(dataset)} queries...")
         query_embeddings = embed_with_cache(
             "sentence-transformers/gtr-t5-base", 
             dataset_fingerprint + "_queries", 
-            dataset.dataset,
+            dataset,
             "query",
         )
         if get_rank() == 0:
-            print(f"Embedding {len(dataset.dataset)} documents...")
+            print(f"Embedding {len(dataset)} documents...")
         corpus_embeddings = embed_with_cache(
             "sentence-transformers/gtr-t5-base", 
             dataset_fingerprint + "_documents", 
-            dataset.dataset,
+            dataset,
             "document",
         )
         return query_embeddings["embeds"], corpus_embeddings["embeds"]

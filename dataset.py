@@ -111,6 +111,8 @@ def get_ance_results(dataset: str, data_path: str, model_name: str = "msmarco-ro
         retriever = RetrievalEvaluator(
             model,
             score_function="dot",
+            batch_size=2048,
+            corpus_chunk_size=2**18,
         )
         queries = {query['id']: query['text'] for query in queries}
         corpus = {doc['id']: {'title': doc['title'] , 'text': doc['text']} for doc in corpus}
@@ -124,8 +126,8 @@ def get_ance_results(dataset: str, data_path: str, model_name: str = "msmarco-ro
         from beir.retrieval.evaluation import EvaluateRetrieval
         model = DRES(
             models.SentenceBERT("msmarco-roberta-base-ance-firstp", max_seq_length=128), 
-            batch_size=512, 
-            corpus_chunk_size=2048,
+            batch_size=2048, 
+            corpus_chunk_size=2**20,
         )
         corpus, queries, qrels = beir.datasets.data_loader.GenericDataLoader(data_path).load(split="test")
         retriever = EvaluateRetrieval(model, score_function="dot")
@@ -188,7 +190,7 @@ def embed_with_cache(model_name: str, cache_name: str, d: datasets.Dataset, col:
     model = SentenceTransformer(model_name)
     model.max_seq_length = 128
     pool = model.start_multi_process_pool()
-    embeddings = model.encode_multi_process(texts, batch_size=4096, pool=pool)
+    embeddings = model.encode_multi_process(texts, batch_size=2048, pool=pool)
     model.stop_multi_process_pool(pool)
 
     datasets_list = []
@@ -479,7 +481,7 @@ class RedditDatasetWithSupervisedQuestions(RedditDataset):
         }
 
 
-class NomicDataset:
+class NomicSupervisedDataset:
     num_hard_negatives: int
     def __init__(self, num_hard_negatives: int = 0):
         data_folder = os.path.join(get_tti_cache_dir(), "nomic_embed_supervised")
@@ -561,6 +563,47 @@ class NomicDataset:
             ######################################################################
             'negative_document_input_ids': hn_document_input_ids,
             'negative_document_attention_mask': (hn_document_input_ids != self.pad_token_id).int(),
+            ######################################################################
+        }
+
+class NomicUnsupervisedDataset:
+    dataset: datasets.Dataset
+    tokenizer: transformers.AutoTokenizer
+    def __init__(self, tokenizer: transformers.AutoTokenizer):
+        self.dataset = datasets.load_dataset("nomic-ai/nomic-embed-unsupervised")
+        self.tokenizer = tokenizer
+
+    @property
+    def _fingerprint(self) -> str:
+        return self.dataset._fingerprint
+
+    def reset_dataset_idx(self) -> int:
+        pass # Not needed with smart sampler
+
+    def __len__(self):
+        return len(self.dataset)
+    
+    def __getitem__(self, query_id: int) -> Dict[str, torch.Tensor]: 
+        ex = self.dataset[query_id]
+        tokenize_fn = functools.partial(self.tokenizer, return_tensors="pt", padding="max_length", truncation=True, )
+        query_encoded = tokenize_fn(ex["query"])
+        query_input_ids = query_encoded.input_ids[0]
+        query_attention_mask = query_encoded.attention_mask[0]
+        #
+        document_encoded = tokenize_fn(ex["document"])
+        document_input_ids = document_encoded.input_ids[0]
+        document_attention_mask = document_encoded.attention_mask[0]
+        # 
+        subdomain_id = ex['dataset']
+        # 
+        return {
+            'idx': query_id,
+            ######################################################################
+            'query_input_ids': query_input_ids,
+            'query_attention_mask': query_attention_mask,
+            ######################################################################
+            'document_input_ids': document_input_ids,
+            'document_attention_mask': document_attention_mask,
             ######################################################################
         }
 
@@ -808,5 +851,5 @@ def load_synthetic_words_dataset() -> Tuple[datasets.Dataset, datasets.Dataset]:
 
 
 if __name__ == '__main__':
-    ds_train = NomicDataset()
+    ds_train = NomicSupervisedDataset()
     print(ds_train[0])

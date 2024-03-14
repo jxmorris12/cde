@@ -1,5 +1,5 @@
-from dataset import NomicDataset
-d = NomicDataset()
+from dataset import NomicSupervisedDataset
+d = NomicSupervisedDataset()
 
 import torch
 torch.manual_seed(42)

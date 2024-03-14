@@ -571,6 +571,7 @@ def load_embedder_and_tokenizer(name: str) -> Tuple:
         model = NomicBertModel.from_pretrained(
             name, add_pooling_layer=False
         )
+        model = model.to(dtype=torch.float32)
     else:
         model = transformers.AutoModel.from_pretrained(name, trust_remote_code=True)
     tokenizer = transformers.AutoTokenizer.from_pretrained(name)

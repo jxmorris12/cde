@@ -9,12 +9,12 @@ import sys
 sys.path.append('/home/paperspace/tti3')
 
 
-from dataset import NomicDataset
+from dataset import NomicSupervisedDataset
 from sampler import FixedSubdomainSampler, RandomSampler
 
 @pytest.fixture
 def nomic_dataset():
-    dataset = NomicDataset(
+    dataset = NomicSupervisedDataset(
         num_hard_negatives=1
     )
     return dataset

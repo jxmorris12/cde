@@ -15,11 +15,12 @@ import tqdm
 
 from cluster_helpers import embed_for_clustering, paired_kmeans, SHOULD_MAXIMIZE_CLUSTER_DISTANCE_FOR_MODEL
 from cluster_helpers_faiss import paired_kmeans_faiss
-from dataset import NomicDataset, RedditDataset
+from dataset import NomicSupervisedDataset, RedditDataset
 from helpers import get_tti_cache_dir, get_rank, get_world_size, md5_hash_kwargs, tqdm_if_main_worker
 
 
 identity = lambda x: x
+
 
 USE_FAISS = True
 
@@ -33,7 +34,7 @@ def get_cache_location_from_kwargs(**kwargs):
 
 
 def _cluster_dataset_uncached(
-        dataset: Union[NomicDataset, RedditDataset], 
+        dataset: datasets.Dataset, 
         query_to_doc: bool,
         model: str,
         query_key: str,
@@ -52,7 +53,7 @@ def _cluster_dataset_uncached(
     
     k = math.ceil(len(X) / batch_size / 2)
 
-    if use_faiss:
+    if USE_FAISS:
         _, assignments = paired_kmeans_faiss(
             q=q,
             X=X,
@@ -110,7 +111,7 @@ def cluster_dataset(
 class Sampler(abc.ABC, torch.utils.data.Sampler):
     def __init__(
             self, 
-            dataset: Union[NomicDataset, RedditDataset], 
+            dataset: Union[NomicSupervisedDataset, RedditDataset], 
             batch_size: int, 
             shuffle: bool, 
             max_num_batches: Optional[int] = None,
@@ -172,13 +173,13 @@ class FixedSubdomainSampler(RandomSampler):
     
     Must have fixed dictionary of subdomains `subdomain_idxs`.
     """
-    dataset: Union[NomicDataset, RedditDataset]
+    dataset: Union[NomicSupervisedDataset, RedditDataset]
     batch_size: int
     max_num_batches: Optional[int]
     batch_assignments: Dict[int, Iterable[int]]
     def __init__(
             self, 
-            dataset: Union[NomicDataset, RedditDataset], 
+            dataset: Union[NomicSupervisedDataset, RedditDataset], 
             batch_size: int, 
             shuffle: bool, 
         ):
@@ -226,10 +227,10 @@ class FixedSubdomainSampler(RandomSampler):
 
 
 class AutoClusterSampler(FixedSubdomainSampler):
-    dataset: datasets.Dataset
+    dataset: Union[NomicSupervisedDataset, RedditDataset]
     def __init__(
             self, 
-            dataset: datasets.Dataset, 
+            dataset: Union[NomicSupervisedDataset, RedditDataset],
             query_to_doc: bool, 
             batch_size: int,
             shuffle: bool,
@@ -256,11 +257,11 @@ class AutoClusterSampler(FixedSubdomainSampler):
             self.batch_assignments[cluster].append(i)
 
 
-class AutoClusterByDomainSampler(FixedSubdomainSampler):
-    dataset: datasets.Dataset
+class AutoClusterWithinDomainSampler(FixedSubdomainSampler):
+    dataset: Union[NomicSupervisedDataset, RedditDataset]
     def __init__(
             self, 
-            dataset: datasets.Dataset, 
+            dataset: Union[NomicSupervisedDataset, RedditDataset],
             query_to_doc: bool, 
             batch_size: int,
             shuffle: bool,
@@ -275,7 +276,7 @@ class AutoClusterByDomainSampler(FixedSubdomainSampler):
         offset = 0
         final_assignments = collections.defaultdict(list)
         for _, data_idxs in self.batch_assignments.items():
-            mini_dataset = dataset.select(data_idxs)
+            mini_dataset = dataset.dataset.select(data_idxs)
             cluster_assignments = cluster_dataset(
                 dataset=mini_dataset,
                 model=model,
@@ -285,14 +286,18 @@ class AutoClusterByDomainSampler(FixedSubdomainSampler):
                 batch_size=batch_size,
             )
 
+            new_cluster_idxs = set()
             for j, cluster in tqdm_if_main_worker(cluster_assignments.items(), leave=False):
                 if isinstance(cluster, list): cluster = cluster[0]
                 if isinstance(cluster, torch.Tensor): cluster = cluster.item()
                 final_assignments[cluster + offset].append(data_idxs[j])
-            offset += len(cluster_assignments)
-        assert len(self.dataset) == len(cluster_assignments)
+                new_cluster_idxs.add(cluster)
+            offset += len(new_cluster_idxs)
+        print(f"expanded {len(self.batch_assignments)} domains to {len(final_assignments)} clusters.")
         self.batch_assignments = final_assignments
         assert sum(map(len, self.batch_assignments.values())) == len(dataset)
+        assert len(set(v for b in self.batch_assignments.values() for v in b)) == len(dataset)
+        assert set(v for b in self.batch_assignments.values() for v in b) == set(range(len(dataset)))
 
 
 def get_sampler(
@@ -322,8 +327,8 @@ def get_sampler(
             query_to_doc=data_args.clustering_query_to_doc, 
             model=data_args.clustering_model,
         )
-    elif strategy == "cluster_in_domain":
-        return AutoClusterByDomainSampler(
+    elif strategy == "cluster_within_domain":
+        return AutoClusterWithinDomainSampler(
             dataset=dataset, 
             batch_size=batch_size,
             shuffle=shuffle,
