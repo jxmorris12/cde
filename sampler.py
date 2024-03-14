@@ -51,7 +51,7 @@ def _cluster_dataset_uncached(
         query_to_doc=query_to_doc,
     )
     
-    k = math.ceil(len(X) / batch_size / 2)
+    k = math.ceil(len(X) / batch_size)
 
     if USE_FAISS:
         _, assignments = paired_kmeans_faiss(

@@ -171,7 +171,7 @@ def load_beir_uncached(dataset: str, split: str) -> Tuple[datasets.Dataset, data
     return corpus, queries, qrels, ance_results
 
 
-def embed_with_cache(model_name: str, cache_name: str, d: datasets.Dataset, col: str) -> datasets.Dataset:
+def embed_with_cache(model_name: str, cache_name: str, d: datasets.Dataset, col: str, save_to_disk: bool = True) -> datasets.Dataset:
     embedder_cache_path = model_name.replace('/', '__')
     # cache_folder = datasets.config.HF_DATASETS_CACHE
     cache_folder = os.path.join(get_tti_cache_dir(), 'corpus_embeddings', embedder_cache_path)
@@ -206,7 +206,8 @@ def embed_with_cache(model_name: str, cache_name: str, d: datasets.Dataset, col:
     
     d = datasets.concatenate_datasets(datasets_list)
     d.set_format("pt")
-    d.save_to_disk(cache_path)
+    if save_to_disk:
+        d.save_to_disk(cache_path)
     return d
 
 
@@ -573,9 +574,10 @@ class NomicUnsupervisedDataset:
     def __init__(self, tokenizer: transformers.AutoTokenizer):
         self.dataset = datasets.load_dataset("nomic-ai/nomic_embed_unsupervised")["train"]
 
-        subdomains_list = self.dataset["dataset"]
         subdomain_idxs = collections.defaultdict(list)
-        for i, subdomain in tqdm.tqdm(enumerate(subdomains_list), total=len(subdomains_list), desc="Counting datasets"):
+        for i in tqdm.trange(len(self.dataset), desc="Counting datasets"):
+            ex = self.dataset[i]
+            subdomain = ex["dataset"]
             subdomain_idxs[subdomain].append(i)
         self.subdomain_idxs = subdomain_idxs
 

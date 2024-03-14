@@ -61,7 +61,9 @@ def embed_for_clustering(
             dataset_fingerprint + "_queries", 
             dataset,
             "query",
+            save_to_disk=False,
         )
+        query_embeddings = query_embeddings["embeds"].half()
         if get_rank() == 0:
             print(f"Embedding {len(dataset)} documents...")
         corpus_embeddings = embed_with_cache(
@@ -69,8 +71,10 @@ def embed_for_clustering(
             dataset_fingerprint + "_documents", 
             dataset,
             "document",
+            save_to_disk=False,
         )
-        return query_embeddings["embeds"], corpus_embeddings["embeds"]
+        corpus_embeddings = corpus_embeddings["embeds"].half()
+        return query_embeddings, corpus_embeddings
     else:
         raise ValueError(f"model {model} not supported")
 

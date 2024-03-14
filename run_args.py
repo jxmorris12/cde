@@ -225,18 +225,17 @@ class TrainingArguments(transformers.TrainingArguments):
             os.environ["WANDB_MODE"] = "disabled"
         ############################################################################
         num_devices = max(1, torch.cuda.device_count())
-        num_cpus = min(64, len(os.sched_getaffinity(0)))
+        num_cpus = min(256, len(os.sched_getaffinity(0)))
         num_workers = int(num_cpus / num_devices)
         self.eval_steps = int(self.eval_steps / num_devices)
         self.save_steps = int(self.save_steps / num_devices)
         self.warmup_steps = int(self.warmup_steps / num_devices)
         if get_rank() == 0:
-            print(f"training with eval_steps = {self.eval_steps} / warmup_steps = {self.warmup_steps} / world_size {get_world_size()}")
+            print(f"training with eval_steps = {self.eval_steps} / num_workers = {num_workers} / warmup_steps = {self.warmup_steps} / world_size {get_world_size()}")
         ############################################################################
         self.dataloader_num_workers = num_workers
         self.dataloader_persistent_workers = (num_workers > 0)
-        self.dataloader_persistent_workers = False # Disabling to see if this fixes an error I had
-        self.dataloader_pin_memory = False
+        self.dataloader_pin_memory = True
         today_date = datetime.date.today()
         formatted_date = today_date.strftime("%Y-%m-%d")
         self.exp_name__no_date = "self.exp_name"

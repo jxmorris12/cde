@@ -138,7 +138,7 @@ class CustomTrainer(transformers.Trainer):
         elif not (self.args.local_rank <= 0):
              return None
         batch = next(iter(dataloader))
-        keys = ["query_input_ids", "document_input_ids", "dataset_input_ids"]
+        keys = ["query_input_ids", "document_input_ids"] # , "dataset_input_ids"]
         tokenizers = [ self.embedder_tokenizer,  self.embedder_tokenizer, self.dataset_tokenizer]
         data = [
                 tokenizer.batch_decode(batch[key][:n], skip_special_tokens=True)
