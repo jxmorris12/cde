@@ -10,7 +10,7 @@ import wandb
 from collate import DocumentQueryCollatorWithPadding
 from dataset import (
     load_reddit_train_and_val, load_synthetic_words_dataset, 
-    BeirDataset, NomicSupervisedDataset
+    BeirDataset, NomicSupervisedDataset, NomicUnsupervisedDataset
 )
 from helpers import get_rank, load_embedder_and_tokenizer, ModelConfig
 from model import get_model_class
@@ -96,12 +96,12 @@ def main():
          'nfcorpus',
          'scidocs', 
          'scifact',
-         'robust04',
+        #  'robust04',    # ??
          'trec-covid',
          'signal1m',
          'fiqa',
          'msmarco',
-         'trec-news',
+        #  'trec-news',   # ??
          'bioasq',
     #############################################
     # these ones are broken, I think:
@@ -134,6 +134,11 @@ def main():
             perc=0.98, 
             supervised=False,
         )
+    elif data_args.dataset == 'nomic_unsupervised':
+        train_dataset = NomicUnsupervisedDataset(
+            tokenizer=embedder_tokenizer
+        )
+        eval_dataset = None
     elif data_args.dataset == 'nomic':
         train_dataset = NomicSupervisedDataset(
             num_hard_negatives=data_args.num_hard_negatives,
@@ -204,7 +209,7 @@ def main():
     checkpoint = get_checkpoint(training_args)
     logging.info("train() loaded checkpoint %s", checkpoint)
     trainer.evaluate_retrieval_datasets(model=model)
-    assert torch.cuda.device_count() > 0, "can't train without CUDA"
+    # assert torch.cuda.device_count() > 0, "can't train without CUDA"
     trainer.train(resume_from_checkpoint=checkpoint)
     trainer.evaluate_retrieval_datasets(model=model)
 

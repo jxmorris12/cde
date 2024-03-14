@@ -1,5 +1,6 @@
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
+import collections
 import copy
 import functools
 import gzip
@@ -106,7 +107,7 @@ def get_ance_results(dataset: str, data_path: str, model_name: str = "msmarco-ro
         def encode(queries, batch_size: int, **kwargs):
             return model.encode_multi_process(queries, batch_size=batch_size, pool=pool)
         model.encode = encode
-
+        print("Loading:", data_path)
         corpus, queries, qrels = HFDataLoader(data_folder=data_path, streaming=False, keep_in_memory=False).load(split="test")
         retriever = RetrievalEvaluator(
             model,
@@ -570,7 +571,15 @@ class NomicUnsupervisedDataset:
     dataset: datasets.Dataset
     tokenizer: transformers.AutoTokenizer
     def __init__(self, tokenizer: transformers.AutoTokenizer):
-        self.dataset = datasets.load_dataset("nomic-ai/nomic-embed-unsupervised")
+        self.dataset = datasets.load_dataset("nomic-ai/nomic_embed_unsupervised")["train"]
+
+        subdomains_list = self.dataset["dataset"]
+        subdomain_idxs = collections.defaultdict(list)
+        for i, subdomain in tqdm.tqdm(enumerate(subdomains_list), total=len(subdomains_list), desc="Counting datasets"):
+            subdomain_idxs[subdomain].append(i)
+        self.subdomain_idxs = subdomain_idxs
+
+        assert len(self.dataset) == 238_998_494
         self.tokenizer = tokenizer
 
     @property

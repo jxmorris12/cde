@@ -263,14 +263,14 @@ class CustomTrainer(transformers.Trainer):
         batch_dataset_inputs = inputs_for_key(inputs, key="batch_dataset")
 
         if self.args.dataset_info == "fake":
-            batch_size = dataset_inputs["input_ids"].shape[0]
+            batch_size = query_inputs["input_ids"].shape[0]
             fake_seq_length = 64
             fake_dataset_input_ids = torch.ones(
-                (batch_size, fake_seq_length), device=dataset_inputs["input_ids"].device,
+                (batch_size, fake_seq_length), device=query_inputs["input_ids"].device,
                 dtype=torch.long
             )
             fake_dataset_attention_mask = torch.ones(
-                (batch_size, fake_seq_length), device=dataset_inputs["input_ids"].device,
+                (batch_size, fake_seq_length), device=query_inputs["input_ids"].device,
                 dtype=torch.long
             )
             query_inputs["dataset_input_ids"] = fake_dataset_input_ids

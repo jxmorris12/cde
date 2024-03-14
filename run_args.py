@@ -97,7 +97,7 @@ class DataArguments:
         default="nomic", 
         metadata={
             "help": "The name of the dataset to use:",
-            "choices": ["synthetic_words", "reddit_supervised", "reddit_unsupervised", "nomic"]
+            "choices": ["synthetic_words", "reddit_supervised", "reddit_unsupervised", "nomic", "nomic_unsupervised"]
         }
     )
     sampling_strategy: str = field(
@@ -133,7 +133,7 @@ class DataArguments:
 @dataclass
 class TrainingArguments(transformers.TrainingArguments):
     dataset_info: str = field(
-        default="random",
+        default="fake",
         metadata={
             "help": "whether to use fake info for dataset (as opposed to our method)",
             "choices": ["random", "batch", "fake"],

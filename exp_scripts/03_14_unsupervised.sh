@@ -1,0 +1,3 @@
+torchrun --nproc_per_node 8 finetune.py --per_device_train_batch_size 224 --per_device_eval_batch_size 224 --use_wandb 1 --bf16 1 --dataset nomic_unsupervised --sampling_strategy domain --num_hard_negatives 7 --exp_name "unsupervised-1-domain" --num_train_epochs 1 --learning_rate 2e-5 --embedder "nomic-ai/nomic-bert-2048"
+
+torchrun --nproc_per_node 8 finetune.py --per_device_train_batch_size 224 --per_device_eval_batch_size 224 --use_wandb 1 --bf16 1 --dataset nomic_unsupervised --sampling_strategy random --num_hard_negatives 7 --exp_name "unsupervised-1-random" --num_train_epochs 1 --learning_rate 2e-5 --embedder "nomic-ai/nomic-bert-2048"
