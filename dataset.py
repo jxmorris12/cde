@@ -1,4 +1,4 @@
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 import collections
 import copy
@@ -26,6 +26,7 @@ from helpers import (
     get_num_proc,
     independent_crop,
     tokenize_dataset, 
+    tqdm_if_main_worker,
 )
 
 
@@ -171,7 +172,120 @@ def load_beir_uncached(dataset: str, split: str) -> Tuple[datasets.Dataset, data
     return corpus, queries, qrels, ance_results
 
 
-def embed_with_cache(model_name: str, cache_name: str, d: datasets.Dataset, col: str, save_to_disk: bool = True) -> datasets.Dataset:
+def _transform_func(tokenizer: transformers.PreTrainedTokenizerFast,
+                    examples: Dict[str, List],
+                    max_length: int): #-> BatchEncoding:
+    batch_dict = tokenizer(
+        examples['input_texts'],
+        max_length=max_length,
+        padding=True,
+        truncation=True
+    )
+
+    return batch_dict
+
+
+
+def move_to_cuda(sample):
+    if len(sample) == 0:
+        return {}
+
+    def _move_to_cuda(maybe_tensor):
+        if torch.is_tensor(maybe_tensor):
+            return maybe_tensor.cuda(non_blocking=True)
+        elif isinstance(maybe_tensor, dict):
+            return {key: _move_to_cuda(value) for key, value in maybe_tensor.items()}
+        elif isinstance(maybe_tensor, list):
+            return [_move_to_cuda(x) for x in maybe_tensor]
+        elif isinstance(maybe_tensor, tuple):
+            return tuple([_move_to_cuda(x) for x in maybe_tensor])
+        elif isinstance(maybe_tensor, Mapping):
+            return type(maybe_tensor)({k: _move_to_cuda(v) for k, v in maybe_tensor.items()})
+        else:
+            return maybe_tensor
+
+    return _move_to_cuda(sample)
+
+def mean_pool(
+    hidden_states: torch.Tensor, attention_mask: torch.Tensor
+) -> torch.Tensor:
+    B, _S, D = hidden_states.shape
+    unmasked_outputs = hidden_states * attention_mask[..., None]
+    pooled_outputs = unmasked_outputs.sum(dim=1) / attention_mask.sum(dim=1)[:, None]
+    assert pooled_outputs.shape == (B, D)
+    return pooled_outputs
+
+
+class DenseEncoder(torch.nn.Module):
+    def __init__(self, model_name_or_path: str, max_seq_length = 128):
+        super().__init__()
+        self.encoder = transformers.AutoModel.from_pretrained(model_name_or_path)
+        if hasattr(self.encoder, "encoder"):
+            print("[DE] taking encoder from encoder-decoder")
+            self.encoder = self.encoder.encoder
+        self.tokenizer = transformers.AutoTokenizer.from_pretrained(model_name_or_path)
+        self.gpu_count = torch.cuda.device_count()
+
+        self.encoder.eval()
+        self.encoder.cuda()
+
+        if self.gpu_count > 1:
+            self.encoder = torch.nn.DataParallel(self.encoder)
+            print(f"[DE] Wrapped DenseEncoder in {self.gpu_count} GPUs")
+        
+        self.max_length = max_seq_length
+
+    @torch.no_grad()
+    def encode(self, sentences, batch_size: int) -> np.ndarray:
+        """ Returns a list of embeddings for the given sentences.
+        Args:
+            sentences (`List[str]`): List of sentences to encode
+            batch_size (`int`): Batch size for the encoding
+
+        Returns:
+            `List[np.ndarray]` or `List[tensor]`: List of embeddings for the given sentences
+        """
+
+        dataset: datasets.Dataset = datasets.Dataset.from_dict({'input_texts': sentences})
+        dataset.set_transform(
+            functools.partial(_transform_func, self.tokenizer, max_length=self.max_length))
+
+        data_collator = transformers.DataCollatorWithPadding(self.tokenizer, pad_to_multiple_of=8)
+        data_loader = torch.utils.data.DataLoader(
+            dataset,
+            batch_size=2048 * self.gpu_count,
+            shuffle=False,
+            drop_last=False,
+            num_workers=64,
+            collate_fn=data_collator,
+            pin_memory=True)
+
+        encoded_embeds = []
+        pbar = tqdm_if_main_worker(
+            data_loader, desc='encoding', 
+            disable=len(sentences) < 128
+        )
+        for batch_dict in pbar:
+            batch_dict = move_to_cuda(batch_dict)
+
+
+            # with torch.cuda.amp.autocast():
+            outputs = self.encoder(**batch_dict)
+            if hasattr(outputs, 'pooler_output'):
+                embeds = outputs.pooler_output
+            else:
+                embeds = mean_pool(
+                    hidden_states=outputs.last_hidden_state,
+                    attention_mask=batch_dict['attention_mask']
+                )
+            embeds = torch.nn.functional.normalize(embeds, p=2, dim=-1)
+            encoded_embeds.append(embeds.cpu().numpy())
+
+        return np.concatenate(encoded_embeds, axis=0)
+
+def embed_with_cache(model_name: str, cache_name: str, d: datasets.Dataset, 
+                     col: str, save_to_disk: bool = True,
+                     model=None, batch_size: int = 8192) -> datasets.Dataset:
     embedder_cache_path = model_name.replace('/', '__')
     # cache_folder = datasets.config.HF_DATASETS_CACHE
     cache_folder = os.path.join(get_tti_cache_dir(), 'corpus_embeddings', embedder_cache_path)
@@ -184,18 +298,23 @@ def embed_with_cache(model_name: str, cache_name: str, d: datasets.Dataset, col:
         d.set_format("pt")
         return d
     
+    print("getting col from dataset")
     texts = d[col]
 
     print("[embed_with_cache] computing embeddings to save at path:", cache_path)
-    from sentence_transformers import SentenceTransformer
-    model = SentenceTransformer(model_name)
-    model.max_seq_length = 128
-    pool = model.start_multi_process_pool()
-    embeddings = model.encode_multi_process(texts, batch_size=2048, pool=pool)
-    model.stop_multi_process_pool(pool)
+    print(f"[embed_with_cache] encoding {len(texts)} with multiprocess pool")
+    if model is None:
+        model = DenseEncoder(model_name, max_seq_length=128)
+
+    embeddings = model.encode(texts, batch_size=batch_size)
+
+    print(f"[embed_with_cache] creating datasets")
+
+    if not save_to_disk:
+        return { "embeds": torch.tensor(embeddings) }
 
     datasets_list = []
-    max_dataset_size = 1_000_000
+    max_dataset_size = 8_000_000
     i = 0
     while i < len(embeddings):
         dataset = datasets.Dataset.from_dict({
@@ -204,10 +323,10 @@ def embed_with_cache(model_name: str, cache_name: str, d: datasets.Dataset, col:
         datasets_list.append(dataset)
         i += max_dataset_size
     
+    print("[embed_with_cache] concatenating datasets")
     d = datasets.concatenate_datasets(datasets_list)
     d.set_format("pt")
-    if save_to_disk:
-        d.save_to_disk(cache_path)
+    d.save_to_disk(cache_path)
     return d
 
 
@@ -333,9 +452,6 @@ class RedditDataset(torch.utils.data.Dataset):
         assert len(self.subreddit_idxs) == len(self.subreddit_keys)
 
         print(f"Loaded {len(self.dataset)} datapoints from {len(self.subreddit_keys)} subreddits")
-
-        # for key in self.subreddit_idxs.keys():
-            # random.shuffle(self.subreddit_idxs[key])
         
         self.pad_token_id = 0 # TODO: Set dynamically based on appropriate tokenizer.
         self.dataset.set_format("pt")
@@ -568,19 +684,44 @@ class NomicSupervisedDataset:
             ######################################################################
         }
 
+
+def get_subdomain_idxs_cached(dataset: datasets.Dataset):
+    cache_folder = os.path.join(get_tti_cache_dir(), "subdomain_idxs")
+    os.makedirs(cache_folder, exist_ok=True)
+    cache_name = dataset._fingerprint + "__sub.p"
+    cache_file_path = os.path.join(cache_folder, cache_name)
+    if os.path.exists(cache_file_path):
+        return pickle.load(open(cache_file_path, 'rb'))
+    else:
+        subdomain_idxs = collections.defaultdict(list)
+        print("Getting subdomains from dataset")
+        subdomains = dataset["dataset"]
+        for i in tqdm.trange(len(dataset), desc="Counting dataset subdomains"):
+            subdomain = subdomains[i]
+            subdomain_idxs[subdomain].append(i)
+        pickle.dump(subdomain_idxs, open(cache_file_path, 'wb'))
+        return subdomain_idxs
+        
+
+NOMIC_UNSUPERVISED_DS_PATH = (
+    "/home/paperspace/.cache/huggingface/datasets/nomic-ai___nomic_embed_unsupervised/default/0.0.0/13f630f335156a50f0e423fe84f6f08bd6a6e612/"
+)
 class NomicUnsupervisedDataset:
     dataset: datasets.Dataset
     tokenizer: transformers.AutoTokenizer
     def __init__(self, tokenizer: transformers.AutoTokenizer):
-        self.dataset = datasets.load_dataset("nomic-ai/nomic_embed_unsupervised")["train"]
-
-        subdomain_idxs = collections.defaultdict(list)
-        for i in tqdm.trange(len(self.dataset), desc="Counting datasets"):
-            ex = self.dataset[i]
-            subdomain = ex["dataset"]
-            subdomain_idxs[subdomain].append(i)
-        self.subdomain_idxs = subdomain_idxs
-
+        print("[NomicUnsupervisedDataset] loading dataset")
+        self.dataset = (
+            datasets.load_dataset(
+                "nomic-ai/nomic_embed_unsupervised", 
+                keep_in_memory=False
+            )["train"]
+            # datasets_fast_load_from_disk(NOMIC_UNSUPERVISED_DS_PATH)["train"]
+        )
+        print("[NomicUnsupervisedDataset] loading subdomain idxs")
+        self.subdomain_idxs = get_subdomain_idxs_cached(
+            dataset=self.dataset
+        )
         assert len(self.dataset) == 238_998_494
         self.tokenizer = tokenizer
 
@@ -593,6 +734,16 @@ class NomicUnsupervisedDataset:
 
     def __len__(self):
         return len(self.dataset)
+    
+    @property
+    def _query_input_ids_key(self) -> str:
+        """The key in the dataset for question input IDs (tokenizer-specific)."""
+        return f'query_input_ids'
+    
+    @property
+    def _document_input_ids_key(self) -> str:
+        """The key in the dataset for document input IDs (tokenizer-specific)."""
+        return f'document_input_ids'
     
     def __getitem__(self, query_id: int) -> Dict[str, torch.Tensor]: 
         ex = self.dataset[query_id]

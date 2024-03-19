@@ -41,8 +41,7 @@ def _cluster_dataset_uncached(
         document_key: str,
         batch_size: int,
     ) -> Dict[int, List[int]]:
-    print("Processing and tokenizing corpus for clustering...")
-    
+    print("[cluster_dataset_uncached] calling embed_for_clustering...")
     q, X = embed_for_clustering(
         dataset=dataset,
         query_key=query_key,
@@ -53,12 +52,13 @@ def _cluster_dataset_uncached(
     
     k = math.ceil(len(X) / batch_size)
 
+    print("--> calling faiss...")
     if USE_FAISS:
         _, assignments = paired_kmeans_faiss(
             q=q,
             X=X,
             k=k,
-            maximize=SHOULD_MAXIMIZE_CLUSTER_DISTANCE_FOR_MODEL[model]
+            # maximize=SHOULD_MAXIMIZE_CLUSTER_DISTANCE_FOR_MODEL[model]
         )
     else:
         _, assignments = paired_kmeans(
@@ -92,8 +92,9 @@ def cluster_dataset(
     )
     print("checking for cluster at file", clustering_hash)
     if os.path.exists(clustering_hash):
-        if get_world_size() > 1:
-            torch.distributed.barrier()
+        # if get_world_size() > 1:
+        #     torch.distributed.barrier()
+        print("-- opening file ... ", clustering_hash)
         return pickle.load(open(clustering_hash, "rb"))
     else:
         result = _cluster_dataset_uncached(
@@ -193,9 +194,12 @@ class FixedSubdomainSampler(RandomSampler):
         self.batch_assignments = self.dataset.subdomain_idxs
         g = torch.Generator()
         g.manual_seed(self.seed)
-        for k in self.batch_assignments.keys():
-            random.Random(self.seed).shuffle(self.batch_assignments[k])
+        if shuffle:
+            for k in tqdm_if_main_worker(self.batch_assignments.keys(), desc="Shuffling clusters", colour="red"):
+                random.Random(self.seed).shuffle(self.batch_assignments[k])
+        print("running assertion")
         assert sum(map(len, self.batch_assignments.values())) == len(dataset)
+        print("done")
     
     def _get_indices(self) -> List[int]:
         g = torch.Generator()
@@ -239,7 +243,7 @@ class AutoClusterSampler(FixedSubdomainSampler):
         super().__init__(
             dataset=dataset, 
             batch_size=batch_size, 
-            shuffle=shuffle,
+            shuffle=False,
         )
         self.dataset = dataset
         cluster_assignments = cluster_dataset(
@@ -267,16 +271,29 @@ class AutoClusterWithinDomainSampler(FixedSubdomainSampler):
             shuffle: bool,
             model: str,
         ):
+        print("calling super().__init__()")
         super().__init__(
             dataset=dataset, 
             batch_size=batch_size, 
-            shuffle=shuffle,
+            shuffle=False,
         )
         self.dataset = dataset
         offset = 0
         final_assignments = collections.defaultdict(list)
-        for _, data_idxs in self.batch_assignments.items():
+
+        def get_length(ex: Dict, input_column, output_column) -> Dict:
+            ex[output_column] = map(len, ex[input_column])
+            return ex
+        
+        # TODO: Cache all this; it's so slow.
+        print("sorting subdomains")
+        subdomains_smallest_first = sorted(self.batch_assignments.items(), key=lambda x: len(x[1]))
+        # subdomains_largest_first = sorted(self.batch_assignments.items(), key=lambda x: -len(x[1]))
+        for _, data_idxs in subdomains_smallest_first:
+            perc = offset / len(self.dataset) * 100
+            print(f"({perc:.1f}%) selecting {len(data_idxs)} indices for clustering")
             mini_dataset = dataset.dataset.select(data_idxs)
+            print("[autocluster] calling cluster_dataset")
             cluster_assignments = cluster_dataset(
                 dataset=mini_dataset,
                 model=model,
@@ -286,6 +303,7 @@ class AutoClusterWithinDomainSampler(FixedSubdomainSampler):
                 batch_size=batch_size,
             )
 
+            print("[autocluster] collecting cluster")
             new_cluster_idxs = set()
             for j, cluster in tqdm_if_main_worker(cluster_assignments.items(), leave=False):
                 if isinstance(cluster, list): cluster = cluster[0]
@@ -295,6 +313,7 @@ class AutoClusterWithinDomainSampler(FixedSubdomainSampler):
             offset += len(new_cluster_idxs)
         print(f"expanded {len(self.batch_assignments)} domains to {len(final_assignments)} clusters.")
         self.batch_assignments = final_assignments
+        print("...got final assignments...")
         assert sum(map(len, self.batch_assignments.values())) == len(dataset)
         assert len(set(v for b in self.batch_assignments.values() for v in b)) == len(dataset)
         assert set(v for b in self.batch_assignments.values() for v in b) == set(range(len(dataset)))

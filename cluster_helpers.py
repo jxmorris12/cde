@@ -1,5 +1,6 @@
-from typing import Iterable, Tuple, Union
+from typing import Dict, Tuple
 
+import functools
 import math
 
 import datasets
@@ -53,27 +54,81 @@ def embed_for_clustering(
         return queries, corpus
     elif model == "gtr_base":
         assert query_to_doc
-        dataset_fingerprint =  dataset._fingerprint
+        dataset_fingerprint = dataset._fingerprint
+        num_gpus = torch.cuda.device_count()
         if get_rank() == 0:
-            print(f"Embedding {len(dataset)} queries...")
+            print(f"Embedding {len(dataset)} queries with {num_gpus} GPUs...")
+
+        from dataset import DenseEncoder
+        model = DenseEncoder( "sentence-transformers/gtr-t5-base")
+
+        # https://github.com/UKPLab/sentence-transformers/blob/87f4180d7d197d4a471d627afc788b62a81c0214/sentence_transformers/SentenceTransformer.py#L392
+        print("computing query embeddings")
+
+        def add_length_columns(ex: Dict) -> Dict:
+            ex["query_length"] = list(map(len, ex["query"]))
+            ex["document_length"] = list(map(len, ex["document"]))
+            return ex
+
+        dataset = dataset.add_column("idx", range(len(dataset)))
+        print("[embed] computing lengths")
+        dataset = dataset.map(add_length_columns, batched=True)
+        print("[embed] flattening")
+        dataset = dataset.flatten_indices()
+        print("[embed] sorting by query length")
+        dataset = dataset.sort("query_length")
+        
+        print("[embed] embedding queries")
         query_embeddings = embed_with_cache(
             "sentence-transformers/gtr-t5-base", 
             dataset_fingerprint + "_queries", 
             dataset,
             "query",
             save_to_disk=False,
+            model=model,
         )
-        query_embeddings = query_embeddings["embeds"].half()
+        print("halving query embeddings")
+        query_embeddings = query_embeddings["embeds"].numpy()
+
+        print("adding query embeddings to datsaet")
+        dataset = dataset.add_column("query_embedding", query_embeddings)
+
+        print("[embed] sorting by doc length")
+        dataset = dataset.sort("document_length")
+
         if get_rank() == 0:
-            print(f"Embedding {len(dataset)} documents...")
+            print(f"Embedding {len(dataset)} documents with {num_gpus} GPUs...")        
+    
+        print(f"[embed_with_cache] computing corpus_embeddings i={i}")
         corpus_embeddings = embed_with_cache(
             "sentence-transformers/gtr-t5-base", 
-            dataset_fingerprint + "_documents", 
+            dataset._fingerprint + "_documents", 
             dataset,
             "document",
             save_to_disk=False,
-        )
-        corpus_embeddings = corpus_embeddings["embeds"].half()
+            model=model,
+        )["embeds"].numpy()
+        print("[embed_with_cache] got corpus embeddings")
+        
+        dataset = dataset.add_column("document_embedding", corpus_embeddings)
+
+        print("[embed_for_clustering] re-sorting")
+        dataset = dataset.sort("idx")
+        print("[embed_for_clustering] remapping embeddings")
+        query_embeddings = []
+        corpus_embeddings = []
+        for i in tqdm_if_main_worker(len(dataset)):
+            ex = dataset[i]
+            query_embeddings.append(ex["query_embedding"])
+            corpus_embeddings.append(ex["corpus_embedding"])
+        query_embeddings = torch.tensor(query_embeddings).half()
+        corpus_embeddings = torch.tensor(corpus_embeddings).half()
+
+        assert not query_embeddings.isnan().any(), "got nan query embeddings"
+        assert not corpus_embeddings.isnan().any(), "got nan corpus embeddings"
+
+        print("[embed_for_clustering] returning all embeddings")
+        breakpoint()
         return query_embeddings, corpus_embeddings
     else:
         raise ValueError(f"model {model} not supported")

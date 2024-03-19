@@ -1,27 +1,21 @@
 from typing import Iterable, Tuple
 
-import os
-
 import faiss
 import torch
-
-
-from helpers import tqdm_if_main_worker
 
 
 def paired_kmeans_faiss(
     q: torch.Tensor,
     X: torch.Tensor, 
     k: int,
-    max_iters: int = 100, 
-    tol: float = 1e-3, 
-    maximize: bool = True,
-    initialization_strategy: str = "kmeans++", # ["kmeans++", "random"]
+    max_iters: int = 80, 
     seed: int = 42
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     # https://github.com/facebookresearch/faiss/blob/dafdff110489db7587b169a0afee8470f220d295/faiss/python/extra_wrappers.py#L437
     # https://github.com/facebookresearch/faiss/blob/dafdff110489db7587b169a0afee8470f220d295/faiss/Clustering.cpp#L56
+    # https://github.com/facebookresearch/faiss/blob/main/faiss/Clustering.h
     assert q.shape == X.shape
+    print("[paired_kmeans_faiss]", q.shape, X.shape, k)
     paired_vectors = torch.cat(
         [
             torch.cat((q, X), dim=0),
@@ -31,12 +25,20 @@ def paired_kmeans_faiss(
     paired_vectors[0] /= paired_vectors.norm(p=2)
 
     dim = paired_vectors[0].numel()
+    # TODO: How to make kmeans use more gpu mem?
     kmeans = faiss.Kmeans(
-        dim, k, niter=max_iters, 
-        gpu=True, verbose=True,
+        dim, k,
+        niter=max_iters, 
+        nredo=3,
+        gpu=True, 
+        verbose=True,
         spherical=True,
+        decode_block_size=2**16,
         seed=seed,
     )
+    # otherwise the kmeans implementation sub-samples the training set
+    # to <= 256 points per centroid
+    kmeans.max_points_per_centroid = 512
     kmeans.train(paired_vectors)
 
     queries = paired_vectors[:len(q)]
