@@ -70,6 +70,8 @@ def embed_for_clustering(
             ex["document_length"] = list(map(len, ex["document"]))
             return ex
 
+        dataset.set_format("pt")
+
         dataset = dataset.add_column("idx", range(len(dataset)))
         print("[embed] computing lengths")
         dataset = dataset.map(add_length_columns, batched=True)
@@ -88,47 +90,42 @@ def embed_for_clustering(
             model=model,
         )
         print("halving query embeddings")
-        query_embeddings = query_embeddings["embeds"].numpy()
-
-        print("adding query embeddings to datsaet")
-        dataset = dataset.add_column("query_embedding", query_embeddings)
+        query_embeddings = query_embeddings["embeds"].half()
+        assert not query_embeddings.isnan().any(), "got nan query embeddings"
+        
 
         print("[embed] sorting by doc length")
+        query_output_idxs = dataset["idx"]
         dataset = dataset.sort("document_length")
-
-        if get_rank() == 0:
-            print(f"Embedding {len(dataset)} documents with {num_gpus} GPUs...")        
+        corpus_output_idxs = dataset["idx"]
     
-        print(f"[embed_with_cache] computing corpus_embeddings i={i}")
+        print(f"[embed_with_cache] computing corpus_embeddings num_gpus={num_gpus}")
         corpus_embeddings = embed_with_cache(
             "sentence-transformers/gtr-t5-base", 
             dataset._fingerprint + "_documents", 
             dataset,
             "document",
+            # save_to_disk=True,
             save_to_disk=False,
             model=model,
-        )["embeds"].numpy()
+        )
+        corpus_embeddings = torch.tensor(
+            corpus_embeddings["embeds"]).half()
         print("[embed_with_cache] got corpus embeddings")
-        
-        dataset = dataset.add_column("document_embedding", corpus_embeddings)
 
-        print("[embed_for_clustering] re-sorting")
-        dataset = dataset.sort("idx")
-        print("[embed_for_clustering] remapping embeddings")
-        query_embeddings = []
-        corpus_embeddings = []
-        for i in tqdm_if_main_worker(len(dataset)):
-            ex = dataset[i]
-            query_embeddings.append(ex["query_embedding"])
-            corpus_embeddings.append(ex["corpus_embedding"])
-        query_embeddings = torch.tensor(query_embeddings).half()
-        corpus_embeddings = torch.tensor(corpus_embeddings).half()
-
-        assert not query_embeddings.isnan().any(), "got nan query embeddings"
         assert not corpus_embeddings.isnan().any(), "got nan corpus embeddings"
 
-        print("[embed_for_clustering] returning all embeddings")
-        breakpoint()
+        print("[embed_with_cache] remapping embeddings")
+        qidxs = []
+        cidxs = []
+        for i in tqdm.trange(len(dataset), desc='remapping embeddings', colour='MAGENTA', leave=False):
+            # TODO: vectorize this
+            #       (https://discuss.pytorch.org/t/reverse-inverse-indices-torch-unique/114521/5?u=jxmorris12)
+            qidxs.append((query_output_idxs == i).int().argmax())
+            cidxs.append((corpus_output_idxs == i).int().argmax())
+        query_embeddings = query_embeddings[qidxs]
+        corpus_embeddings = corpus_embeddings[cidxs]
+        print("returning all embeddings")
         return query_embeddings, corpus_embeddings
     else:
         raise ValueError(f"model {model} not supported")

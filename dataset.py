@@ -299,6 +299,7 @@ def embed_with_cache(model_name: str, cache_name: str, d: datasets.Dataset,
         return d
     
     print("getting col from dataset")
+    d = d.flatten_indices()
     texts = d[col]
 
     print("[embed_with_cache] computing embeddings to save at path:", cache_path)

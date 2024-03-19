@@ -8,7 +8,7 @@ def paired_kmeans_faiss(
     q: torch.Tensor,
     X: torch.Tensor, 
     k: int,
-    max_iters: int = 80, 
+    max_iters: int = 100, 
     seed: int = 42
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     # https://github.com/facebookresearch/faiss/blob/dafdff110489db7587b169a0afee8470f220d295/faiss/python/extra_wrappers.py#L437
