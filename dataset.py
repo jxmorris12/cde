@@ -172,18 +172,17 @@ def load_beir_uncached(dataset: str, split: str) -> Tuple[datasets.Dataset, data
     return corpus, queries, qrels, ance_results
 
 
-def _transform_func(tokenizer: transformers.PreTrainedTokenizerFast,
+def tokenize_transform_func(tokenizer: transformers.PreTrainedTokenizerFast,
                     examples: Dict[str, List],
+                    col: str,
                     max_length: int): #-> BatchEncoding:
     batch_dict = tokenizer(
-        examples['input_texts'],
+        examples[col],
         max_length=max_length,
         padding=True,
         truncation=True
     )
-
     return batch_dict
-
 
 
 def move_to_cuda(sample):
@@ -236,7 +235,7 @@ class DenseEncoder(torch.nn.Module):
         self.max_length = max_seq_length
 
     @torch.no_grad()
-    def encode(self, sentences, batch_size: int) -> np.ndarray:
+    def encode(self, dataset: datasets.Dataset, col: str, batch_size: int) -> np.ndarray:
         """ Returns a list of embeddings for the given sentences.
         Args:
             sentences (`List[str]`): List of sentences to encode
@@ -246,28 +245,27 @@ class DenseEncoder(torch.nn.Module):
             `List[np.ndarray]` or `List[tensor]`: List of embeddings for the given sentences
         """
 
-        dataset: datasets.Dataset = datasets.Dataset.from_dict({'input_texts': sentences})
         dataset.set_transform(
-            functools.partial(_transform_func, self.tokenizer, max_length=self.max_length))
+            functools.partial(tokenize_transform_func, self.tokenizer, col=col, max_length=self.max_length))
 
         data_collator = transformers.DataCollatorWithPadding(self.tokenizer, pad_to_multiple_of=8)
         data_loader = torch.utils.data.DataLoader(
             dataset,
-            batch_size=2048 * self.gpu_count,
+            batch_size=batch_size * self.gpu_count,
             shuffle=False,
             drop_last=False,
-            num_workers=64,
+            num_workers=8 * self.gpu_count,
             collate_fn=data_collator,
-            pin_memory=True)
+            pin_memory=True
+        )
 
         encoded_embeds = []
         pbar = tqdm_if_main_worker(
             data_loader, desc='encoding', 
-            disable=len(sentences) < 128
+            disable=(dataset.num_rows < 128)
         )
         for batch_dict in pbar:
             batch_dict = move_to_cuda(batch_dict)
-
 
             # with torch.cuda.amp.autocast():
             outputs = self.encoder(**batch_dict)
@@ -299,15 +297,19 @@ def embed_with_cache(model_name: str, cache_name: str, d: datasets.Dataset,
         return d
     
     print("getting col from dataset")
-    d = d.flatten_indices()
-    texts = d[col]
+    # d = d.flatten_indices()
+    # texts = list(d[i][col] for i in tqdm.trange(len(d), desc=f"stacking column [{col}]", leave=False))
+    d.set_format(type=None, columns=[col]) # get python objects (strings!)
+
+    all_other_colums = [c for c in d.column_names if c != col]
+    d_subset = d.remove_columns(all_other_colums)
 
     print("[embed_with_cache] computing embeddings to save at path:", cache_path)
-    print(f"[embed_with_cache] encoding {len(texts)} with multiprocess pool")
+    print(f"[embed_with_cache] encoding {len(d)}")
     if model is None:
         model = DenseEncoder(model_name, max_seq_length=128)
 
-    embeddings = model.encode(texts, batch_size=batch_size)
+    embeddings = model.encode(d_subset, col, batch_size=batch_size)
 
     print(f"[embed_with_cache] creating datasets")
 

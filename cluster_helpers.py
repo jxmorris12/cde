@@ -1,6 +1,5 @@
 from typing import Dict, Tuple
 
-import functools
 import math
 
 import datasets
@@ -56,6 +55,7 @@ def embed_for_clustering(
         assert query_to_doc
         dataset_fingerprint = dataset._fingerprint
         num_gpus = torch.cuda.device_count()
+        # num_proc = len(os.sched_getaffinity(0))
         if get_rank() == 0:
             print(f"Embedding {len(dataset)} queries with {num_gpus} GPUs...")
 
@@ -70,17 +70,23 @@ def embed_for_clustering(
             ex["document_length"] = list(map(len, ex["document"]))
             return ex
 
+        dataset = dataset.add_column("idx", range(len(dataset)))
+        print("[embed_with_cache] computing lengths")
+        # dataset = dataset.map(
+        #     add_length_columns,
+        #     batched=True,
+        #     batch_size=12_000,
+        #     # num_proc=num_proc,
+        #     num_proc=12,
+        #     keep_in_memory=True
+        # )
         dataset.set_format("pt")
 
-        dataset = dataset.add_column("idx", range(len(dataset)))
-        print("[embed] computing lengths")
-        dataset = dataset.map(add_length_columns, batched=True)
-        print("[embed] flattening")
-        dataset = dataset.flatten_indices()
-        print("[embed] sorting by query length")
-        dataset = dataset.sort("query_length")
+        keep_in_memory = True
+        print("[embed_with_cache] sorting by query length")
+        # dataset = dataset.sort("query_length", keep_in_memory=keep_in_memory)
         
-        print("[embed] embedding queries")
+        print("[embed_with_cache] embedding queries")
         query_embeddings = embed_with_cache(
             "sentence-transformers/gtr-t5-base", 
             dataset_fingerprint + "_queries", 
@@ -92,11 +98,13 @@ def embed_for_clustering(
         print("halving query embeddings")
         query_embeddings = query_embeddings["embeds"].half()
         assert not query_embeddings.isnan().any(), "got nan query embeddings"
-        
+    
 
-        print("[embed] sorting by doc length")
+        # print("[embed_with_cache] flatten indices again")
+        # dataset = dataset.flatten_indices(keep_in_memory=keep_in_memory)
+        # print("[embed_with_cache] sorting by doc length")
         query_output_idxs = dataset["idx"]
-        dataset = dataset.sort("document_length")
+        # dataset = dataset.sort("document_length", keep_in_memory=keep_in_memory)
         corpus_output_idxs = dataset["idx"]
     
         print(f"[embed_with_cache] computing corpus_embeddings num_gpus={num_gpus}")
@@ -105,27 +113,32 @@ def embed_for_clustering(
             dataset._fingerprint + "_documents", 
             dataset,
             "document",
-            # save_to_disk=True,
             save_to_disk=False,
             model=model,
         )
-        corpus_embeddings = torch.tensor(
-            corpus_embeddings["embeds"]).half()
+        corpus_embeddings = corpus_embeddings["embeds"].half()
         print("[embed_with_cache] got corpus embeddings")
 
         assert not corpus_embeddings.isnan().any(), "got nan corpus embeddings"
 
         print("[embed_with_cache] remapping embeddings")
-        qidxs = []
-        cidxs = []
-        for i in tqdm.trange(len(dataset), desc='remapping embeddings', colour='MAGENTA', leave=False):
-            # TODO: vectorize this
-            #       (https://discuss.pytorch.org/t/reverse-inverse-indices-torch-unique/114521/5?u=jxmorris12)
-            qidxs.append((query_output_idxs == i).int().argmax())
-            cidxs.append((corpus_output_idxs == i).int().argmax())
+        ##################################################################
+        # qidxs = []
+        # cidxs = []
+        # for i in tqdm.trange(len(dataset), desc='remapping embeddings', colour='MAGENTA', leave=False):
+        #     # TODO: vectorize this
+        #     #       (https://discuss.pytorch.org/t/reverse-inverse-indices-torch-unique/114521/5?u=jxmorris12)
+        #     qidxs.append((query_output_idxs == i).int().argmax())
+        #     cidxs.append((corpus_output_idxs == i).int().argmax())
+        qidxs = torch.zeros(len(dataset), dtype=torch.long)
+        qidxs[query_output_idxs] = torch.arange(len(dataset), dtype=torch.long)
+        cidxs = torch.zeros(len(dataset), dtype=torch.long)
+        cidxs[corpus_output_idxs] = torch.arange(len(dataset), dtype=torch.long)
+        ##################################################################
         query_embeddings = query_embeddings[qidxs]
         corpus_embeddings = corpus_embeddings[cidxs]
-        print("returning all embeddings")
+        avg_sim = (corpus_embeddings[:100] @ query_embeddings[:100].T).diag().mean()
+        print(f"[embed_with_cache] returning all embeddings / avg_sim={avg_sim:.2f}")
         return query_embeddings, corpus_embeddings
     else:
         raise ValueError(f"model {model} not supported")

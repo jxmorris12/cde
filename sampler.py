@@ -2,6 +2,7 @@ from typing import Dict, Iterable, List, Optional, Union
 
 import abc
 import collections
+import gc
 import logging
 import math
 import os
@@ -105,6 +106,8 @@ def cluster_dataset(
             document_key=document_key,
             batch_size=batch_size,
         )
+        gc.collect()
+        torch.cuda.empty_cache()
         pickle.dump(result, open(clustering_hash, "wb"))
         return result
 
@@ -280,19 +283,15 @@ class AutoClusterWithinDomainSampler(FixedSubdomainSampler):
         self.dataset = dataset
         offset = 0
         final_assignments = collections.defaultdict(list)
-
-        def get_length(ex: Dict, input_column, output_column) -> Dict:
-            ex[output_column] = map(len, ex[input_column])
-            return ex
         
-        # TODO: Cache all this; it's so slow.
+        # TODO: Cache all this; it's slow.
         print("sorting subdomains")
         subdomains_smallest_first = sorted(self.batch_assignments.items(), key=lambda x: len(x[1]))
         # subdomains_largest_first = sorted(self.batch_assignments.items(), key=lambda x: -len(x[1]))
-        for _, data_idxs in subdomains_smallest_first:
-            perc = offset / len(self.dataset) * 100
-            print(f"({perc:.1f}%) selecting {len(data_idxs)} indices for clustering")
-            mini_dataset = dataset.dataset.select(data_idxs)
+        for j, (_, data_idxs) in enumerate(subdomains_smallest_first):
+            perc = (j + 1) / len(self.batch_assignments) * 100
+            print(f"({j + 1} / {len(self.batch_assignments)} -- {perc:.1f}%) selecting {len(data_idxs)} indices for clustering")
+            mini_dataset = dataset.dataset.select(data_idxs, keep_in_memory=True)
             print("[autocluster] calling cluster_dataset")
             cluster_assignments = cluster_dataset(
                 dataset=mini_dataset,
