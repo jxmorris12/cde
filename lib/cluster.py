@@ -10,7 +10,6 @@ import datasets
 import torch
 import tqdm
 
-
 from lib.cluster_faiss import paired_kmeans_faiss
 from bm25_pt.bm25 import TokenizedBM25
 
@@ -18,12 +17,17 @@ from .dist import (
     get_rank, 
     get_world_size, 
 )
-from .embed import embed_with_cache
+from .embed import (
+    DenseEncoder, 
+    embed_with_cache,
+)
 from .misc import (
     get_cache_location_from_kwargs,
     tqdm_if_main_worker
 )
-from .tensor import maxsim
+from .tensor import (
+    maxsim,
+)
 
 
 # Whether to maximize distances
@@ -72,8 +76,7 @@ def embed_for_clustering(
         if get_rank() == 0:
             print(f"Embedding {len(dataset)} queries with {num_gpus} GPUs...")
 
-        from dataset import DenseEncoder
-        model = DenseEncoder( "sentence-transformers/gtr-t5-base")
+        model = DenseEncoder("sentence-transformers/gtr-t5-base")
 
         # https://github.com/UKPLab/sentence-transformers/blob/87f4180d7d197d4a471d627afc788b62a81c0214/sentence_transformers/SentenceTransformer.py#L392
         print("[embed_with_cache] computing query embeddings")

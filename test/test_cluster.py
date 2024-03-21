@@ -29,6 +29,11 @@ def tiny_dataset() -> datasets.Dataset:
     dataset = dataset.map(
         tokenize, batched=True, keep_in_memory=True)
     dataset.set_format("pt")
+
+    dataset.set_format(type=None, columns=["text"])
+    dataset = dataset.add_column("query", dataset["text"])
+    dataset = dataset.add_column("document", dataset["text"])
+
     return dataset
 
 

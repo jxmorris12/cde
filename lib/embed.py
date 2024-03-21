@@ -1,3 +1,5 @@
+from typing import Dict, List, Mapping
+
 import functools
 import os
 
@@ -6,27 +8,75 @@ import numpy as np
 import torch
 import transformers
 
-from .misc import tqdm_if_main_worker
+from .misc import (
+    datasets_fast_load_from_disk, 
+    get_tti_cache_dir,
+    tqdm_if_main_worker,
+)
+from .tensor import (
+    mean_pool,
+)
+
+
+def move_to_cuda(sample):
+    if len(sample) == 0:
+        return {}
+    elif not torch.cuda.is_available():
+        return sample
+
+    def _move_to_cuda(maybe_tensor):
+        if torch.is_tensor(maybe_tensor):
+            return maybe_tensor.cuda(non_blocking=True)
+        elif isinstance(maybe_tensor, dict):
+            return {key: _move_to_cuda(value) for key, value in maybe_tensor.items()}
+        elif isinstance(maybe_tensor, list):
+            return [_move_to_cuda(x) for x in maybe_tensor]
+        elif isinstance(maybe_tensor, tuple):
+            return tuple([_move_to_cuda(x) for x in maybe_tensor])
+        elif isinstance(maybe_tensor, Mapping):
+            return type(maybe_tensor)({k: _move_to_cuda(v) for k, v in maybe_tensor.items()})
+        else:
+            return maybe_tensor
+
+    return _move_to_cuda(sample)
 
 
 class DenseEncoder(torch.nn.Module):
     def __init__(self, model_name_or_path: str, max_seq_length = 128):
         super().__init__()
-        self.encoder = transformers.AutoModel.from_pretrained(model_name_or_path)
+        self.encoder = transformers.AutoModel.from_pretrained(
+            model_name_or_path)
         if hasattr(self.encoder, "encoder"):
             print("[DE] taking encoder from encoder-decoder")
             self.encoder = self.encoder.encoder
-        self.tokenizer = transformers.AutoTokenizer.from_pretrained(model_name_or_path)
+        self.tokenizer = transformers.AutoTokenizer.from_pretrained(
+            model_name_or_path)
         self.gpu_count = torch.cuda.device_count()
 
         self.encoder.eval()
-        self.encoder.cuda()
+
+        if self.gpu_count > 0:
+            self.encoder.cuda()
 
         if self.gpu_count > 1:
             self.encoder = torch.nn.DataParallel(self.encoder)
             print(f"[DE] Wrapped DenseEncoder in {self.gpu_count} GPUs")
         
         self.max_length = max_seq_length
+
+    def tokenize_transform(
+            self,
+            examples: Dict[str, List],
+            col: str,
+            max_length: int): #-> BatchEncoding:
+        texts = examples[col]
+        batch_dict = self.tokenizer(
+            texts,
+            max_length=max_length,
+            padding=True,
+            truncation=True
+        )
+        return batch_dict
 
     @torch.no_grad()
     def encode(self, dataset: datasets.Dataset, col: str, batch_size: int) -> np.ndarray:
@@ -40,23 +90,27 @@ class DenseEncoder(torch.nn.Module):
         """
         os.environ["TOKENIZERS_PARALLELISM"] = "1"
         dataset = dataset.map(
-            functools.partial(tokenize_transform_func, self.tokenizer, col=col, max_length=self.max_length),
+            functools.partial(
+                self.tokenize_transform, 
+                col=col, 
+                max_length=self.max_length
+            ),
             batch_size=10_000,
             batched=True,
             num_proc=None,
-            # num_proc=len(os.sched_getaffinity(0)),
             keep_in_memory=False,
             remove_columns=[col],
             desc=f"Tokenizing {col}"
         )
 
         data_collator = transformers.DataCollatorWithPadding(self.tokenizer, pad_to_multiple_of=8)
+        num_workers = max(1, self.gpu_count)
         data_loader = torch.utils.data.DataLoader(
             dataset,
-            batch_size=batch_size * self.gpu_count,
+            batch_size=batch_size * num_workers,
             shuffle=False,
             drop_last=False,
-            num_workers=self.gpu_count, # 2 # 2 * self.gpu_count,
+            num_workers=num_workers, 
             collate_fn=data_collator,
             persistent_workers=True,
             pin_memory=True
@@ -70,7 +124,7 @@ class DenseEncoder(torch.nn.Module):
         for batch_dict in pbar:
             batch_dict = move_to_cuda(batch_dict)
 
-            # with torch.cuda.amp.autocast():
+            # TODO: Support float16 inference.
             outputs = self.encoder(**batch_dict)
             if hasattr(outputs, 'pooler_output'):
                 embeds = outputs.pooler_output
@@ -86,11 +140,11 @@ class DenseEncoder(torch.nn.Module):
         print(f"cleaned {num_cleaned_cache_files} files")
         return np.concatenate(encoded_embeds, axis=0)
 
+
 def embed_with_cache(model_name: str, cache_name: str, d: datasets.Dataset, 
                      col: str, save_to_disk: bool = True,
                      model=None, batch_size: int = 4096) -> datasets.Dataset:
     embedder_cache_path = model_name.replace('/', '__')
-    # cache_folder = datasets.config.HF_DATASETS_CACHE
     cache_folder = os.path.join(get_tti_cache_dir(), 'corpus_embeddings', embedder_cache_path)
     os.makedirs(cache_folder, exist_ok=True)
     cache_path = os.path.join(cache_folder, cache_name) #  + "_small")

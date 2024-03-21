@@ -1,7 +1,7 @@
-import abc
-
 import torch
 import transformers
+
+from lib.tensor import mean_pool
 
 
 def limit_layers(model: transformers.PreTrainedModel, n_layers: int) -> None:
@@ -20,16 +20,6 @@ def disable_dropout(model: torch.nn.Module):
     print(
         f"Disabled {len(dropout_modules)} dropout modules from model type {type(model)}"
     )
-
-
-def mean_pool(
-    hidden_states: torch.Tensor, attention_mask: torch.Tensor
-) -> torch.Tensor:
-    B, S, D = hidden_states.shape
-    unmasked_outputs = hidden_states * attention_mask[..., None]
-    pooled_outputs = unmasked_outputs.sum(dim=1) / attention_mask.sum(dim=1)[:, None]
-    assert pooled_outputs.shape == (B, D)
-    return pooled_outputs
 
 
 class EncoderDecoderWithDatasetEmbedder(transformers.PreTrainedModel):
