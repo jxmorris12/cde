@@ -1,6 +1,9 @@
+import math
+
 import torch
 
-from .misc import get_rank, get_world_size
+from .dist import gather_sum, get_rank, get_world_size
+
 
 def slice_sparse_tensor_rows(t: torch.sparse.Tensor, min_row: int, max_row: int) -> torch.sparse.Tensor:
     assert min_row < max_row, f"can't slice from row {min_row} to {max_row}"
@@ -24,7 +27,10 @@ def slice_tensor_rows(t: torch.Tensor, min_row: int, max_row: int) -> torch.Tens
 
 
 @torch.no_grad
-def maxsim(X: torch.Tensor, y: torch.Tensor, maximize: bool, chunk_size: int = 8_000) -> torch.Tensor:
+def maxsim(
+    X: torch.Tensor, y: torch.Tensor, 
+    maximize: bool, chunk_size: int = 8_000,
+    debug_mem_usage: bool = False) -> torch.Tensor:
     device = X.device
     n_samples = X.shape[0]
 
@@ -43,8 +49,8 @@ def maxsim(X: torch.Tensor, y: torch.Tensor, maximize: bool, chunk_size: int = 8
     for i in range(splits_start_idx, splits_end_idx, chunk_size):
         start, end = i, min(i + chunk_size, n_samples)
         sub_x = slice_tensor_rows(X, start, end)
-        if DEBUG_MEM: print(f"[maxsim] step {i} cuda mem free/total = {torch.cuda.mem_get_info()}")
-        if DEBUG_MEM: print("sub_x.shape:", sub_x.shape, "//", "y.shape:", y.shape)
+        if debug_mem_usage: print(f"[maxsim] step {i} cuda mem free/total = {torch.cuda.mem_get_info()}")
+        if debug_mem_usage: print("[maxsim] sub_x.shape:", sub_x.shape, "//", "y.shape:", y.shape)
         sub_sim = sub_x @ y # TODO – Implement sparse max here to save mem!
         sub_sim = sub_sim
         if maximize:

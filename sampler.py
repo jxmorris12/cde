@@ -12,7 +12,7 @@ import datasets
 import torch
 
 from dataset import NomicSupervisedDataset, RedditDataset
-from helpers import get_tti_cache_dir, get_rank, get_world_size, md5_hash_kwargs, tqdm_if_main_worker
+from lib import get_tti_cache_dir, get_rank, get_world_size, md5_hash_kwargs, tqdm_if_main_worker
 
 
 class Sampler(abc.ABC, torch.utils.data.Sampler):

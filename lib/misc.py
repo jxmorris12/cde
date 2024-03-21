@@ -6,8 +6,6 @@ import json
 import hashlib
 import itertools
 import logging
-import math
-import multiprocessing
 import os
 import pickle
 import random
@@ -19,6 +17,8 @@ import numpy as np
 import torch
 import tqdm
 import transformers
+
+from .dist import get_rank
 
 
 def get_tti_cache_dir() -> str:
@@ -38,51 +38,6 @@ def get_cache_location_from_kwargs(**kwargs):
     os.makedirs(cache_location, exist_ok=True)
     return os.path.join(cache_location, md5_hash_kwargs(**kwargs))
 
-
-def gather(t: torch.Tensor) -> torch.Tensor:
-    # torch.distributed.nn.all_gather scales by world size since the reduce op is SUM
-    # https://github.com/pytorch/pytorch/issues/58005
-    # only should use torch.distributed.nn.all_gather if we implement a `local_loss`
-    # like: https://github.com/mlfoundations/open_clip/issues/616
-    world_size = get_world_size()
-    if world_size == 1:
-        return t
-
-    if t.ndim == 0:
-        t = t.unsqueeze(0)
-
-    gathered = [torch.empty_like(t) for _ in range(world_size)]
-    torch.distributed.all_gather(gathered, t)
-    gathered[get_rank()] = t
-    return torch.cat(gathered, dim=0)
-
-
-def gather_sum(t: torch.Tensor) -> torch.Tensor:
-    # torch.distributed.nn.all_gather scales by world size since the reduce op is SUM
-    # https://github.com/pytorch/pytorch/issues/58005
-    # only should use torch.distributed.nn.all_gather if we implement a `local_loss`
-    # like: https://github.com/mlfoundations/open_clip/issues/616
-    world_size = get_world_size()
-    if world_size == 1:
-        return t
-
-    if t.ndim == 0:
-        t = t.unsqueeze(0)
-
-    gathered = [torch.empty_like(t) for _ in range(world_size)]
-    torch.distributed.all_gather(gathered, t)
-    gathered = torch.stack(gathered, dim=0)
-    return gathered.sum(dim=0) # Sum across workers
-
-
-def get_num_proc() -> int:
-    world_size: int = get_world_size()
-    try:
-        # os.sched_getaffinity respects schedulers, unlike cpu_count(), but it's only available
-        # on some Unix platforms, so we support both!
-        return len(os.sched_getaffinity(0)) // world_size  # type: ignore[attr-defined]
-    except AttributeError:
-        return multiprocessing.cpu_count() // world_size
 
 
 def process_qrels_uncached(corpus: datasets.Dataset, qrels: datasets.Dataset) -> Tuple[Dict[str, List[float]], Dict[str, List[str]]]:
@@ -204,19 +159,6 @@ def download_url_and_unzip(url: str, out_dir: str, chunk_size: int = 1024) -> st
     
     return os.path.join(out_dir, dataset.replace(".zip", ""))
 
-def get_world_size() -> int:
-    try:
-        return torch.distributed.get_world_size()
-    except (RuntimeError, ValueError):
-        return 1
-
-
-def get_rank() -> int:
-    try:
-        return torch.distributed.get_rank()
-    except (RuntimeError, ValueError):
-        return 0
-    
 
 def tqdm_if_main_worker(iterable: Iterable, **kwargs) -> Iterable:
     if get_rank() == 0:

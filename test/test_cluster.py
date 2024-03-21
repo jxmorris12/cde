@@ -1,9 +1,35 @@
 import sys
 sys.path.append('/home/paperspace/tti3')
 
-import torch
+from typing import Dict
 
-from helpers import paired_kmeans_faiss
+import pytest
+
+import datasets
+import numpy as np
+import torch
+import transformers
+
+from lib import cluster_dataset, paired_kmeans_faiss
+
+
+@pytest.fixture
+def tiny_dataset() -> datasets.Dataset:
+    tokenizer = transformers.AutoTokenizer.from_pretrained("bert-base-uncased")
+    dataset = datasets.load_dataset("rotten_tomatoes")
+    dataset = dataset["train"]
+    dataset = dataset.select(range(0, 64))
+    def tokenize(ex: Dict) -> Dict:
+        return tokenizer(
+            ex["text"], 
+            truncation=True, 
+            padding=True,
+            max_length=32
+        )
+    dataset = dataset.map(
+        tokenize, batched=True, keep_in_memory=True)
+    dataset.set_format("pt")
+    return dataset
 
 
 def test_cluster_tiny():
@@ -37,3 +63,32 @@ def test_cluster_tiny():
         )
     ).all()
 
+@pytest.mark.parametrize(
+        "query_to_doc, model", [
+            (True, "bm25"),
+            (False, "bm25"),
+            (True, "gtr_base")
+        ]
+)
+def test_cluster_bm25(
+        tiny_dataset: datasets.Dataset,
+        query_to_doc: bool, 
+        model: str
+    ):
+    batch_size = 2
+    clusters = cluster_dataset(
+        dataset=tiny_dataset,
+        query_to_doc=query_to_doc,
+        model=model,
+        query_key="input_ids",
+        document_key="input_ids",
+        batch_size=batch_size
+    )
+    assert clusters is not None
+    all_clusters = np.array(list(clusters.values())).flatten()
+    unique, counts = np.unique(all_clusters, return_counts=True)
+
+    # assert there are as many clusters as we specified
+    assert len(unique) == len(tiny_dataset) / batch_size
+    # check that they are a little imbalanced
+    assert 1.0 < counts.mean() <= batch_size

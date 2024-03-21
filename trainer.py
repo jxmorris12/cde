@@ -9,7 +9,7 @@ import wandb
 
 from gradcache import GradCache
 from dataset import BeirDataset
-from helpers import get_rank, RerankHelper, TensorRunningAverages
+from lib import get_rank, RerankHelper, TensorRunningAverages
 from sampler import Sampler
 
 

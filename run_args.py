@@ -10,7 +10,7 @@ import torch
 import transformers
 
 
-from helpers import get_rank, get_world_size
+from lib import get_rank, get_world_size
 
 
 @dataclass

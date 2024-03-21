@@ -19,7 +19,8 @@ import torch
 import transformers
 import torch.multiprocessing as mp
 import tqdm
-from helpers import (
+
+from lib import (
     datasets_fast_load_from_disk,
     download_url, download_url_and_unzip, 
     get_tti_cache_dir,

@@ -12,7 +12,7 @@ from dataset import (
     load_reddit_train_and_val, load_synthetic_words_dataset, 
     BeirDataset, NomicSupervisedDataset, NomicUnsupervisedDataset
 )
-from helpers import get_rank, load_embedder_and_tokenizer, ModelConfig
+from lib import get_rank, load_embedder_and_tokenizer, ModelConfig
 from model import get_model_class
 from run_args import ModelArguments, DataArguments, TrainingArguments
 from sampler import get_sampler

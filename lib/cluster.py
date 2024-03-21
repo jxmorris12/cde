@@ -1,18 +1,29 @@
 from typing import Dict, List, Tuple
 
 import collections
+import gc
 import math
+import os
+import pickle
 
 import datasets
 import torch
 import tqdm
 
 
-from helpers.cluster_faiss import paired_kmeans_faiss
+from lib.cluster_faiss import paired_kmeans_faiss
 from bm25_pt.bm25 import TokenizedBM25
 
+from .dist import (
+    get_rank, 
+    get_world_size, 
+)
 from .embed import embed_with_cache
-from .misc import get_rank, get_world_size, tqdm_if_main_worker
+from .misc import (
+    get_cache_location_from_kwargs,
+    tqdm_if_main_worker
+)
+from .tensor import maxsim
 
 
 # Whether to maximize distances
@@ -22,7 +33,6 @@ SHOULD_MAXIMIZE_CLUSTER_DISTANCE_FOR_MODEL = {
     "gtr_base": False,
 }
 
-DEBUG_MEM = False
 
 def pad_to_length(t, max_doc_length: int = 128):
     if len(t) < max_doc_length:
@@ -115,7 +125,7 @@ def embed_for_clustering(
 
 
 @torch.no_grad
-def paired_kmeans(
+def paired_kmeans_sparse(
         q: torch.Tensor,
         X: torch.Tensor, 
         k: int,
@@ -123,7 +133,8 @@ def paired_kmeans(
         tol: float = 1e-3, 
         maximize: bool = True,
         initialization_strategy: str = "kmeans++", # ["kmeans++", "random"]
-        seed: int = 42
+        seed: int = 42,
+        debug_mem_usage: bool = False,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
     """Runs paired kmeans.
 
@@ -167,7 +178,7 @@ def paired_kmeans(
                 d = d + (centroids_used_mask * -10e10)
                 best_centroid_idx = d.argmax()
                 centroids_used_mask[best_centroid_idx] = 1
-            if DEBUG_MEM: tqdm.tqdm.write(f"--> got centroid {best_centroid_idx} with dist: {d[best_centroid_idx]:.3f}")
+            if debug_mem_usage: tqdm.tqdm.write(f"--> got centroid {best_centroid_idx} with dist: {d[best_centroid_idx]:.3f}")
             centroids.append(X[best_centroid_idx])
         centroids = torch.stack(centroids)
     else:
@@ -179,9 +190,10 @@ def paired_kmeans(
     pbar = tqdm_if_main_worker(range(max_iters), desc="KMEANS ITER")
     for j in pbar:
         torch.cuda.empty_cache()
-        if DEBUG_MEM: print(f"[kmeans] step {j} cuda mem free/total = {torch.cuda.mem_get_info()}")
+        if debug_mem_usage: print(f"[kmeans] step {j} cuda mem free/total = {torch.cuda.mem_get_info()}")
         sims, assignments = maxsim(
-            X=q, y=centroids.T, maximize=maximize
+            X=q, y=centroids.T, maximize=maximize,
+            debug_mem_usage=debug_mem_usage,
         )
         avg_sim = sims.mean()
         x_idxs = torch.arange(len(X), device=assignments.device)
@@ -228,10 +240,7 @@ def paired_kmeans(
     return centroids.cpu(), assignments.cpu()
 
 
-USE_FAISS = True
-
-
-def _cluster_dataset_uncached(
+def cluster_dataset_uncached(
         dataset: datasets.Dataset, 
         query_to_doc: bool,
         model: str,
@@ -249,21 +258,22 @@ def _cluster_dataset_uncached(
     )
     
     k = math.ceil(len(X) / batch_size)
+    is_sparse = (model == "bm25")
 
     print("--> calling faiss...")
-    if USE_FAISS:
+    if is_sparse:
+        _, assignments = paired_kmeans_sparse(
+            q=q, 
+            X=X,
+            k=k,
+            maximize=SHOULD_MAXIMIZE_CLUSTER_DISTANCE_FOR_MODEL[model]
+        )
+    else:
         _, assignments = paired_kmeans_faiss(
             q=q,
             X=X,
             k=k,
             # maximize=SHOULD_MAXIMIZE_CLUSTER_DISTANCE_FOR_MODEL[model]
-        )
-    else:
-        _, assignments = paired_kmeans(
-            q=q, 
-            X=X,
-            k=k,
-            maximize=SHOULD_MAXIMIZE_CLUSTER_DISTANCE_FOR_MODEL[model]
         )
     # stack assignments to list.
     assignments_dict = collections.defaultdict(list)
@@ -296,7 +306,7 @@ def cluster_dataset(
         print("-- opening file ... ", clustering_hash)
         return pickle.load(open(clustering_hash, "rb"))
     else:
-        result = _cluster_dataset_uncached(
+        result = cluster_dataset_uncached(
             dataset=dataset,
             model=model,
             query_to_doc=query_to_doc,
