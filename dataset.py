@@ -172,12 +172,14 @@ def load_beir_uncached(dataset: str, split: str) -> Tuple[datasets.Dataset, data
     return corpus, queries, qrels, ance_results
 
 
-def tokenize_transform_func(tokenizer: transformers.PreTrainedTokenizerFast,
-                    examples: Dict[str, List],
-                    col: str,
-                    max_length: int): #-> BatchEncoding:
+def tokenize_transform_func(
+        tokenizer: transformers.PreTrainedTokenizerFast,
+        examples: Dict[str, List],
+        col: str,
+        max_length: int): #-> BatchEncoding:
+    texts = examples[col]
     batch_dict = tokenizer(
-        examples[col],
+        texts,
         max_length=max_length,
         padding=True,
         truncation=True
@@ -244,9 +246,17 @@ class DenseEncoder(torch.nn.Module):
         Returns:
             `List[np.ndarray]` or `List[tensor]`: List of embeddings for the given sentences
         """
-
-        dataset.set_transform(
-            functools.partial(tokenize_transform_func, self.tokenizer, col=col, max_length=self.max_length))
+        os.environ["TOKENIZERS_PARALLELISM"] = "1"
+        dataset = dataset.map(
+            functools.partial(tokenize_transform_func, self.tokenizer, col=col, max_length=self.max_length),
+            batch_size=10_000,
+            batched=True,
+            num_proc=None,
+            # num_proc=len(os.sched_getaffinity(0)),
+            keep_in_memory=False,
+            remove_columns=[col],
+            desc=f"Tokenizing {col}"
+        )
 
         data_collator = transformers.DataCollatorWithPadding(self.tokenizer, pad_to_multiple_of=8)
         data_loader = torch.utils.data.DataLoader(
@@ -254,8 +264,9 @@ class DenseEncoder(torch.nn.Module):
             batch_size=batch_size * self.gpu_count,
             shuffle=False,
             drop_last=False,
-            num_workers=8 * self.gpu_count,
+            num_workers=self.gpu_count, # 2 # 2 * self.gpu_count,
             collate_fn=data_collator,
+            persistent_workers=True,
             pin_memory=True
         )
 
@@ -279,11 +290,13 @@ class DenseEncoder(torch.nn.Module):
             embeds = torch.nn.functional.normalize(embeds, p=2, dim=-1)
             encoded_embeds.append(embeds.cpu().numpy())
 
+        num_cleaned_cache_files = dataset.cleanup_cache_files()
+        print(f"cleaned {num_cleaned_cache_files} files")
         return np.concatenate(encoded_embeds, axis=0)
 
 def embed_with_cache(model_name: str, cache_name: str, d: datasets.Dataset, 
                      col: str, save_to_disk: bool = True,
-                     model=None, batch_size: int = 8192) -> datasets.Dataset:
+                     model=None, batch_size: int = 4096) -> datasets.Dataset:
     embedder_cache_path = model_name.replace('/', '__')
     # cache_folder = datasets.config.HF_DATASETS_CACHE
     cache_folder = os.path.join(get_tti_cache_dir(), 'corpus_embeddings', embedder_cache_path)
@@ -296,16 +309,11 @@ def embed_with_cache(model_name: str, cache_name: str, d: datasets.Dataset,
         d.set_format("pt")
         return d
     
-    print("getting col from dataset")
-    # d = d.flatten_indices()
-    # texts = list(d[i][col] for i in tqdm.trange(len(d), desc=f"stacking column [{col}]", leave=False))
     d.set_format(type=None, columns=[col]) # get python objects (strings!)
-
     all_other_colums = [c for c in d.column_names if c != col]
     d_subset = d.remove_columns(all_other_colums)
 
-    print("[embed_with_cache] computing embeddings to save at path:", cache_path)
-    print(f"[embed_with_cache] encoding {len(d)}")
+    print(f"[embed_with_cache] encoding {len(d)} with batch size {batch_size}")
     if model is None:
         model = DenseEncoder(model_name, max_seq_length=128)
 
@@ -717,7 +725,8 @@ class NomicUnsupervisedDataset:
         self.dataset = (
             datasets.load_dataset(
                 "nomic-ai/nomic_embed_unsupervised", 
-                keep_in_memory=False
+                keep_in_memory=False,
+                num_proc=32,
             )["train"]
             # datasets_fast_load_from_disk(NOMIC_UNSUPERVISED_DS_PATH)["train"]
         )

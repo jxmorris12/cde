@@ -72,7 +72,8 @@ def main():
 
     os.environ["WANDB__SERVICE_WAIT"] = "30"
     # os.environ["_WANDB_STARTUP_DEBUG"] = "true"
-    os.environ['TOKENIZERS_PARALLELISM'] = 'False'
+    # os.environ['TOKENIZERS_PARALLELISM'] = 'False'
+    os.environ['TOKENIZERS_PARALLELISM'] = 'True'
 
     parser = transformers.HfArgumentParser((ModelArguments, DataArguments, TrainingArguments))
     model_args, data_args, training_args = parser.parse_args_into_dataclasses()
