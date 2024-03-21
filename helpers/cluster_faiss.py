@@ -1,4 +1,4 @@
-from typing import Iterable, Tuple
+from typing import Tuple
 
 import faiss
 import torch
@@ -22,10 +22,11 @@ def paired_kmeans_faiss(
             torch.cat((X, q), dim=0),
         ], dim=1
     )
-    paired_vectors[0] /= paired_vectors.norm(p=2)
+    paired_vectors /= paired_vectors.norm(dim=1, keepdim=True, p=2)
 
     dim = paired_vectors[0].numel()
     # TODO: How to make kmeans use more gpu mem?
+    print("[paired_kmeans_faiss] initializing Kmeans object")
     kmeans = faiss.Kmeans(
         dim, k,
         niter=max_iters, 
@@ -39,6 +40,7 @@ def paired_kmeans_faiss(
     # otherwise the kmeans implementation sub-samples the training set
     # to <= 256 points per centroid
     kmeans.max_points_per_centroid = 512
+    print("[paired_kmeans_faiss] calling kmeans.train()")
     kmeans.train(paired_vectors)
 
     queries = paired_vectors[:len(q)]
