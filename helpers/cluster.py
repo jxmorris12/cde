@@ -1,15 +1,18 @@
-from typing import Dict, Tuple
+from typing import Dict, List, Tuple
 
+import collections
 import math
 
 import datasets
 import torch
 import tqdm
 
+
+from helpers.cluster_faiss import paired_kmeans_faiss
 from bm25_pt.bm25 import TokenizedBM25
 
-from dataset import embed_with_cache, NomicSupervisedDataset, RedditDataset
-from helpers import gather_sum, get_rank, get_world_size, tqdm_if_main_worker
+from .embed import embed_with_cache
+from .misc import get_rank, get_world_size, tqdm_if_main_worker
 
 
 # Whether to maximize distances
@@ -26,6 +29,7 @@ def pad_to_length(t, max_doc_length: int = 128):
         nz = max_doc_length - len(t) 
         t = torch.cat((t, torch.zeros((nz,))), dim=0)
     return t
+
 
 def embed_for_clustering(
         dataset: datasets.Dataset, 
@@ -55,7 +59,6 @@ def embed_for_clustering(
         assert query_to_doc
         dataset_fingerprint = dataset._fingerprint
         num_gpus = torch.cuda.device_count()
-        # num_proc = len(os.sched_getaffinity(0))
         if get_rank() == 0:
             print(f"Embedding {len(dataset)} queries with {num_gpus} GPUs...")
 
@@ -63,29 +66,11 @@ def embed_for_clustering(
         model = DenseEncoder( "sentence-transformers/gtr-t5-base")
 
         # https://github.com/UKPLab/sentence-transformers/blob/87f4180d7d197d4a471d627afc788b62a81c0214/sentence_transformers/SentenceTransformer.py#L392
-        print("computing query embeddings")
-
-        def add_length_columns(ex: Dict) -> Dict:
-            ex["query_length"] = list(map(len, ex["query"]))
-            ex["document_length"] = list(map(len, ex["document"]))
-            return ex
+        print("[embed_with_cache] computing query embeddings")
 
         dataset = dataset.add_column("idx", range(len(dataset)))
         print("[embed_with_cache] computing lengths")
-        # dataset = dataset.map(
-        #     add_length_columns,
-        #     batched=True,
-        #     batch_size=12_000,
-        #     # num_proc=num_proc,
-        #     num_proc=12,
-        #     keep_in_memory=True
-        # )
         dataset.set_format("pt")
-
-        keep_in_memory = True
-        print("[embed_with_cache] sorting by query length")
-        # dataset = dataset.sort("query_length", keep_in_memory=keep_in_memory)
-        
         print("[embed_with_cache] embedding queries")
         query_embeddings = embed_with_cache(
             "sentence-transformers/gtr-t5-base", 
@@ -95,16 +80,10 @@ def embed_for_clustering(
             save_to_disk=False,
             model=model,
         )
-        print("halving query embeddings")
+        print("[embed_with_cache] halving query embeddings")
         query_embeddings = query_embeddings["embeds"].half()
         assert not query_embeddings.isnan().any(), "got nan query embeddings"
-    
-
-        # print("[embed_with_cache] flatten indices again")
-        # dataset = dataset.flatten_indices(keep_in_memory=keep_in_memory)
-        # print("[embed_with_cache] sorting by doc length")
         query_output_idxs = dataset["idx"]
-        # dataset = dataset.sort("document_length", keep_in_memory=keep_in_memory)
         corpus_output_idxs = dataset["idx"]
     
         print(f"[embed_with_cache] computing corpus_embeddings num_gpus={num_gpus}")
@@ -117,19 +96,10 @@ def embed_for_clustering(
             model=model,
         )
         corpus_embeddings = corpus_embeddings["embeds"].half()
-        print("[embed_with_cache] got corpus embeddings")
+        print("[embed_with_cache] got corpus embeddings, remapping")
 
         assert not corpus_embeddings.isnan().any(), "got nan corpus embeddings"
 
-        print("[embed_with_cache] remapping embeddings")
-        ##################################################################
-        # qidxs = []
-        # cidxs = []
-        # for i in tqdm.trange(len(dataset), desc='remapping embeddings', colour='MAGENTA', leave=False):
-        #     # TODO: vectorize this
-        #     #       (https://discuss.pytorch.org/t/reverse-inverse-indices-torch-unique/114521/5?u=jxmorris12)
-        #     qidxs.append((query_output_idxs == i).int().argmax())
-        #     cidxs.append((corpus_output_idxs == i).int().argmax())
         qidxs = torch.zeros(len(dataset), dtype=torch.long)
         qidxs[query_output_idxs] = torch.arange(len(dataset), dtype=torch.long)
         cidxs = torch.zeros(len(dataset), dtype=torch.long)
@@ -142,74 +112,6 @@ def embed_for_clustering(
         return query_embeddings, corpus_embeddings
     else:
         raise ValueError(f"model {model} not supported")
-
-
-def slice_sparse_tensor_rows(t: torch.sparse.Tensor, min_row: int, max_row: int) -> torch.sparse.Tensor:
-    assert min_row < max_row, f"can't slice from row {min_row} to {max_row}"
-    t = t.coalesce()
-    row_idxs = t.indices()[0]
-    index_mask = (min_row <= row_idxs) & (row_idxs < max_row)
-
-    num_rows = (max_row - min_row)
-    num_cols = t.shape[1]
-
-    idxs = t.indices()[:, index_mask]
-    vals = t.values()[index_mask]
-    return torch.sparse_coo_tensor(idxs, vals, size=(num_rows, num_cols)).coalesce()
-
-
-def slice_tensor_rows(t: torch.Tensor, min_row: int, max_row: int) -> torch.Tensor:
-    if t.is_sparse:
-        return slice_sparse_tensor_rows(t=t, min_row=min_row, max_row=max_row)
-    else:
-        return t[min_row:max_row]
-
-
-@torch.no_grad
-def maxsim(X: torch.Tensor, y: torch.Tensor, maximize: bool, chunk_size: int = 8_000) -> torch.Tensor:
-    device = X.device
-    n_samples = X.shape[0]
-
-    max_sim_v = torch.zeros(n_samples, device=device, dtype=X.dtype)
-    max_sim_i = torch.zeros(n_samples, device=device, dtype=torch.int64)
-
-    # TODO: Implement faster max (without going to dense tensors).
-    # TODO: Use multiple GPUs.
-    rank = get_rank()
-    world_size = get_world_size()
-
-    worker_worklist_size = int(math.ceil(n_samples / world_size))
-    splits_start_idx = worker_worklist_size * rank
-    splits_end_idx = worker_worklist_size * (rank + 1)
-
-    for i in range(splits_start_idx, splits_end_idx, chunk_size):
-        start, end = i, min(i + chunk_size, n_samples)
-        sub_x = slice_tensor_rows(X, start, end)
-        if DEBUG_MEM: print(f"[maxsim] step {i} cuda mem free/total = {torch.cuda.mem_get_info()}")
-        if DEBUG_MEM: print("sub_x.shape:", sub_x.shape, "//", "y.shape:", y.shape)
-        sub_sim = sub_x @ y # TODO – Implement sparse max here to save mem!
-        sub_sim = sub_sim
-        if maximize:
-            sub_max_sim_v, sub_max_sim_i = sub_sim.to_dense().max(dim=-1)
-        else:
-            sub_max_sim_v, sub_max_sim_i = sub_sim.to_dense().min(dim=-1)
-        del sub_sim
-        del sub_x
-        torch.cuda.empty_cache() # needs to happen after maxsim for some reason.
-        max_sim_v[start: end] = sub_max_sim_v
-        max_sim_i[start: end] = sub_max_sim_i
-    
-    # gather
-    max_sim_v = gather_sum(max_sim_v)
-    max_sim_i = gather_sum(max_sim_i)
-    k = y.shape[1]
-
-    assert max_sim_v.shape == (n_samples,)
-    assert max_sim_i.shape == (n_samples,)
-    assert max_sim_i.min() >= 0
-    assert max_sim_i.max() <= k
-
-    return max_sim_v, max_sim_i
 
 
 @torch.no_grad
@@ -325,3 +227,124 @@ def paired_kmeans(
         print("exiting kmeans with total shift", total_centroid_shift.item())
     return centroids.cpu(), assignments.cpu()
 
+
+USE_FAISS = True
+
+
+def _cluster_dataset_uncached(
+        dataset: datasets.Dataset, 
+        query_to_doc: bool,
+        model: str,
+        query_key: str,
+        document_key: str,
+        batch_size: int,
+    ) -> Dict[int, List[int]]:
+    print("[cluster_dataset_uncached] calling embed_for_clustering...")
+    q, X = embed_for_clustering(
+        dataset=dataset,
+        query_key=query_key,
+        document_key=document_key,
+        model=model,
+        query_to_doc=query_to_doc,
+    )
+    
+    k = math.ceil(len(X) / batch_size)
+
+    print("--> calling faiss...")
+    if USE_FAISS:
+        _, assignments = paired_kmeans_faiss(
+            q=q,
+            X=X,
+            k=k,
+            # maximize=SHOULD_MAXIMIZE_CLUSTER_DISTANCE_FOR_MODEL[model]
+        )
+    else:
+        _, assignments = paired_kmeans(
+            q=q, 
+            X=X,
+            k=k,
+            maximize=SHOULD_MAXIMIZE_CLUSTER_DISTANCE_FOR_MODEL[model]
+        )
+    # stack assignments to list.
+    assignments_dict = collections.defaultdict(list)
+    for i in tqdm.trange(len(assignments), desc="collecting assigments", leave=False):
+        assignments_dict[i].append(assignments[i].item())
+    return assignments_dict
+
+
+def cluster_dataset(
+        dataset: datasets.Dataset, 
+        query_to_doc: bool,
+        model: str,
+        query_key: str,
+        document_key: str,
+        batch_size: int,
+    ) -> Dict[int, List[int]]:
+    # TODO: Turn this caching logic into a nice decorator?
+    clustering_hash = get_cache_location_from_kwargs(
+        dataset_fingerprint=dataset._fingerprint,
+        document_key=document_key,
+        query_key=query_key,
+        batch_size=batch_size,
+        model=model,
+        query_to_doc=query_to_doc,
+    )
+    print("checking for cluster at file", clustering_hash)
+    if os.path.exists(clustering_hash):
+        # if get_world_size() > 1:
+        #     torch.distributed.barrier()
+        print("-- opening file ... ", clustering_hash)
+        return pickle.load(open(clustering_hash, "rb"))
+    else:
+        result = _cluster_dataset_uncached(
+            dataset=dataset,
+            model=model,
+            query_to_doc=query_to_doc,
+            query_key=query_key,
+            document_key=document_key,
+            batch_size=batch_size,
+        )
+        gc.collect()
+        torch.cuda.empty_cache()
+        pickle.dump(result, open(clustering_hash, "wb"))
+        return result
+
+
+def cluster_subdomains(
+        dataset: datasets.Dataset,
+        subdomains: Dict[int, List[int]],
+        query_to_doc: bool,
+        batch_size: int, 
+        model: str,
+    ) -> Dict[int, List[int]]:
+    offset = 0
+    final_assignments = collections.defaultdict(list)
+    
+    # TODO: Cache all this; it's slow.
+    print("sorting subdomains")
+    subdomains_smallest_first = sorted(subdomains.items(), key=lambda x: len(x[1]))
+    # subdomains_largest_first = sorted(self.batch_assignments.items(), key=lambda x: -len(x[1]))
+    for j, (_, data_idxs) in enumerate(subdomains_smallest_first):
+        perc = (j + 1) / len(subdomains) * 100
+        print(f"({j + 1} / {len(subdomains)} -- {perc:.1f}%) selecting {len(data_idxs)} indices for clustering")
+        mini_dataset = dataset.dataset.select(data_idxs, keep_in_memory=True)
+        print("[autocluster] calling cluster_dataset")
+        cluster_assignments = cluster_dataset(
+            dataset=mini_dataset,
+            model=model,
+            query_key=dataset._document_input_ids_key,
+            document_key=dataset._query_input_ids_key,
+            query_to_doc=query_to_doc,
+            batch_size=batch_size,
+        )
+
+        print("[autocluster] collecting cluster")
+        new_cluster_idxs = set()
+        for j, cluster in tqdm_if_main_worker(cluster_assignments.items(), leave=False):
+            if isinstance(cluster, list): cluster = cluster[0]
+            if isinstance(cluster, torch.Tensor): cluster = cluster.item()
+            final_assignments[cluster + offset].append(data_idxs[j])
+            new_cluster_idxs.add(cluster)
+        offset += len(new_cluster_idxs)
+    print(f"expanded {len(subdomains)} domains to {len(final_assignments)} clusters.")
+    return final_assignments

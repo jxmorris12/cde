@@ -26,12 +26,12 @@ def paired_kmeans_faiss(
 
     dim = paired_vectors[0].numel()
     # TODO: How to make kmeans use more gpu mem?
-    print("[paired_kmeans_faiss] initializing Kmeans object")
+    print(f"[paired_kmeans_faiss] initializing Kmeans object (gpu={torch.cuda.is_available()})")
     kmeans = faiss.Kmeans(
         dim, k,
         niter=max_iters, 
         nredo=3,
-        gpu=True, 
+        gpu=torch.cuda.is_available(), 
         verbose=True,
         spherical=True,
         decode_block_size=2**16,

@@ -6,7 +6,7 @@ import numpy as np
 import torch
 import transformers
 
-from . import tqdm_if_main_worker
+from .misc import tqdm_if_main_worker
 
 
 class DenseEncoder(torch.nn.Module):

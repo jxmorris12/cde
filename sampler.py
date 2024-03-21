@@ -2,114 +2,17 @@ from typing import Dict, Iterable, List, Optional, Union
 
 import abc
 import collections
-import gc
 import logging
 import math
 import os
-import pickle
 import random
 import torch
 
 import datasets
 import torch
-import tqdm
 
-from cluster_helpers import embed_for_clustering, paired_kmeans, SHOULD_MAXIMIZE_CLUSTER_DISTANCE_FOR_MODEL
-from cluster_helpers_faiss import paired_kmeans_faiss
 from dataset import NomicSupervisedDataset, RedditDataset
 from helpers import get_tti_cache_dir, get_rank, get_world_size, md5_hash_kwargs, tqdm_if_main_worker
-
-
-identity = lambda x: x
-
-
-USE_FAISS = True
-
-
-def get_cache_location_from_kwargs(**kwargs):
-    cache_location = os.path.join(
-        get_tti_cache_dir(), "cluster"
-    )
-    os.makedirs(cache_location, exist_ok=True)
-    return os.path.join(cache_location, md5_hash_kwargs(**kwargs))
-
-
-def _cluster_dataset_uncached(
-        dataset: datasets.Dataset, 
-        query_to_doc: bool,
-        model: str,
-        query_key: str,
-        document_key: str,
-        batch_size: int,
-    ) -> Dict[int, List[int]]:
-    print("[cluster_dataset_uncached] calling embed_for_clustering...")
-    q, X = embed_for_clustering(
-        dataset=dataset,
-        query_key=query_key,
-        document_key=document_key,
-        model=model,
-        query_to_doc=query_to_doc,
-    )
-    
-    k = math.ceil(len(X) / batch_size)
-
-    print("--> calling faiss...")
-    if USE_FAISS:
-        _, assignments = paired_kmeans_faiss(
-            q=q,
-            X=X,
-            k=k,
-            # maximize=SHOULD_MAXIMIZE_CLUSTER_DISTANCE_FOR_MODEL[model]
-        )
-    else:
-        _, assignments = paired_kmeans(
-            q=q, 
-            X=X,
-            k=k,
-            maximize=SHOULD_MAXIMIZE_CLUSTER_DISTANCE_FOR_MODEL[model]
-        )
-    # stack assignments to list.
-    assignments_dict = collections.defaultdict(list)
-    for i in tqdm.trange(len(assignments), desc="collecting assigments", leave=False):
-        assignments_dict[i].append(assignments[i].item())
-    return assignments_dict
-    
-def cluster_dataset(
-        dataset: datasets.Dataset, 
-        query_to_doc: bool,
-        model: str,
-        query_key: str,
-        document_key: str,
-        batch_size: int,
-    ) -> Dict[int, List[int]]:
-    # TODO: Turn this caching logic into a nice decorator?
-    clustering_hash = get_cache_location_from_kwargs(
-        dataset_fingerprint=dataset._fingerprint,
-        document_key=document_key,
-        query_key=query_key,
-        batch_size=batch_size,
-        model=model,
-        query_to_doc=query_to_doc,
-    )
-    print("checking for cluster at file", clustering_hash)
-    if os.path.exists(clustering_hash):
-        # if get_world_size() > 1:
-        #     torch.distributed.barrier()
-        print("-- opening file ... ", clustering_hash)
-        return pickle.load(open(clustering_hash, "rb"))
-    else:
-        result = _cluster_dataset_uncached(
-            dataset=dataset,
-            model=model,
-            query_to_doc=query_to_doc,
-            query_key=query_key,
-            document_key=document_key,
-            batch_size=batch_size,
-        )
-        gc.collect()
-        torch.cuda.empty_cache()
-        pickle.dump(result, open(clustering_hash, "wb"))
-        return result
 
 
 class Sampler(abc.ABC, torch.utils.data.Sampler):
@@ -281,38 +184,10 @@ class AutoClusterWithinDomainSampler(FixedSubdomainSampler):
             shuffle=False,
         )
         self.dataset = dataset
-        offset = 0
-        final_assignments = collections.defaultdict(list)
-        
-        # TODO: Cache all this; it's slow.
-        print("sorting subdomains")
-        subdomains_smallest_first = sorted(self.batch_assignments.items(), key=lambda x: len(x[1]))
-        # subdomains_largest_first = sorted(self.batch_assignments.items(), key=lambda x: -len(x[1]))
-        for j, (_, data_idxs) in enumerate(subdomains_smallest_first):
-            perc = (j + 1) / len(self.batch_assignments) * 100
-            print(f"({j + 1} / {len(self.batch_assignments)} -- {perc:.1f}%) selecting {len(data_idxs)} indices for clustering")
-            mini_dataset = dataset.dataset.select(data_idxs, keep_in_memory=True)
-            print("[autocluster] calling cluster_dataset")
-            cluster_assignments = cluster_dataset(
-                dataset=mini_dataset,
-                model=model,
-                query_key=dataset._document_input_ids_key,
-                document_key=dataset._query_input_ids_key,
-                query_to_doc=query_to_doc,
-                batch_size=batch_size,
-            )
-
-            print("[autocluster] collecting cluster")
-            new_cluster_idxs = set()
-            for j, cluster in tqdm_if_main_worker(cluster_assignments.items(), leave=False):
-                if isinstance(cluster, list): cluster = cluster[0]
-                if isinstance(cluster, torch.Tensor): cluster = cluster.item()
-                final_assignments[cluster + offset].append(data_idxs[j])
-                new_cluster_idxs.add(cluster)
-            offset += len(new_cluster_idxs)
-        print(f"expanded {len(self.batch_assignments)} domains to {len(final_assignments)} clusters.")
-        self.batch_assignments = final_assignments
-        print("...got final assignments...")
+        self.batch_assignments = cluster_subdomains(
+            dataset=self.dataset,
+            subdomains=self.batch_assignments,
+        )
         assert sum(map(len, self.batch_assignments.values())) == len(dataset)
         assert len(set(v for b in self.batch_assignments.values() for v in b)) == len(dataset)
         assert set(v for b in self.batch_assignments.values() for v in b) == set(range(len(dataset)))
