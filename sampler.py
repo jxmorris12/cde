@@ -121,9 +121,7 @@ class FixedSubdomainSampler(RandomSampler):
         if shuffle:
             for k in tqdm_if_main_worker(self.batch_assignments.keys(), desc="Shuffling clusters", colour="red"):
                 random.Random(self.seed).shuffle(self.batch_assignments[k])
-        print("running assertion")
         assert sum(map(len, self.batch_assignments.values())) == len(dataset)
-        print("done")
     
     def _get_indices(self) -> List[int]:
         g = torch.Generator()

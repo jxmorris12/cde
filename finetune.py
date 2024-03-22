@@ -144,6 +144,7 @@ def main():
         eval_dataset = None
     elif data_args.dataset == 'nomic':
         train_dataset = NomicSupervisedDataset(
+            tokenizer=embedder_tokenizer,
             num_hard_negatives=data_args.num_hard_negatives,
         )
         eval_dataset = None

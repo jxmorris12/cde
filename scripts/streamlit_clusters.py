@@ -22,13 +22,17 @@ from sampler import (
 @st.cache_resource
 def load_supervised_dataset() -> NomicSupervisedDataset:        
     tokenizer = transformers.AutoTokenizer.from_pretrained("nomic-ai/nomic-embed-text-v1-unsupervised")
-    return NomicUnsupervisedDataset(tokenizer=tokenizer)
+    return NomicSupervisedDataset(
+        tokenizer=tokenizer, num_hard_negatives=0
+    )
 
 
 @st.cache_resource
 def load_unsupervised_dataset() -> NomicUnsupervisedDataset:        
     tokenizer = transformers.AutoTokenizer.from_pretrained("nomic-ai/nomic-embed-text-v1-unsupervised")
-    return NomicUnsupervisedDataset(tokenizer=tokenizer)
+    return NomicUnsupervisedDataset(
+        tokenizer=tokenizer
+    )
 
 
 def get_sampler(
@@ -70,13 +74,13 @@ def get_sampler(
 
 @st.cache_data
 def get_sampler_batch_idxs(
-        start_idx: int,
+        dataset_start_idx: int,
         batch_size: int,
         sampler: torch.utils.data.Sampler
     ) -> List[int]:
     batch_idxs = []
     sampler_iter = iter(sampler)
-    for _ in range(start_idx):
+    for _ in range(dataset_start_idx):
         next(sampler_iter)
 
     for _ in range(batch_size):
@@ -85,12 +89,13 @@ def get_sampler_batch_idxs(
     return batch_idxs
 
 
+@st.cache_resource
 def get_sampled_batch(
         strategy: str,
         dataset: Union[NomicSupervisedDataset, NomicUnsupervisedDataset],
         batch_size: int,
         model: str,
-        start_idx = 0,
+        dataset_start_idx = 0,
     ) -> Tuple[List, List]:
         sampler = get_sampler(
             strategy=strategy,
@@ -101,7 +106,7 @@ def get_sampled_batch(
         )
 
         batch_idxs = get_sampler_batch_idxs(
-            start_idx=0,
+            dataset_start_idx=dataset_start_idx,
             batch_size=batch_size,
             sampler=sampler,
         )
@@ -111,14 +116,21 @@ def get_sampled_batch(
         return batch, batch_idxs
 
 
+dataset_start_idx = 0
+
 def main():
+    global dataset_start_idx
+
     st.title('🎈 TTI Clusters')
 
     with st.sidebar:
         dataset_name = st.selectbox(
             "Dataset",
-            ["nomic_unsupervised", "nomic_supervised"],
+            ["nomic_supervised", "nomic_unsupervised"],
+            # ["nomic_unsupervised", "nomic_supervised"],
         )
+        if dataset_name == "nomic_supervised":
+            st.text("[Note: Hard negatives not displayed.]")
         batch_size = st.selectbox(
             "Batch_size",
             [224],
@@ -142,21 +154,21 @@ def main():
             dataset = load_unsupervised_dataset()
         else:
             dataset = load_supervised_dataset()
-
-    start_idx = 0
     
     # allow toggling through multiple batches
+    if st.button('Reset batch'):
+        dataset_start_idx = 0
     if st.button('Next batch'):
-        start_idx += batch_size
-    st.text(f"Batch index {start_idx}")
-    
+        dataset_start_idx += batch_size
+    st.text(f"Batch index {dataset_start_idx}")
+
     with st.spinner('Getting samples...'):      
         batch, batch_idxs = get_sampled_batch(
             strategy=sampling_strategy,
             dataset=dataset,
             batch_size=batch_size,
             model=model,
-            start_idx=start_idx,
+            dataset_start_idx=dataset_start_idx,
         )
 
     # show it in the UI
@@ -167,6 +179,9 @@ def main():
     truncate_to_length = lambda s: s[:max_len] + ("..." if len(s) > max_len else "")
     df["query"] = df["query"].apply(truncate_to_length)
     df["document"] = df["document"].apply(truncate_to_length)
+    if "negative" in df.columns:
+        df["negative"] = df["negative"].apply(lambda batch: list(map(truncate_to_length, batch)))
+        df = df.drop("negative", axis=1)
 
     st.header("Data")
     st.table(df)

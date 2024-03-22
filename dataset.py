@@ -22,7 +22,9 @@ import tqdm
 
 from lib import (
     datasets_fast_load_from_disk,
-    download_url, download_url_and_unzip, 
+    download_url, 
+    download_url_and_unzip, 
+    embed_with_cache,
     get_tti_cache_dir,
     get_num_proc,
     independent_crop,
@@ -443,20 +445,27 @@ class RedditDatasetWithSupervisedQuestions(RedditDataset):
 
 class NomicSupervisedDataset:
     num_hard_negatives: int
-    def __init__(self, num_hard_negatives: int = 0):
-        data_folder = os.path.join(get_tti_cache_dir(), "nomic_embed_supervised")
-        # Load questions
-        self.subdomain_idxs = pickle.load(
-            open(os.path.join(data_folder, 'subdomain_idxs.p'), 'rb'))
-        self.dataset = datasets.Dataset.load_from_disk(
-            os.path.join(data_folder, 'test.dataset'))
-        self.dataset.set_format('pt')
-        self.pad_token_id = 0 # TODO: Set dynamically based on appropriate tokenizer
-
-        self._embedder_tokenizer_name = 'bert'
-        self._dataset_tokenizer_name = 'bert'
-
+    tokenizer: transformers.AutoTokenizer
+    def __init__(self, tokenizer: transformers.AutoTokenizer, num_hard_negatives: int = 0):
+        self.dataset = datasets.load_dataset(
+            "nomic-ai/nomic_embed_supervised",
+            keep_in_memory=False,
+            num_proc=32,
+        )["train"]
+        self.subdomain_idxs = get_subdomain_idxs_cached(self.dataset)
+        self.tokenizer = tokenizer
         self.num_hard_negatives = num_hard_negatives
+
+    def __hash__(self) -> int:
+        return hash(self.__reduce__())
+
+    def __reduce__(self) -> Tuple:
+        # this function isn't quite right, but works
+        # for caching in streamlit :-)
+        return (
+            self._fingerprint, 
+            self.tokenizer.name_or_path
+        )
 
     @property
     def _fingerprint(self) -> str:
@@ -471,22 +480,22 @@ class NomicSupervisedDataset:
     @property
     def _query_input_ids_key(self) -> str:
         """The key in the dataset for question input IDs (tokenizer-specific)."""
-        return f'query_input_ids__{self._embedder_tokenizer_name}'
+        return f'query_input_ids'
     
     @property
     def _document_input_ids_key(self) -> str:
         """The key in the dataset for document input IDs (tokenizer-specific)."""
-        return f'document_input_ids__{self._embedder_tokenizer_name}'
+        return f'document_input_ids'
     
     @property
     def _negative_document_input_ids_key(self) -> str:
         """The key in the dataset for document input IDs (tokenizer-specific)."""
-        return f'hn_input_ids__{self._embedder_tokenizer_name}'
+        return f'hn_input_ids'
     
     @property
     def _dataset_input_ids_key(self) -> str:
         """The key in the dataset for dataset input IDs (tokenizer-specific)."""
-        return f'document_input_ids__{self._dataset_tokenizer_name}'
+        return f'document_input_ids'
     
     def first(self) -> Dict[str, torch.Tensor]:
         subdomain_query_idxs = list(next(iter(self.subdomain_idxs.values())))
@@ -495,16 +504,28 @@ class NomicSupervisedDataset:
     
     def __getitem__(self, query_id: int) -> Dict[str, torch.Tensor]: 
         query_ex = self.dataset[query_id]
-        query_input_ids = query_ex[self._query_input_ids_key]
-        document_input_ids = self.dataset[query_id][self._document_input_ids_key]
-        hn_document_input_ids = self.dataset[query_id][self._negative_document_input_ids_key]
-        hn_document_input_ids = hn_document_input_ids[:self.num_hard_negatives]
-        if not isinstance(hn_document_input_ids, torch.Tensor):
-            hn_document_input_ids = torch.tensor(hn_document_input_ids)
+
+        tokenize_fn = functools.partial(
+            self.tokenizer, return_tensors="pt", padding="max_length", truncation=True
+        )
+        query_encoded = tokenize_fn(query_ex["query"])
+        query_input_ids = query_encoded.input_ids[0]
+        query_attention_mask = query_encoded.attention_mask[0]
+
+        document_encoded = tokenize_fn(query_ex["query"])
+        document_input_ids = document_encoded.input_ids[0]
+        document_attention_mask = document_encoded.attention_mask[0]
+
+        # TODO: Tokenize hard negatives.
+        # hn_document_encoded = tokenize_fn(query_ex[""]
+        # hn_document_input_ids = self.dataset[query_id][self._negative_document_input_ids_key]
+        # hn_document_input_ids = hn_document_input_ids[:self.num_hard_negatives]
+        # if not isinstance(hn_document_input_ids, torch.Tensor):
+        #     hn_document_input_ids = torch.tensor(hn_document_input_ids)
         #
         subdomain_id = query_ex['dataset']
-        random_idx_within_subdomain = random.choice(self.subdomain_idxs[subdomain_id])
-        dataset_input_ids = self.dataset[random_idx_within_subdomain][self._dataset_input_ids_key]
+        # random_idx_within_subdomain = random.choice(self.subdomain_idxs[subdomain_id])
+        # dataset_input_ids = self.dataset[random_idx_within_subdomain][self._dataset_input_ids_key]
         # 
         return {
             'idx': query_id,
@@ -512,8 +533,8 @@ class NomicSupervisedDataset:
             # 'batch_dataset_input_ids': document_input_ids_dataset_embedder,
             # 'batch_dataset_attention_mask': (document_input_ids_dataset_embedder != self.pad_token_id).int(),
             # ######################################################################
-            'dataset_input_ids': dataset_input_ids,
-            'dataset_attention_mask': (dataset_input_ids != self.pad_token_id).int(),
+            # 'dataset_input_ids': dataset_input_ids,
+            # 'dataset_attention_mask': (dataset_input_ids != self.pad_token_id).int(),
             ######################################################################
             'query_input_ids': query_input_ids,
             'query_attention_mask': (query_input_ids != self.pad_token_id).int(),
@@ -521,8 +542,8 @@ class NomicSupervisedDataset:
             'document_input_ids': document_input_ids,
             'document_attention_mask': (document_input_ids != self.pad_token_id).int(),
             ######################################################################
-            'negative_document_input_ids': hn_document_input_ids,
-            'negative_document_attention_mask': (hn_document_input_ids != self.pad_token_id).int(),
+            # 'negative_document_input_ids': hn_document_input_ids,
+            # 'negative_document_attention_mask': (hn_document_input_ids != self.pad_token_id).int(),
             ######################################################################
         }
 
@@ -567,6 +588,17 @@ class NomicUnsupervisedDataset:
         )
         assert len(self.dataset) == 238_998_494
         self.tokenizer = tokenizer
+    
+    def __hash__(self) -> int:
+        return hash(self.__reduce__())
+
+    def __reduce__(self) -> Tuple:
+        # this function isn't quite right, but works
+        # for caching in streamlit :-)
+        return (
+            self._fingerprint, 
+            self.tokenizer.name_or_path
+        )
 
     @property
     def _fingerprint(self) -> str:
@@ -590,7 +622,7 @@ class NomicUnsupervisedDataset:
     
     def __getitem__(self, query_id: int) -> Dict[str, torch.Tensor]: 
         ex = self.dataset[query_id]
-        tokenize_fn = functools.partial(self.tokenizer, return_tensors="pt", padding="max_length", truncation=True, )
+        tokenize_fn = functools.partial(self.tokenizer, return_tensors="pt", padding="max_length", truncation=True)
         query_encoded = tokenize_fn(ex["query"])
         query_input_ids = query_encoded.input_ids[0]
         query_attention_mask = query_encoded.attention_mask[0]
@@ -599,7 +631,7 @@ class NomicUnsupervisedDataset:
         document_input_ids = document_encoded.input_ids[0]
         document_attention_mask = document_encoded.attention_mask[0]
         # 
-        subdomain_id = ex['dataset']
+        # subdomain_id = ex['dataset']
         # 
         return {
             'idx': query_id,
