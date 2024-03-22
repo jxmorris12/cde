@@ -3,6 +3,7 @@ import os
 import logging
 import os
 
+import datasets
 import torch
 import transformers
 import wandb
@@ -64,15 +65,9 @@ def main():
     # Helps with debugging.
     torch.autograd.set_detect_anomaly(True)
     torch.compiler.reset()
-    # torch._logging.set_logs(dynamo=logging.DEBUG)
 
-    import datasets
     datasets.logging.set_verbosity_info()
-    # torch._dynamo.config.verbose = True
-
     os.environ["WANDB__SERVICE_WAIT"] = "30"
-    # os.environ["_WANDB_STARTUP_DEBUG"] = "true"
-    # os.environ['TOKENIZERS_PARALLELISM'] = 'False'
     os.environ['TOKENIZERS_PARALLELISM'] = 'True'
 
     parser = transformers.HfArgumentParser((ModelArguments, DataArguments, TrainingArguments))

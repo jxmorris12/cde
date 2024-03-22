@@ -8,7 +8,8 @@ def paired_kmeans_faiss(
     q: torch.Tensor,
     X: torch.Tensor, 
     k: int,
-    max_iters: int = 100, 
+    max_iters: int = 30, 
+    n_redo: int = 2,
     seed: int = 42
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     # https://github.com/facebookresearch/faiss/blob/dafdff110489db7587b169a0afee8470f220d295/faiss/python/extra_wrappers.py#L437
@@ -30,7 +31,7 @@ def paired_kmeans_faiss(
     kmeans = faiss.Kmeans(
         dim, k,
         niter=max_iters, 
-        nredo=3,
+        nredo=n_redo,
         gpu=torch.cuda.is_available(), 
         verbose=True,
         spherical=True,

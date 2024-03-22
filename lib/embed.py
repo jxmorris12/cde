@@ -118,7 +118,7 @@ class DenseEncoder(torch.nn.Module):
 
         encoded_embeds = []
         pbar = tqdm_if_main_worker(
-            data_loader, desc='encoding', 
+            data_loader, desc=f"Encoding {col}", 
             disable=(dataset.num_rows < 128)
         )
         for batch_dict in pbar:

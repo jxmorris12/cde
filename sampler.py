@@ -12,7 +12,13 @@ import datasets
 import torch
 
 from dataset import NomicSupervisedDataset, RedditDataset
-from lib import get_tti_cache_dir, get_rank, get_world_size, md5_hash_kwargs, tqdm_if_main_worker
+from lib import (
+    cluster_dataset,
+    cluster_subdomains,
+    get_rank, 
+    get_world_size, 
+    tqdm_if_main_worker
+) 
 
 
 class Sampler(abc.ABC, torch.utils.data.Sampler):
@@ -187,7 +193,11 @@ class AutoClusterWithinDomainSampler(FixedSubdomainSampler):
         self.batch_assignments = cluster_subdomains(
             dataset=self.dataset,
             subdomains=self.batch_assignments,
+            query_to_doc=query_to_doc,
+            batch_size=batch_size,
+            model=model,
         )
+        # TODO: shuffle?
         assert sum(map(len, self.batch_assignments.values())) == len(dataset)
         assert len(set(v for b in self.batch_assignments.values() for v in b)) == len(dataset)
         assert set(v for b in self.batch_assignments.values() for v in b) == set(range(len(dataset)))

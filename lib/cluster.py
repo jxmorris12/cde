@@ -132,7 +132,7 @@ def paired_kmeans_sparse(
         q: torch.Tensor,
         X: torch.Tensor, 
         k: int,
-        max_iters: int = 100, 
+        max_iters: int = 25, 
         tol: float = 1e-3, 
         maximize: bool = True,
         initialization_strategy: str = "kmeans++", # ["kmeans++", "random"]
@@ -259,6 +259,7 @@ def cluster_dataset_uncached(
         model=model,
         query_to_doc=query_to_doc,
     )
+    gc.collect()
     
     k = math.ceil(len(X) / batch_size)
     is_sparse = (model == "bm25")
@@ -309,14 +310,51 @@ def cluster_dataset(
         print("-- opening file ... ", clustering_hash)
         return pickle.load(open(clustering_hash, "rb"))
     else:
-        result = cluster_dataset_uncached(
-            dataset=dataset,
-            model=model,
-            query_to_doc=query_to_doc,
-            query_key=query_key,
-            document_key=document_key,
-            batch_size=batch_size,
-        )
+        MAX_DATASET_LEN = 10_000_000
+        if len(dataset) < MAX_DATASET_LEN:
+            result = cluster_dataset_uncached(
+                dataset=dataset,
+                model=model,
+                query_to_doc=query_to_doc,
+                query_key=query_key,
+                document_key=document_key,
+                batch_size=batch_size,
+            )
+        else:
+            num_sub_datasets = math.ceil(len(dataset) / MAX_DATASET_LEN)
+            print(f"[cluster_dataset] splitting into {num_sub_datasets} datasets of max length {MAX_DATASET_LEN}")
+            dataset = dataset.add_column("sub_idx", range(len(dataset)))
+            dataset = dataset.shuffle(seed=42, keep_in_memory=True)
+            i = 0
+            result = {}
+            offset = 0
+            while i < len(dataset):
+                j = (i // MAX_DATASET_LEN) + 1
+                print(f"[cluster_dataset] selecting sub-dataset {j} / {num_sub_datasets}")
+                mini_dataset = dataset.select(
+                    range(i, min(i + MAX_DATASET_LEN, len(dataset)))
+                )
+                mini_dataset = mini_dataset.flatten_indices(keep_in_memory=True)
+                mini_result = cluster_dataset_uncached(
+                    dataset=mini_dataset,
+                    model=model,
+                    query_to_doc=query_to_doc,
+                    query_key=query_key,
+                    document_key=document_key,
+                    batch_size=batch_size,
+                )
+                new_clusters = set()
+                for data_idx, cluster in tqdm_if_main_worker(mini_result.items()):
+                    if isinstance(cluster, list): cluster = cluster[0]
+                    if isinstance(cluster, torch.Tensor): cluster = cluster.item()
+                    new_clusters.add(cluster)
+                    true_data_idx = mini_dataset[data_idx]["sub_idx"]
+                    result[true_data_idx] = cluster + offset
+                offset += len(new_clusters)
+                
+                gc.collect()
+                torch.cuda.empty_cache()
+                i += MAX_DATASET_LEN
         gc.collect()
         torch.cuda.empty_cache()
         pickle.dump(result, open(clustering_hash, "wb"))
@@ -335,9 +373,9 @@ def cluster_subdomains(
     
     # TODO: Cache all this; it's slow.
     print("sorting subdomains")
-    subdomains_smallest_first = sorted(subdomains.items(), key=lambda x: len(x[1]))
-    # subdomains_largest_first = sorted(self.batch_assignments.items(), key=lambda x: -len(x[1]))
-    for j, (_, data_idxs) in enumerate(subdomains_smallest_first):
+    # subdomains_smallest_first = sorted(subdomains.items(), key=lambda x: len(x[1]))
+    subdomains_largest_first = sorted(subdomains.items(), key=lambda x: -len(x[1]))
+    for j, (_, data_idxs) in enumerate(subdomains_largest_first):
         perc = (j + 1) / len(subdomains) * 100
         print(f"({j + 1} / {len(subdomains)} -- {perc:.1f}%) selecting {len(data_idxs)} indices for clustering")
         mini_dataset = dataset.dataset.select(data_idxs, keep_in_memory=True)
@@ -359,5 +397,5 @@ def cluster_subdomains(
             final_assignments[cluster + offset].append(data_idxs[j])
             new_cluster_idxs.add(cluster)
         offset += len(new_cluster_idxs)
-    print(f"expanded {len(subdomains)} domains to {len(final_assignments)} clusters.")
+    print(f"[cluster_subdomains] xpanded {len(subdomains)} domains to {len(final_assignments)} clusters.")
     return final_assignments
