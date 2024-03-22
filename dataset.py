@@ -32,6 +32,9 @@ from lib import (
 )
 
 
+os.environ['TOKENIZERS_PARALLELISM'] = '0'
+
+
 def load_msmarco_hard_negatives_uncached() -> Dict[str, Dict[str, Any]]:
     """Loads hard negative passage for MSMARCO.
 
@@ -240,7 +243,7 @@ class BeirDataset(torch.utils.data.Dataset):
         return self.size
     
     def tokenize(self, tokenizer: transformers.PreTrainedTokenizer, max_length: int) -> None:
-        os.environ['TOKENIZERS_PARALLELISM'] = 'True'
+        os.environ['TOKENIZERS_PARALLELISM'] = '0'
         self.queries = tokenize_dataset(
             dataset=self.queries,
             tokenizer=tokenizer,
@@ -446,7 +449,7 @@ class RedditDatasetWithSupervisedQuestions(RedditDataset):
 class NomicSupervisedDataset:
     num_hard_negatives: int
     tokenizer: transformers.AutoTokenizer
-    def __init__(self, tokenizer: transformers.AutoTokenizer, num_hard_negatives: int = 0):
+    def __init__(self, tokenizer: transformers.AutoTokenizer, max_seq_length: int, num_hard_negatives: int = 0):
         self.dataset = datasets.load_dataset(
             "nomic-ai/nomic_embed_supervised",
             keep_in_memory=False,
@@ -454,6 +457,7 @@ class NomicSupervisedDataset:
         )["train"]
         self.subdomain_idxs = get_subdomain_idxs_cached(self.dataset)
         self.tokenizer = tokenizer
+        self.max_seq_length = max_seq_length
         self.num_hard_negatives = num_hard_negatives
 
     def __hash__(self) -> int:
@@ -463,8 +467,9 @@ class NomicSupervisedDataset:
         # this function isn't quite right, but works
         # for caching in streamlit :-)
         return (
-            self._fingerprint, 
-            self.tokenizer.name_or_path
+            self.max_seq_length,
+            self._fingerprint,
+            self.tokenizer.name_or_path,
         )
 
     @property
@@ -503,10 +508,15 @@ class NomicSupervisedDataset:
         return self[random_query_idx]
     
     def __getitem__(self, query_id: int) -> Dict[str, torch.Tensor]: 
+        os.environ['TOKENIZERS_PARALLELISM'] = '1'
         query_ex = self.dataset[query_id]
 
         tokenize_fn = functools.partial(
-            self.tokenizer, return_tensors="pt", padding="max_length", truncation=True
+            self.tokenizer, 
+            return_tensors="pt", 
+            padding="max_length", 
+            truncation=True,
+            max_length=self.max_seq_length
         )
         query_encoded = tokenize_fn(query_ex["query"])
         query_input_ids = query_encoded.input_ids[0]
@@ -537,10 +547,10 @@ class NomicSupervisedDataset:
             # 'dataset_attention_mask': (dataset_input_ids != self.pad_token_id).int(),
             ######################################################################
             'query_input_ids': query_input_ids,
-            'query_attention_mask': (query_input_ids != self.pad_token_id).int(),
+            'query_attention_mask': query_attention_mask,
             ######################################################################
             'document_input_ids': document_input_ids,
-            'document_attention_mask': (document_input_ids != self.pad_token_id).int(),
+            'document_attention_mask': document_attention_mask,
             ######################################################################
             # 'negative_document_input_ids': hn_document_input_ids,
             # 'negative_document_attention_mask': (hn_document_input_ids != self.pad_token_id).int(),
@@ -566,19 +576,16 @@ def get_subdomain_idxs_cached(dataset: datasets.Dataset):
         return subdomain_idxs
         
 
-NOMIC_UNSUPERVISED_DS_PATH = (
-    "/home/paperspace/.cache/huggingface/datasets/nomic-ai___nomic_embed_unsupervised/default/0.0.0/13f630f335156a50f0e423fe84f6f08bd6a6e612/"
-)
-class NomicUnsupervisedDataset:
+class NomicUnsupervisedDataset(torch.utils.data.Dataset):
     dataset: datasets.Dataset
     tokenizer: transformers.AutoTokenizer
-    def __init__(self, tokenizer: transformers.AutoTokenizer):
+    def __init__(self, tokenizer: transformers.AutoTokenizer, max_seq_length: int):
         print("[NomicUnsupervisedDataset] loading dataset")
         self.dataset = (
             datasets.load_dataset(
                 "nomic-ai/nomic_embed_unsupervised", 
-                keep_in_memory=False,
-                num_proc=32,
+                # keep_in_memory=False,
+                # num_proc=32,
             )["train"]
             # datasets_fast_load_from_disk(NOMIC_UNSUPERVISED_DS_PATH)["train"]
         )
@@ -588,6 +595,7 @@ class NomicUnsupervisedDataset:
         )
         assert len(self.dataset) == 238_998_494
         self.tokenizer = tokenizer
+        self.max_seq_length = max_seq_length
     
     def __hash__(self) -> int:
         return hash(self.__reduce__())
@@ -597,8 +605,16 @@ class NomicUnsupervisedDataset:
         # for caching in streamlit :-)
         return (
             self._fingerprint, 
-            self.tokenizer.name_or_path
+            self.max_seq_length,
+            self.tokenizer.name_or_path,
         )
+
+    # def remove_columns(self, columns: List[sr]) -> None:
+    #     return self # Do nothing.
+    
+    # @property
+    # def column_names(self) -> List[str]:
+    #     return self.dataset.column_names
 
     @property
     def _fingerprint(self) -> str:
@@ -621,9 +637,19 @@ class NomicUnsupervisedDataset:
         return f'document_input_ids'
     
     def __getitem__(self, query_id: int) -> Dict[str, torch.Tensor]: 
+        os.environ['TOKENIZERS_PARALLELISM'] = '1'
+        
         ex = self.dataset[query_id]
-        tokenize_fn = functools.partial(self.tokenizer, return_tensors="pt", padding="max_length", truncation=True)
+        tokenize_fn = functools.partial(
+            self.tokenizer, 
+            return_tensors="pt", 
+            padding=True,
+            truncation=True,
+            max_length=self.max_seq_length
+        )
         query_encoded = tokenize_fn(ex["query"])
+        # from lib import get_rank
+        # print(f"tokenize [{get_rank()}] =", query_encoded.input_ids.shape)
         query_input_ids = query_encoded.input_ids[0]
         query_attention_mask = query_encoded.attention_mask[0]
         #
@@ -636,12 +662,24 @@ class NomicUnsupervisedDataset:
         return {
             'idx': query_id,
             ######################################################################
+            'query': ex["query"],
+            'document': ex["document"],
+            ######################################################################
             'query_input_ids': query_input_ids,
             'query_attention_mask': query_attention_mask,
             ######################################################################
             'document_input_ids': document_input_ids,
             'document_attention_mask': document_attention_mask,
             ######################################################################
+        }
+    
+    @staticmethod
+    def collate_fn(batches: List[Dict[str, int]]):
+        print("Dataset.collate called")
+        breakpoint()
+        return {
+            k: torch.tensor(v, dtype=torch.int64) 
+            for k, v in batches[0].items()
         }
 
 

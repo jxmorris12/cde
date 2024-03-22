@@ -23,7 +23,7 @@ from sampler import (
 def load_supervised_dataset() -> NomicSupervisedDataset:        
     tokenizer = transformers.AutoTokenizer.from_pretrained("nomic-ai/nomic-embed-text-v1-unsupervised")
     return NomicSupervisedDataset(
-        tokenizer=tokenizer, num_hard_negatives=0
+        tokenizer=tokenizer, num_hard_negatives=0, max_seq_length=128
     )
 
 
@@ -31,7 +31,7 @@ def load_supervised_dataset() -> NomicSupervisedDataset:
 def load_unsupervised_dataset() -> NomicUnsupervisedDataset:        
     tokenizer = transformers.AutoTokenizer.from_pretrained("nomic-ai/nomic-embed-text-v1-unsupervised")
     return NomicUnsupervisedDataset(
-        tokenizer=tokenizer
+        tokenizer=tokenizer, max_seq_length=128
     )
 
 
@@ -126,8 +126,8 @@ def main():
     with st.sidebar:
         dataset_name = st.selectbox(
             "Dataset",
-            ["nomic_supervised", "nomic_unsupervised"],
-            # ["nomic_unsupervised", "nomic_supervised"],
+            # ["nomic_supervised", "nomic_unsupervised"],
+            ["nomic_unsupervised", "nomic_supervised"],
         )
         if dataset_name == "nomic_supervised":
             st.text("[Note: Hard negatives not displayed.]")

@@ -304,11 +304,11 @@ def cluster_dataset(
         model=model,
         query_to_doc=query_to_doc,
     )
-    print("[cluster_dataset] checking for cluster at file", clustering_hash)
+    # print("[cluster_dataset] checking for cluster at file", clustering_hash)
     if os.path.exists(clustering_hash):
-        print("[cluster_dataset] opening cached cluster ... ", clustering_hash)
+        # print("[cluster_dataset] opening cached cluster ... ", clustering_hash)
         result = pickle.load(open(clustering_hash, "rb"))
-        print("[cluster_dataset] opened cached cluster ... ", clustering_hash)
+        # print("[cluster_dataset] opened cached cluster ... ", clustering_hash)
         return result
     else:
         MAX_DATASET_LEN = 10_000_000
@@ -414,9 +414,9 @@ def cluster_subdomains(
         model=model,
         query_to_doc=query_to_doc,
     )
-    print("[cluster_subdomains] checking for cluster at file", clustering_hash)
+    # print("[cluster_subdomains] checking for cluster at file", clustering_hash)
     if os.path.exists(clustering_hash):
-        print("[cluster_subdomains] opening cached cluster ... ", clustering_hash)
+        # print("[cluster_subdomains] opening cached cluster ... ", clustering_hash)
         return pickle.load(open(clustering_hash, "rb"))
     else:
         result = cluster_subdomains_uncached(

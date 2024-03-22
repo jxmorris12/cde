@@ -68,7 +68,6 @@ def main():
 
     datasets.logging.set_verbosity_info()
     os.environ["WANDB__SERVICE_WAIT"] = "30"
-    os.environ['TOKENIZERS_PARALLELISM'] = 'True'
 
     parser = transformers.HfArgumentParser((ModelArguments, DataArguments, TrainingArguments))
     model_args, data_args, training_args = parser.parse_args_into_dataclasses()
@@ -108,7 +107,7 @@ def main():
         # 'dbpedia',
 
     ]
-    # beir_dataset_names = [] # tmp
+    beir_dataset_names = ['arguana'] # tmp
     beir_dict = {
         d: BeirDataset(dataset=d, embedder=model_args.embedder_rerank) 
         for d in sorted(beir_dataset_names)
@@ -135,13 +134,15 @@ def main():
         )
     elif data_args.dataset == 'nomic_unsupervised':
         train_dataset = NomicUnsupervisedDataset(
-            tokenizer=embedder_tokenizer
+            tokenizer=embedder_tokenizer,
+            max_seq_length=model_args.max_seq_length,
         )
         eval_dataset = None
     elif data_args.dataset == 'nomic':
         train_dataset = NomicSupervisedDataset(
             tokenizer=embedder_tokenizer,
             num_hard_negatives=data_args.num_hard_negatives,
+            max_seq_length=model_args.max_seq_length,
         )
         eval_dataset = None
     else:

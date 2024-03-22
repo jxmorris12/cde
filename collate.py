@@ -52,7 +52,7 @@ class DocumentQueryCollatorWithPadding(transformers.DataCollatorWithPadding):
         other_features = collections.defaultdict(list)
         for ex in features:
             doc_ex = {}
-            hn_doc_ex ={}
+            hn_doc_ex = {}
             query_ex = {}
             dataset_ex = {}
             for k,v in ex.items():
