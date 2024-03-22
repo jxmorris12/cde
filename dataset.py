@@ -640,36 +640,11 @@ class NomicUnsupervisedDataset(torch.utils.data.Dataset):
         os.environ['TOKENIZERS_PARALLELISM'] = '1'
         
         ex = self.dataset[query_id]
-        tokenize_fn = functools.partial(
-            self.tokenizer, 
-            return_tensors="pt", 
-            padding=True,
-            truncation=True,
-            max_length=self.max_seq_length
-        )
-        query_encoded = tokenize_fn(ex["query"])
-        # from lib import get_rank
-        # print(f"tokenize [{get_rank()}] =", query_encoded.input_ids.shape)
-        query_input_ids = query_encoded.input_ids[0]
-        query_attention_mask = query_encoded.attention_mask[0]
-        #
-        document_encoded = tokenize_fn(ex["document"])
-        document_input_ids = document_encoded.input_ids[0]
-        document_attention_mask = document_encoded.attention_mask[0]
-        # 
-        # subdomain_id = ex['dataset']
-        # 
         return {
             'idx': query_id,
             ######################################################################
             'query': ex["query"],
             'document': ex["document"],
-            ######################################################################
-            'query_input_ids': query_input_ids,
-            'query_attention_mask': query_attention_mask,
-            ######################################################################
-            'document_input_ids': document_input_ids,
-            'document_attention_mask': document_attention_mask,
             ######################################################################
         }
     

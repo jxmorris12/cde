@@ -8,7 +8,7 @@ import torch
 import transformers
 import wandb
 
-from collate import DocumentQueryCollatorWithPadding
+from collate import DocumentQueryCollatorWithPadding, TokenizerCollator
 from dataset import (
     load_reddit_train_and_val, load_synthetic_words_dataset, 
     BeirDataset, NomicSupervisedDataset, NomicUnsupervisedDataset
@@ -107,7 +107,7 @@ def main():
         # 'dbpedia',
 
     ]
-    beir_dataset_names = ['arguana'] # tmp
+    # beir_dataset_names = ['arguana'] # tmp
     beir_dict = {
         d: BeirDataset(dataset=d, embedder=model_args.embedder_rerank) 
         for d in sorted(beir_dataset_names)
@@ -116,6 +116,7 @@ def main():
         **{f"BeIR/{k}": v for k,v in beir_dict.items()}
     }
 
+    collator_cls = DocumentQueryCollatorWithPadding
     if data_args.dataset == 'synthetic_words':
         train_dataset, eval_dataset = load_synthetic_words_dataset()
     elif data_args.dataset == 'reddit_supervised':
@@ -138,6 +139,8 @@ def main():
             max_seq_length=model_args.max_seq_length,
         )
         eval_dataset = None
+        # Need to tokenize and collate for this dataset
+        collator_cls = TokenizerCollator
     elif data_args.dataset == 'nomic':
         train_dataset = NomicSupervisedDataset(
             tokenizer=embedder_tokenizer,
@@ -145,6 +148,8 @@ def main():
             max_seq_length=model_args.max_seq_length,
         )
         eval_dataset = None
+        # Need to tokenize and collate for this dataset
+        collator_cls = TokenizerCollator
     else:
         raise ValueError(f'Unsupported dataset {data_args.dataset}')
     
@@ -171,13 +176,12 @@ def main():
         dataset_backbone=dataset_backbone,
     )
 
-    collator = DocumentQueryCollatorWithPadding(
+    collator = collator_cls(
         tokenizer=embedder_tokenizer,
         padding='longest',
         return_tensors='pt',
         max_length=model_args.max_seq_length,
     )
-
     if get_rank() == 0:
         wandb_run_id = training_args.exp_name
         print("starting wandb run with name", wandb_run_id)

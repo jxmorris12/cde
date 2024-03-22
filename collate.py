@@ -2,6 +2,7 @@ from typing import Any, Dict, List, Optional, Union
 
 import collections
 import functools
+import os
 
 import torch
 import transformers
@@ -36,6 +37,85 @@ def cut_padding(batch: Dict[str, torch.Tensor], pad_token: int) -> Dict[str, tor
     batch['input_ids'] = batch['input_ids'][:, :padding_start]
     batch['attention_mask'] = batch['attention_mask'][:, :padding_start]
     return batch
+
+from typing import Any, Dict, List, Optional, Union
+
+import collections
+import functools
+
+import torch
+import transformers
+
+
+is_doc = lambda s: s.startswith('document_')
+is_hn_doc = lambda s: s.startswith('negative_document_')
+is_query = lambda s: s.startswith('query_')
+is_dataset_doc = lambda s: s.startswith('dataset_')
+
+
+def pad_tensor_to_length(the_list: List[int], length: int = 0, value: int = 0) -> List[int]:
+    num_pads = length - len(the_list)
+    if num_pads == 0:
+        return torch.tensor(the_list, dtype=torch.long)
+    else:
+        return torch.tensor(the_list + [value] * num_pads, dtype=torch.long)
+
+
+def cut_padding(batch: Dict[str, torch.Tensor], pad_token: int) -> Dict[str, torch.Tensor]:
+    """Truncates doc if some stuff is all padding at the end."""
+    assert 'input_ids' in batch
+    assert 'attention_mask' in batch
+    # 
+    b, s = batch['input_ids'].shape
+    # 
+    all_padding = (batch['input_ids'] == pad_token).all(dim=0)
+    if all_padding.sum() == 0:
+        return batch
+    # 
+    padding_start = all_padding.int().argmax()
+    batch['input_ids'] = batch['input_ids'][:, :padding_start]
+    batch['attention_mask'] = batch['attention_mask'][:, :padding_start]
+    return batch
+
+
+class TokenizerCollator(transformers.DataCollatorWithPadding):
+    tokenizer: transformers.PreTrainedTokenizerBase
+    padding: Union[bool, str] = True
+    max_length: Optional[int] = None
+    pad_to_multiple_of: Optional[int] = None
+    return_tensors: str = "pt"
+
+    # TODO: Fix to use separate tokenizers
+
+    def __call__(self, features: List[Dict[str, Any]]) -> Dict[str, Any]:
+        os.environ['TOKENIZERS_PARALLELISM'] = '1'
+        query = []
+        document = []
+
+        for ex in features:
+            query.append(ex["query"])
+            document.append(ex["document"])
+
+        
+        tokenize_fn = functools.partial(
+            self.tokenizer, 
+            return_tensors="pt", 
+            padding=True,
+            truncation=True,
+            max_length=self.max_length
+        )
+        query_encoded = tokenize_fn(query)
+        document_encoded = tokenize_fn(document)
+
+        ex = {}
+        
+        ex["query_input_ids"] = query_encoded.input_ids
+        ex["query_attention_mask"] = query_encoded.attention_mask
+
+        ex["document_input_ids"] = document_encoded.input_ids
+        ex["document_attention_mask"] = document_encoded.attention_mask
+
+        return ex
 
 
 class DocumentQueryCollatorWithPadding(transformers.DataCollatorWithPadding):

@@ -116,8 +116,6 @@ def get_sampled_batch(
         return batch, batch_idxs
 
 
-dataset_start_idx = 0
-
 def main():
     global dataset_start_idx
 
@@ -156,10 +154,14 @@ def main():
             dataset = load_supervised_dataset()
     
     # allow toggling through multiple batches
+    if 'dataset_start_idx' not in st.session_state:
+        st.session_state['dataset_start_idx'] = 0
     if st.button('Reset batch'):
-        dataset_start_idx = 0
+        st.session_state['dataset_start_idx'] = 0
     if st.button('Next batch'):
-        dataset_start_idx += batch_size
+        st.session_state['dataset_start_idx'] += batch_size
+    
+    dataset_start_idx = st.session_state['dataset_start_idx']
     st.text(f"Batch index {dataset_start_idx}")
 
     with st.spinner('Getting samples...'):      
