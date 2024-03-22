@@ -1,10 +1,9 @@
-from typing import Dict, Iterable, List, Optional, Union
+from typing import Dict, Iterable, List, Optional, Union, Tuple
 
 import abc
 import collections
 import logging
 import math
-import os
 import random
 import torch
 
@@ -40,6 +39,19 @@ class Sampler(abc.ABC, torch.utils.data.Sampler):
         self.shuffle = shuffle
         self.seed = 42
         self.epoch = 0
+
+    def __hash__(self) -> int:
+        return hash(self.__reduce__())
+
+    def __reduce__(self) -> Tuple:
+        # this function isn't quite right, but works
+        # for caching in streamlit :-)
+        return (
+            self.dataset._fingerprint, 
+            self.batch_size, 
+            self.max_num_batches, 
+            self.seed
+        )
     
     def _get_indices(self) -> Iterable[int]:
         # TODO respect self.shuffle.

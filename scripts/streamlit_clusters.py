@@ -1,54 +1,175 @@
-from typing import Dict, List
+from typing import List, Union, Tuple
 
+import sys
+sys.path.append('/home/paperspace/tti3')
+
+from typing import List
+
+import pandas as pd
 import streamlit as st
+import torch
 import transformers
 
-from dataset import NomicUnsupervisedDataset
-from lib import get_cache_location_from_kwargs
+from dataset import NomicSupervisedDataset, NomicUnsupervisedDataset
+from sampler import (
+    RandomSampler, 
+    FixedSubdomainSampler, 
+    AutoClusterSampler, 
+    AutoClusterWithinDomainSampler
+)
 
 
-def load_default_dataset() -> NomicUnsupervisedDataset:        
+@st.cache_resource
+def load_supervised_dataset() -> NomicSupervisedDataset:        
     tokenizer = transformers.AutoTokenizer.from_pretrained("nomic-ai/nomic-embed-text-v1-unsupervised")
     return NomicUnsupervisedDataset(tokenizer=tokenizer)
 
 
-def load_cluster(
-        dataset: NomicUnsupervisedDataset,
+@st.cache_resource
+def load_unsupervised_dataset() -> NomicUnsupervisedDataset:        
+    tokenizer = transformers.AutoTokenizer.from_pretrained("nomic-ai/nomic-embed-text-v1-unsupervised")
+    return NomicUnsupervisedDataset(tokenizer=tokenizer)
+
+
+def get_sampler(
+        strategy: str,
+        dataset: Union[NomicSupervisedDataset, NomicUnsupervisedDataset],
         query_to_doc: bool,
         batch_size: int,
-        model: str
-    )  -> Dict[int, List[int]]:
-    clustering_hash = get_cache_location_from_kwargs(
-        dataset_fingerprint=dataset._fingerprint,
-        query_key=dataset._document_input_ids_key,
-        document_key=dataset._query_input_ids_key,
-        batch_size=batch_size,
-        model=model,
-        query_to_doc=query_to_doc,
-    )
-    print("checking for cluster at file", clustering_hash)
+        model: str,
+    )  -> torch.utils.data.Sampler:
+    if strategy == "random":
+        return RandomSampler(
+            dataset=dataset, 
+            batch_size=batch_size,
+            shuffle=True,
+        )
+    elif strategy == "domain":
+        return FixedSubdomainSampler(
+            dataset=dataset, 
+            batch_size=batch_size,
+            shuffle=False,
+        )
+    elif strategy == "cluster":
+        return AutoClusterSampler(
+            dataset=dataset, 
+            batch_size=batch_size,
+            shuffle=True,
+            query_to_doc=query_to_doc, 
+            model=model,
+        )
+    elif strategy == "cluster_within_domain":
+        return AutoClusterWithinDomainSampler(
+            dataset=dataset, 
+            batch_size=batch_size,
+            shuffle=True,
+            query_to_doc=query_to_doc, 
+            model=model,
+        )
     
 
-def main():
-    st.title('🎈 App Name')
-    batch_size = st.selectbox(
-        "Batch_size",
-        [224],
-    )
-    model = st.selectbox(
-        "Model",
-        key="gtr_base"
-        ["bm25", "gtr_base"],
-    )
+@st.cache_data
+def get_sampler_batch_idxs(
+        start_idx: int,
+        batch_size: int,
+        sampler: torch.utils.data.Sampler
+    ) -> List[int]:
+    batch_idxs = []
+    sampler_iter = iter(sampler)
+    for _ in range(start_idx):
+        next(sampler_iter)
 
-    with st.spinner('Getting cluster...'):
-        dataset = load_default_dataset()
-        cluster = load_cluster(
+    for _ in range(batch_size):
+        idx = next(sampler_iter)
+        batch_idxs.append(idx)
+    return batch_idxs
+
+
+def get_sampled_batch(
+        strategy: str,
+        dataset: Union[NomicSupervisedDataset, NomicUnsupervisedDataset],
+        batch_size: int,
+        model: str,
+        start_idx = 0,
+    ) -> Tuple[List, List]:
+        sampler = get_sampler(
+            strategy=strategy,
             dataset=dataset,
             batch_size=batch_size,
             model=model,
             query_to_doc=True,
         )
+
+        batch_idxs = get_sampler_batch_idxs(
+            start_idx=0,
+            batch_size=batch_size,
+            sampler=sampler,
+        )
+
+        # get a batch from the sampler
+        batch = [dataset.dataset[j] for j in batch_idxs]
+        return batch, batch_idxs
+
+
+def main():
+    st.title('🎈 TTI Clusters')
+
+    with st.sidebar:
+        dataset_name = st.selectbox(
+            "Dataset",
+            ["nomic_unsupervised", "nomic_supervised"],
+        )
+        batch_size = st.selectbox(
+            "Batch_size",
+            [224],
+        )
+        model = st.selectbox(
+            "Model",
+            options=["gtr_base", "bm25"],
+        )
+        sampling_strategy = st.selectbox(
+            "Sampler",
+            options=[
+                "domain", 
+                "random", 
+                "cluster", 
+                "cluster_within_domain"
+            ],
+        )
+    
+    with st.spinner('Getting dataset...'):
+        if dataset_name == "nomic_unsupervised":
+            dataset = load_unsupervised_dataset()
+        else:
+            dataset = load_supervised_dataset()
+
+    start_idx = 0
+    
+    # allow toggling through multiple batches
+    if st.button('Next batch'):
+        start_idx += batch_size
+    st.text(f"Batch index {start_idx}")
+    
+    with st.spinner('Getting samples...'):      
+        batch, batch_idxs = get_sampled_batch(
+            strategy=sampling_strategy,
+            dataset=dataset,
+            batch_size=batch_size,
+            model=model,
+            start_idx=start_idx,
+        )
+
+    # show it in the UI
+    df = pd.DataFrame(batch)
+    df["batch_idx"] = batch_idxs
+
+    max_len = 200
+    truncate_to_length = lambda s: s[:max_len] + ("..." if len(s) > max_len else "")
+    df["query"] = df["query"].apply(truncate_to_length)
+    df["document"] = df["document"].apply(truncate_to_length)
+
+    st.header("Data")
+    st.table(df)
         
     st.success('Done!')
 
