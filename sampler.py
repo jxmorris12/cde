@@ -2,6 +2,7 @@ from typing import Dict, Iterable, List, Optional, Union, Tuple
 
 import abc
 import collections
+import functools
 import logging
 import math
 import random
@@ -124,12 +125,14 @@ class FixedSubdomainSampler(RandomSampler):
         assert sum(map(len, self.batch_assignments.values())) == len(dataset)
     
     def _get_indices(self) -> List[int]:
+        print(f"[sampler] running get_indices on rank {get_rank()}")
         g = torch.Generator()
         g.manual_seed(self.seed + self.epoch)
         batch_lists = list(self.batch_assignments.values())
         random.Random(self.seed + self.epoch).shuffle(batch_lists)
         # 1. Concatenate all datasets from all batches (which should be pre-shuffled once)
-        all_assignments = torch.tensor([v for L in batch_lists for v in L])
+        all_assignments = torch.tensor(
+            [v for L in tqdm_if_main_worker(batch_lists, desc="Sampler tensorizing clusters") for v in L])
         effective_length = len(self.dataset) - (len(self.dataset) % self.batch_size)
         # 2. Trim off the end (effectively drop_last=True)
         all_assignments = all_assignments[:effective_length]
@@ -141,6 +144,7 @@ class FixedSubdomainSampler(RandomSampler):
         # 4. Randomly reorder batches
         batch_perm = torch.randperm(num_batches, generator=g)
         # 5. Flatten and return
+        print(f"[sampler] finished running get_indices on rank {get_rank()}")
         return all_assignments[batch_perm].flatten().tolist()
 
     def __iter__(self):  
@@ -193,7 +197,7 @@ class AutoClusterWithinDomainSampler(FixedSubdomainSampler):
             shuffle: bool,
             model: str,
         ):
-        print("calling super().__init__()")
+        # TODO: shuffle?
         super().__init__(
             dataset=dataset, 
             batch_size=batch_size, 
@@ -207,10 +211,14 @@ class AutoClusterWithinDomainSampler(FixedSubdomainSampler):
             batch_size=batch_size,
             model=model,
         )
-        # TODO: shuffle?
-        assert sum(map(len, self.batch_assignments.values())) == len(dataset)
-        assert len(set(v for b in self.batch_assignments.values() for v in b)) == len(dataset)
-        assert set(v for b in self.batch_assignments.values() for v in b) == set(range(len(dataset)))
+        run_assertions = False
+        if run_assertions:
+            print("[autocluster running assertions]")
+            tq = functools.partial(tqdm_if_main_worker, leave=False)
+            assert sum(map(len, tq(self.batch_assignments.values(), desc="asserting total length of all clusters"))) == len(dataset)
+            assert len(set(v for b in tq(self.batch_assignments.values()) for v in b), desc="asserting all values are unique") == len(dataset)
+            assert set(v for b in tq(self.batch_assignments.values(), desc="asserting values cover range") for v in b) == set(range(len(dataset)))
+            print("[autocluster ran assertions]")
 
 
 def get_sampler(

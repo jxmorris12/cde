@@ -18,7 +18,7 @@ import torch
 import tqdm
 import transformers
 
-from .dist import get_rank
+from .dist import get_num_proc, get_rank
 
 
 def get_tti_cache_dir() -> str:

@@ -296,6 +296,7 @@ def cluster_dataset(
     ) -> Dict[int, List[int]]:
     # TODO: Turn this caching logic into a nice decorator?
     clustering_hash = get_cache_location_from_kwargs(
+        # method="cluster_dataset",
         dataset_fingerprint=dataset._fingerprint,
         document_key=document_key,
         query_key=query_key,
@@ -303,12 +304,12 @@ def cluster_dataset(
         model=model,
         query_to_doc=query_to_doc,
     )
-    print("checking for cluster at file", clustering_hash)
+    print("[cluster_dataset] checking for cluster at file", clustering_hash)
     if os.path.exists(clustering_hash):
-        # if get_world_size() > 1:
-        #     torch.distributed.barrier()
-        print("-- opening file ... ", clustering_hash)
-        return pickle.load(open(clustering_hash, "rb"))
+        print("[cluster_dataset] opening cached cluster ... ", clustering_hash)
+        result = pickle.load(open(clustering_hash, "rb"))
+        print("[cluster_dataset] opened cached cluster ... ", clustering_hash)
+        return result
     else:
         MAX_DATASET_LEN = 10_000_000
         if len(dataset) < MAX_DATASET_LEN:
@@ -361,7 +362,7 @@ def cluster_dataset(
         return result
 
 
-def cluster_subdomains(
+def cluster_subdomains_uncached(
         dataset: datasets.Dataset,
         subdomains: Dict[int, List[int]],
         query_to_doc: bool,
@@ -371,8 +372,6 @@ def cluster_subdomains(
     offset = 0
     final_assignments = collections.defaultdict(list)
     
-    # TODO: Cache all this; it's slow.
-    print("sorting subdomains")
     # subdomains_smallest_first = sorted(subdomains.items(), key=lambda x: len(x[1]))
     subdomains_largest_first = sorted(subdomains.items(), key=lambda x: -len(x[1]))
     for j, (_, data_idxs) in enumerate(subdomains_largest_first):
@@ -397,5 +396,39 @@ def cluster_subdomains(
             final_assignments[cluster + offset].append(data_idxs[j])
             new_cluster_idxs.add(cluster)
         offset += len(new_cluster_idxs)
-    print(f"[cluster_subdomains] xpanded {len(subdomains)} domains to {len(final_assignments)} clusters.")
+    print(f"[cluster_subdomains] expanded {len(subdomains)} domains to {len(final_assignments)} clusters.")
     return final_assignments
+
+
+def cluster_subdomains(
+        dataset: datasets.Dataset,
+        subdomains: Dict[int, List[int]],
+        query_to_doc: bool,
+        batch_size: int, 
+        model: str,
+    ) -> Dict[int, List[int]]:
+    clustering_hash = get_cache_location_from_kwargs(
+        method="cluster_subdomains",
+        dataset_fingerprint=dataset._fingerprint,
+        batch_size=batch_size,
+        model=model,
+        query_to_doc=query_to_doc,
+    )
+    print("[cluster_subdomains] checking for cluster at file", clustering_hash)
+    if os.path.exists(clustering_hash):
+        print("[cluster_subdomains] opening cached cluster ... ", clustering_hash)
+        return pickle.load(open(clustering_hash, "rb"))
+    else:
+        result = cluster_subdomains_uncached(
+            dataset=dataset,
+            subdomains=subdomains,
+            query_to_doc=query_to_doc,
+            batch_size=batch_size,
+            model=model,
+        )
+        gc.collect()
+        torch.cuda.empty_cache()
+        print("[cluster_subdomains] saving result to", clustering_hash)
+        pickle.dump(result, open(clustering_hash, "wb"))
+        print("[cluster_subdomains] saved result to", clustering_hash)
+        return result

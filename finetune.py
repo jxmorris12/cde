@@ -78,15 +78,12 @@ def main():
         datefmt='%Y-%m-%d %H:%M:%S',
         level=logging.WARNING
     )
-    print("[*] loading models (1)")
     embedder, embedder_tokenizer = load_embedder_and_tokenizer(
         model_args.embedder,
     )
-    print("[*] loading models (2)")
     dataset_embedder, dataset_tokenizer = load_embedder_and_tokenizer(
         model_args.dataset_embedder,
     )
-    print("[*] loading models (3)")
     dataset_backbone, dataset_tokenizer = load_embedder_and_tokenizer(
         model_args.dataset_embedder,
     )
@@ -111,7 +108,7 @@ def main():
         # 'dbpedia',
 
     ]
-    beir_dataset_names = [] # tmp
+    # beir_dataset_names = [] # tmp
     beir_dict = {
         d: BeirDataset(dataset=d, embedder=model_args.embedder_rerank) 
         for d in sorted(beir_dataset_names)
@@ -120,7 +117,6 @@ def main():
         **{f"BeIR/{k}": v for k,v in beir_dict.items()}
     }
 
-    print("[*] loading data")
     if data_args.dataset == 'synthetic_words':
         train_dataset, eval_dataset = load_synthetic_words_dataset()
     elif data_args.dataset == 'reddit_supervised':
