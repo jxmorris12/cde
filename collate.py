@@ -92,9 +92,13 @@ class TokenizerCollator(transformers.DataCollatorWithPadding):
         query = []
         document = []
 
+        out_ex = {}
+        out_ex["idx"] = []
+
         for ex in features:
             query.append(ex["query"])
             document.append(ex["document"])
+            out_ex["idx"].append(ex["idx"])
 
         
         tokenize_fn = functools.partial(
@@ -106,16 +110,16 @@ class TokenizerCollator(transformers.DataCollatorWithPadding):
         )
         query_encoded = tokenize_fn(query)
         document_encoded = tokenize_fn(document)
-
-        ex = {}
         
-        ex["query_input_ids"] = query_encoded.input_ids
-        ex["query_attention_mask"] = query_encoded.attention_mask
+        out_ex["query_input_ids"] = query_encoded.input_ids
+        out_ex["query_attention_mask"] = query_encoded.attention_mask
 
-        ex["document_input_ids"] = document_encoded.input_ids
-        ex["document_attention_mask"] = document_encoded.attention_mask
+        out_ex["document_input_ids"] = document_encoded.input_ids
+        out_ex["document_attention_mask"] = document_encoded.attention_mask
 
-        return ex
+        out_ex["idx"] = torch.tensor(out_ex["idx"])
+
+        return out_ex
 
 
 class DocumentQueryCollatorWithPadding(transformers.DataCollatorWithPadding):

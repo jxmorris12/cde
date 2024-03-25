@@ -176,7 +176,7 @@ class TrainingArguments(transformers.TrainingArguments):
         metadata={"help": "Log every X updates steps."}
     )
     eval_steps: int = field(
-        default=20_000, 
+        default=30_000, 
         metadata={"help": "Run an evaluation every X steps."}
     )
 
@@ -210,6 +210,14 @@ class TrainingArguments(transformers.TrainingArguments):
     weight_decay: float = field(
         default=0.01, 
         metadata={"help": "Weight decay for AdamW if we apply some."}
+    )
+    automatically_deduplicate_documents: bool = field(
+        default=True,
+        metadata={"help": "whether to count duplicate queries as joint positive samples"}
+    )
+    automatically_deduplicate_queries: bool = field(
+        default=True,
+        metadata={"help": "whether to count duplicate queries as joint positive samples"}
     )
     def __setattr__(self, name, value):
         super(transformers.TrainingArguments, self).__setattr__(name, value)

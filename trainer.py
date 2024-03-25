@@ -40,6 +40,7 @@ class CustomTrainer(transformers.Trainer):
         self._eval_sampler = eval_sampler
         self._signature_columns = [
             "idx",
+            "query", "document",
             "document_input_ids", "document_attention_mask",
             "negative_document_input_ids", "negative_document_attention_mask",
             "dataset_input_ids", "dataset_attention_mask",
@@ -278,10 +279,10 @@ class CustomTrainer(transformers.Trainer):
             document_inputs["dataset_input_ids"] = fake_dataset_input_ids
             document_inputs["dataset_attention_mask"] = fake_dataset_attention_mask
         elif self.args.dataset_info == "batch":
-            query_inputs["dataset_input_ids"] = batch_dataset_inputs["input_ids"]
-            query_inputs["dataset_attention_mask"] = batch_dataset_inputs["attention_mask"]
-            document_inputs["dataset_input_ids"] = batch_dataset_inputs["input_ids"]
-            document_inputs["dataset_attention_mask"] = batch_dataset_inputs["attention_mask"]
+            query_inputs["dataset_input_ids"] = document_inputs["input_ids"]
+            query_inputs["dataset_attention_mask"] = document_inputs["attention_mask"]
+            document_inputs["dataset_input_ids"] = document_inputs["input_ids"]
+            document_inputs["dataset_attention_mask"] = document_inputs["attention_mask"]
         else:
             document_inputs["dataset_input_ids"] = dataset_inputs["input_ids"]
             document_inputs["dataset_attention_mask"] = dataset_inputs["attention_mask"]
@@ -309,40 +310,39 @@ class CustomTrainer(transformers.Trainer):
             
             # Create labels based on document IDs.
             document_unique_ids = document_inputs["input_ids"].sum(dim=1)
-            one_hot_labels = (
-                document_unique_ids[:, None] == corpus_unique_ids[None, :])
+            if self.args.automatically_deduplicate_documents:
+                one_hot_labels = (
+                    document_unique_ids[:, None] == corpus_unique_ids[None, :])
+            else:
+                idx = inputs["idx"]
+                one_hot_labels = (idx[:, None] == idx[None, :]).float()
             
             # Aggregate labels for duplicate queries.
             query_unique_ids = query_inputs["input_ids"].sum(dim=1)
-            # TODO: Write out theory for these lines.
-            one_hot_labels = (
-                (query_unique_ids[:, None] == query_unique_ids[None, :]).float() @ one_hot_labels.float())
-            one_hot_labels = one_hot_labels.bool()
+            if self.args.automatically_deduplicate_queries:
+                one_hot_labels = (
+                    (query_unique_ids[:, None] == query_unique_ids[None, :]).float() @ one_hot_labels.float())
+                one_hot_labels = one_hot_labels.bool()
 
             num_unique_documents = corpus_unique_ids.unique().numel()
-            num_collisions = len(corpus_unique_ids) - num_unique_documents
-            # num_collisions = (one_hot_labels.sum(dim=1) > 1).sum()
-            # num_unique_documents = len(one_hot_labels) - num_collisions
-
+            num_collisions_documents = len(corpus_unique_ids) - num_unique_documents
             num_unique_queries = query_unique_ids.unique().numel()
             num_collisions_queries = len(one_hot_labels) - num_unique_queries
 
             metrics = {
                 "stats_unique": num_unique_documents,
                 "stats_unique_queries": num_unique_queries,
-                "stats_collisions": num_collisions,
+                "stats_collisions": num_collisions_documents,
                 "stats_collisions_queries": num_collisions_queries,
             }
             if self.is_in_train:
                 for key, val in metrics.items():
                     self._log_extra(key, val)
 
-            loss, scores = self._contrastive_loss(
+            loss, _scores = self._contrastive_loss(
                 e1, e2, 
                 one_hot_labels=one_hot_labels
             )
-            # if self._is_main_worker: breakpoint()
-            # torch.distributed.barrier()
             return loss
     
     # Custom retrieval evalution code

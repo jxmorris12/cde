@@ -79,7 +79,8 @@ class EncoderDecoderWithDatasetEmbedder(transformers.PreTrainedModel):
             dataset_attention_mask: torch.Tensor,
     ) -> torch.Tensor:
         # print("shapes:", input_ids.shape, dataset_input_ids.shape, "(", attention_mask.shape, dataset_attention_mask.shape, ")")
-        batch_size = dataset_input_ids.shape[0]
+        batch_size = input_ids.shape[0]
+        corpus_size = dataset_input_ids.shape[0]
         dataset_outputs = self.dataset_embedder(
             input_ids=dataset_input_ids,
             attention_mask=dataset_attention_mask
@@ -133,16 +134,12 @@ class TwoEmbeddersWithMLP(transformers.PreTrainedModel):
             limit_layers(dataset_backbone, config.limit_layers)
         self.embedder = embedder
         self.dataset_embedder = dataset_embedder
+        self.dataset_backbone = dataset_backbone
 
         # TODO make this a little nicer. (Not every model has 'embeddings...')
         self.dataset_backbone = dataset_backbone
-        self.dataset_backbone.embeddings.position_embeddings.weight.requires_grad = False
-        self.dataset_backbone.embeddings.position_embeddings.weight.fill_(0.0)
-
-        # TODO - fix. consider BART or another encoder-decoder.
-        # self.backbone = transformers.AutoModel.from_pretrained("t5-small")
-        # for block in self.backbone.decoder.block: 
-        #     block.layer[0].SelfAttention.has_relative_attention_bias = False
+        self.dataset_backbone.embeddings.word_embeddings.weight.requires_grad = False
+        self.dataset_backbone.embeddings.word_embeddings.weight.fill_(0.0)
 
         self.hidden_size = self.embedder.config.hidden_size
         joint_hidden_size = (self.embedder.config.hidden_size + self.dataset_backbone.config.hidden_size)
@@ -154,6 +151,7 @@ class TwoEmbeddersWithMLP(transformers.PreTrainedModel):
             torch.nn.Linear(self.hidden_size * 2, self.hidden_size),
         )
 
+        self.temp = config.contrastive_temp
         if config.disable_dropout:
             disable_dropout(self)
     
@@ -164,20 +162,30 @@ class TwoEmbeddersWithMLP(transformers.PreTrainedModel):
             dataset_input_ids: torch.Tensor,
             dataset_attention_mask: torch.Tensor,
     ) -> torch.Tensor:
-        dataset_input_embeddings = mean_pool(
+        batch_size = input_ids.shape[0]
+        _corpus_size = dataset_input_ids.shape[0]
+        dataset_backbone_input_embeddings = mean_pool(
             hidden_states=self.dataset_embedder(
                 input_ids=dataset_input_ids,
                 attention_mask=dataset_attention_mask
             ).last_hidden_state,
             attention_mask=dataset_attention_mask,
         )
-        assert len(dataset_input_embeddings.shape) == 2 # (b, d)
-        dataset_input_embeddings = dataset_input_embeddings[:, None, :]
+        assert len(dataset_backbone_input_embeddings.shape) == 2 # (b, d)
+        dataset_backbone_input_embeddings = dataset_backbone_input_embeddings[:, None, :]
+        dataset_backbone_attention_mask = torch.ones(
+            dataset_backbone_input_embeddings.shape[0:2], 
+            device=dataset_input_ids.device,
+            dtype=torch.long
+        )
         dataset_intermediate_embeddings = self.dataset_backbone(
-            inputs_embeds=dataset_input_embeddings
+            inputs_embeds=dataset_backbone_input_embeddings,
+            attention_mask=dataset_backbone_attention_mask,
         ).last_hidden_state
-        dataset_embedding = dataset_intermediate_embeddings[:, 0, :].mean(dim=0, keepdim=True)
-        batch_size = dataset_input_ids.shape[0]
+        dataset_embedding = dataset_intermediate_embeddings[:, 0, :].mean(
+            dim=0, 
+            keepdim=True
+        )
         with torch.no_grad():
             embeddings = mean_pool(
                 hidden_states=self.embedder(
@@ -185,6 +193,8 @@ class TwoEmbeddersWithMLP(transformers.PreTrainedModel):
                     attention_mask=attention_mask).last_hidden_state,
                 attention_mask=attention_mask,
             )
+        assert dataset_embedding.shape[0] == 1 # (1, d)
+        assert embeddings.shape[0] == batch_size # (b, d)
         mlp_input_embeddings = torch.cat(
             (
                 dataset_embedding.expand(batch_size, -1),
@@ -224,8 +234,8 @@ class DatasetTransformer(transformers.PreTrainedModel):
 
         # TODO make this a little nicer. (Not every model has 'embeddings...')
         self.backbone = dataset_backbone
-        self.backbone.embeddings.position_embeddings.weight.requires_grad = False
-        self.backbone.embeddings.position_embeddings.weight.fill_(0.0)
+        self.backbone.embeddings.weight.requires_grad = False
+        self.backbone.embeddings.weight.fill_(0.0)
 
         self.embedding_dim = self.embedder.config.hidden_size
         self.hidden_size = self.backbone.config.hidden_size
@@ -247,10 +257,7 @@ class DatasetTransformer(transformers.PreTrainedModel):
             torch.nn.Linear(self.hidden_size, self.hidden_size)
         )
 
-        # whether to share hard negatives between queries.
-        # TODO argparse for this.
-        self.share_hard_negatives = False
-
+        self.temp = config.contrastive_temp
         self.gamma = config.gamma
         if config.disable_dropout:
             disable_dropout(self)

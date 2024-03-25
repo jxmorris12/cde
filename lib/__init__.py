@@ -3,5 +3,5 @@ from .cluster import *
 from .cluster_faiss import *
 from .dist import *
 from .misc import *
-from .rank import *
+from .rerank import *
 from .tensor import *

@@ -608,14 +608,7 @@ class NomicUnsupervisedDataset(torch.utils.data.Dataset):
             self.max_seq_length,
             self.tokenizer.name_or_path,
         )
-
-    # def remove_columns(self, columns: List[sr]) -> None:
-    #     return self # Do nothing.
     
-    # @property
-    # def column_names(self) -> List[str]:
-    #     return self.dataset.column_names
-
     @property
     def _fingerprint(self) -> str:
         return self.dataset._fingerprint
@@ -637,8 +630,6 @@ class NomicUnsupervisedDataset(torch.utils.data.Dataset):
         return f'document_input_ids'
     
     def __getitem__(self, query_id: int) -> Dict[str, torch.Tensor]: 
-        os.environ['TOKENIZERS_PARALLELISM'] = '1'
-        
         ex = self.dataset[query_id]
         return {
             'idx': query_id,
@@ -646,15 +637,6 @@ class NomicUnsupervisedDataset(torch.utils.data.Dataset):
             'query': ex["query"],
             'document': ex["document"],
             ######################################################################
-        }
-    
-    @staticmethod
-    def collate_fn(batches: List[Dict[str, int]]):
-        print("Dataset.collate called")
-        breakpoint()
-        return {
-            k: torch.tensor(v, dtype=torch.int64) 
-            for k, v in batches[0].items()
         }
 
 
