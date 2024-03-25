@@ -219,6 +219,15 @@ class TrainingArguments(transformers.TrainingArguments):
         default=True,
         metadata={"help": "whether to count duplicate queries as joint positive samples"}
     )
+    ddp_find_unused_parameters: Optional[bool] = field(
+        default=False,
+        metadata={
+            "help": (
+                "When using distributed training, the value of the flag `find_unused_parameters` passed to "
+                "`DistributedDataParallel`."
+            )
+        },
+    )
     def __setattr__(self, name, value):
         super(transformers.TrainingArguments, self).__setattr__(name, value)
 
@@ -254,5 +263,4 @@ class TrainingArguments(transformers.TrainingArguments):
         logging.info(f"setting dataloader_drop_last from {self.dataloader_drop_last} -> {True}")
         self.dataloader_drop_last = True
         ############################################################################
-        self.ddp_find_unused_parameters = False
         self.ddp_broadcast_buffers = False

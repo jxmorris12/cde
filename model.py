@@ -125,7 +125,7 @@ class TwoEmbeddersWithMLP(transformers.PreTrainedModel):
             dataset_backbone: transformers.PreTrainedModel,
         ):
         super().__init__(config=config)
-        self.tokenizer = transformers.AutoTokenizer.from_pretrained('bert-base-uncased')
+        # self.tokenizer = transformers.AutoTokenizer.from_pretrained('bert-base-uncased')
 
         if config.limit_layers:
             print(f"Limiting layers to {config.limit_layers}")
@@ -171,6 +171,8 @@ class TwoEmbeddersWithMLP(transformers.PreTrainedModel):
             ).last_hidden_state,
             attention_mask=dataset_attention_mask,
         )
+        emb_dtype = self.dataset_backbone.embeddings.word_embeddings.weight.dtype
+        dataset_backbone_input_embeddings = dataset_backbone_input_embeddings.to(emb_dtype)
         assert len(dataset_backbone_input_embeddings.shape) == 2 # (b, d)
         dataset_backbone_input_embeddings = dataset_backbone_input_embeddings[:, None, :]
         dataset_backbone_attention_mask = torch.ones(
@@ -186,13 +188,13 @@ class TwoEmbeddersWithMLP(transformers.PreTrainedModel):
             dim=0, 
             keepdim=True
         )
-        with torch.no_grad():
-            embeddings = mean_pool(
-                hidden_states=self.embedder(
-                    input_ids=input_ids,
-                    attention_mask=attention_mask).last_hidden_state,
-                attention_mask=attention_mask,
-            )
+        embeddings = mean_pool(
+            hidden_states=self.embedder(
+                input_ids=input_ids,
+                attention_mask=attention_mask
+            ).last_hidden_state,
+            attention_mask=attention_mask,
+        )
         assert dataset_embedding.shape[0] == 1 # (1, d)
         assert embeddings.shape[0] == batch_size # (b, d)
         mlp_input_embeddings = torch.cat(

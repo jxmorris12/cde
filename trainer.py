@@ -329,11 +329,16 @@ class CustomTrainer(transformers.Trainer):
             num_unique_queries = query_unique_ids.unique().numel()
             num_collisions_queries = len(one_hot_labels) - num_unique_queries
 
+
+            # Dataset input stats
+            ds_input_document_unique_tokens = document_inputs["dataset_input_ids"].unique().numel()
+
             metrics = {
                 "stats_unique": num_unique_documents,
                 "stats_unique_queries": num_unique_queries,
                 "stats_collisions": num_collisions_documents,
                 "stats_collisions_queries": num_collisions_queries,
+                "stats_dataset_inputs_unique_tokens": ds_input_document_unique_tokens,
             }
             if self.is_in_train:
                 for key, val in metrics.items():
@@ -367,9 +372,6 @@ class CustomTrainer(transformers.Trainer):
         )
         model = self._wrap_model(model, training=False, dataloader=dataloader)
 
-        # if full fp16 or bf16 eval is wanted and this funciton isn't called
-        # while ``train`` is running, cast it to the right dtype first and then put on device
-        model = model.to(dtype=torch.bfloat16, device=self.args.device)
         model.eval()
         
         reranker = RerankHelper(
@@ -381,15 +383,15 @@ class CustomTrainer(transformers.Trainer):
         )
 
         # Rerank top-100 results using the reranker provided
-        rerank_results_model = reranker.rerank(
-            eval_dataset.corpus, 
-            eval_dataset.corpus_embeddings,
-            eval_dataset.queries, 
-            eval_dataset.query_embeddings,
-            results=eval_dataset.ance_results, 
-            top_k=self.args.eval_rerank_topk
-        )
-        model = model.to(dtype=torch.float32, device=self.args.device)
+        with torch.autocast("cuda", dtype=torch.bfloat16):
+            rerank_results_model = reranker.rerank(
+                eval_dataset.corpus, 
+                eval_dataset.corpus_embeddings,
+                eval_dataset.queries, 
+                eval_dataset.query_embeddings,
+                results=eval_dataset.ance_results, 
+                top_k=self.args.eval_rerank_topk
+            )
 
         #### Evaluate your retrieval using NDCG@k, MAP@K ...
         ndcg, _map, recall, precision = EvaluateRetrieval.evaluate(
