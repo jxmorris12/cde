@@ -63,8 +63,9 @@ def get_checkpoint(training_args) -> Optional[str]:
 
 def main():
     # Helps with debugging.
-    torch.autograd.set_detect_anomaly(True)
+    # torch.autograd.set_detect_anomaly(True)
     torch.compiler.reset()
+    torch._dynamo.config.optimize_ddp = False
 
     datasets.logging.set_verbosity_info()
     os.environ["WANDB__SERVICE_WAIT"] = "30"
@@ -108,7 +109,7 @@ def main():
 
     ]
     # beir_dataset_names = [] # tmp
-    beir_dataset_names = ['arguana'] # tmp
+    # beir_dataset_names = ['arguana'] # tmp
     beir_dict = {
         d: BeirDataset(dataset=d, embedder=model_args.embedder_rerank) 
         for d in sorted(beir_dataset_names)
