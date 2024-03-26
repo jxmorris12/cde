@@ -1,0 +1,7 @@
+accelerate
+beir
+bm25_pt
+datasets
+optimum
+transformers
+wandb
