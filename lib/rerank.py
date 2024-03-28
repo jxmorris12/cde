@@ -16,13 +16,14 @@ class RerankHelper:
     
     Template: https://github.com/beir-cellar/beir/blob/main/beir/reranking/rerank.py#L7
     """
-    def __init__(self, model: torch.nn.Module, tokenizer: transformers.PreTrainedTokenizer, batch_size: int, max_seq_length: int, name: str):
+    def __init__(self, model: torch.nn.Module, tokenizer: transformers.PreTrainedTokenizer, batch_size: int, max_seq_length: int, name: str, fake_dataset_info: bool):
         self.model = model
         self.tokenizer = tokenizer
         self.batch_size = batch_size
         self.max_seq_length = max_seq_length
         self.name = name
         self.max_reranking_queries = 500
+        self.fake_dataset_info = fake_dataset_info
     
     def _score(self, query_embedding: torch.Tensor, corpus_embeddings: torch.Tensor) -> float:
         with torch.no_grad():
@@ -88,19 +89,36 @@ class RerankHelper:
                 max_length=self.max_seq_length,
                 return_tensors="pt",
             ).to(device)
+
+            if self.fake_dataset_info:
+                batch_size = document_inputs["input_ids"].shape[0]
+                fake_seq_length = 64
+                fake_dataset_input_ids = torch.ones(
+                    (batch_size, fake_seq_length), device=document_inputs["input_ids"].device,
+                    dtype=torch.long
+                )
+                fake_dataset_attention_mask = torch.ones(
+                    (batch_size, fake_seq_length), device=document_inputs["input_ids"].device,
+                    dtype=torch.long
+                )
+                dataset_input_ids = fake_dataset_input_ids
+                dataset_attention_mask = fake_dataset_attention_mask
+            else:
+                dataset_input_ids = document_inputs.input_ids
+                dataset_attention_mask = document_inputs.attention_mask
             
             with torch.no_grad():
                 query_embedding = self.model(
                     input_ids=query_inputs.input_ids,
                     attention_mask=query_inputs.attention_mask,
-                    dataset_input_ids=document_inputs.input_ids,
-                    dataset_attention_mask=document_inputs.attention_mask,
+                    dataset_input_ids=dataset_input_ids,
+                    dataset_attention_mask=dataset_attention_mask,
                 ).flatten()
                 document_embeddings = self.model(
                     input_ids=document_inputs.input_ids,
                     attention_mask=document_inputs.attention_mask,
-                    dataset_input_ids=document_inputs.input_ids,
-                    dataset_attention_mask=document_inputs.attention_mask,
+                    dataset_input_ids=dataset_input_ids,
+                    dataset_attention_mask=dataset_attention_mask,
                 )
             
             biencoder_score = torch.nn.functional.cosine_similarity(

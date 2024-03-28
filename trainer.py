@@ -251,17 +251,22 @@ class CustomTrainer(transformers.Trainer):
         logits, labels = None, None
         return loss, logits, labels
 
-    def compute_loss(
-        self,
-        model: transformers.PreTrainedModel,
-        inputs: Dict[str, torch.Tensor],
-        return_outputs: bool = False,
-    ) -> Union[Tuple[torch.Tensor, Dict[str, torch.Tensor]], torch.Tensor]:
+    def _split_inputs(self, inputs: Dict[str, torch.Tensor]) -> Tuple[
+        Dict[str, torch.Tensor], Dict[str, torch.Tensor], Dict[str, torch.Tensor], Dict[str, torch.Tensor]]:
+        """Splits input and creates dataset inputs based on trainer settings.
+
+        Args:
+            inputs (Dict[str, torch.Tensor]) – all data inputs to model
+        Returns:
+            query_inputs
+            document_inputs
+            negative_document_inputs
+            dataset_inputs
+        """
         query_inputs = inputs_for_key(inputs, key="query")
         document_inputs = inputs_for_key(inputs, key="document")
         negative_document_inputs = inputs_for_key(inputs, key="negative_document")
         dataset_inputs = inputs_for_key(inputs, key="dataset")
-        batch_dataset_inputs = inputs_for_key(inputs, key="batch_dataset")
 
         if self.args.dataset_info == "fake":
             batch_size = query_inputs["input_ids"].shape[0]
@@ -288,7 +293,15 @@ class CustomTrainer(transformers.Trainer):
             document_inputs["dataset_attention_mask"] = dataset_inputs["attention_mask"]
             query_inputs["dataset_input_ids"] = dataset_inputs["input_ids"]
             query_inputs["dataset_attention_mask"] = dataset_inputs["attention_mask"]
+        return (query_inputs, document_inputs, negative_document_inputs, dataset_inputs)
 
+    def compute_loss(
+        self,
+        model: transformers.PreTrainedModel,
+        inputs: Dict[str, torch.Tensor],
+        return_outputs: bool = False,
+    ) -> Union[Tuple[torch.Tensor, Dict[str, torch.Tensor]], torch.Tensor]:
+        query_inputs, document_inputs, negative_document_inputs, dataset_inputs = self._split_inputs(inputs=inputs)
 
         if self.use_gc:
             return self.gc(
@@ -380,6 +393,7 @@ class CustomTrainer(transformers.Trainer):
             batch_size=self.args.eval_batch_size,
             max_seq_length=self.max_seq_length,
             name=metric_key_prefix,
+            fake_dataset_info=(self.args.dataset_info == "fake"),
         )
 
         # Rerank top-100 results using the reranker provided

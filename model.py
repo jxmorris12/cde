@@ -279,14 +279,14 @@ class DatasetTransformer(transformers.PreTrainedModel):
         self.embedding_dim = self.embedder.config.hidden_size
         self.hidden_size = self.backbone.config.hidden_size
 
-        self.n_sequence = 8
+        self.n_sequence = 4
         self.prompt_projection = torch.nn.Sequential(
             torch.nn.Linear(self.embedding_dim, self.hidden_size),
             torch.nn.ReLU(),
             torch.nn.Linear(self.hidden_size, self.hidden_size * self.n_sequence)
         )
         self.output_projection = torch.nn.Sequential(
-            torch.nn.Linear(self.hidden, self.hidden_size),
+            torch.nn.Linear(self.hidden_size, self.hidden_size),
             torch.nn.ReLU(),
             torch.nn.Linear(self.hidden_size, self.hidden_size)
         )
@@ -315,20 +315,17 @@ class DatasetTransformer(transformers.PreTrainedModel):
                 [d1, d2, d3, hn1_1, hn1_2, hn2_1, hn2_2, hn3_1, hn3_2]
                 for a corpus with three documents and two hard negatives per document
         """
-        del dataset_input_ids
-        del dataset_attention_mask
-
         outputs = (
             self.embedder(
-                input_ids=input_ids,
-                attention_mask=attention_mask).last_hidden_state
+                input_ids=dataset_input_ids,
+                attention_mask=dataset_attention_mask).last_hidden_state
         )
-        document_embeddings = mean_pool(outputs, attention_mask)
-        document_embeddings = document_embeddings[None, :, :] # (1, b, d)
+        dataset_embeddings = mean_pool(outputs, dataset_attention_mask) # (b, s, d) -> (b, d)
+        dataset_embeddings = dataset_embeddings[None, :, :] # (b, d) -> (1, b, d)
         
         batch_size = input_ids.shape[0]
-        document_embeddings = self.corpus_projection(document_embeddings)
-        _, corpus_size, hidden_dim = document_embeddings.shape
+        dataset_embeddings = self.corpus_projection(dataset_embeddings) # (1, b, d) -> (1, b, d)
+        _, corpus_size, hidden_dim = dataset_embeddings.shape
         assert _ == 1
         
         # TODO: we shouldn't need to apply the below constraint if we property disable backbone
@@ -336,28 +333,36 @@ class DatasetTransformer(transformers.PreTrainedModel):
         backbone_max_seq_length = self.backbone.config.max_position_embeddings
         assert batch_size + (2 * self.n_sequence + corpus_size) <= backbone_max_seq_length, "too many hard negatives for backbone model"
 
-        soft_prompt = torch.ones((1, self.embedding_dim), device=document_embeddings.device, dtype=torch.float32)
+        soft_prompt = torch.ones((1, self.embedding_dim), device=dataset_embeddings.device, dtype=torch.float32)
         soft_prompt = self.prompt_projection(soft_prompt).reshape((1, self.n_sequence, self.hidden_size))
+        soft_prompt = torch.cat((soft_prompt, dataset_embeddings), dim=1)
+        soft_prompt = soft_prompt.repeat((len(input_ids), 1, 1)) # -> (b, 4+b, d)
         
-        inputs_embeds = document_embeddings
-        inputs_embeds = torch.cat((soft_prompt, inputs_embeds), dim=1) # (1, b + n_sequence, d)
+        inputs_embeds = self.backbone.embeddings.word_embeddings(input_ids) # (b, s) -> (b, s, d)
+        inputs_embeds = torch.cat((soft_prompt, inputs_embeds), dim=1) # (v, 4+b+s, d)
 
         backbone_attention_mask = torch.ones(
-            inputs_embeds.shape[0:2],
+            soft_prompt.shape[0:2],
             dtype=torch.long,
             device=inputs_embeds.device,
         )
+        attention_mask = torch.cat((backbone_attention_mask, attention_mask), dim=1)
         output = self.backbone(
             inputs_embeds=inputs_embeds,
-            attention_mask=backbone_attention_mask,
-        ) # (1, b + n_sequence, d)
+            attention_mask=attention_mask,
+        ) # (1, 4 + b + s, d)
         # trim soft prompt
-        output_vectors = output.last_hidden_state[:, self.n_sequence:, :]
-        output_vectors = self.output_projection(output_vectors) # TODO: test :)
+        output_vectors = output.last_hidden_state
+
+        # use only these tokens
+        n_soft_prompt_tokens = soft_prompt.shape[1]
+        output_vectors = output.last_hidden_state[:, n_soft_prompt_tokens:, :]
+        attention_mask = attention_mask[:, n_soft_prompt_tokens:]
+        
         # average with original vectors
-        output_vectors = (document_embeddings * self.gamma) + (output_vectors * (1 - self.gamma))
-        # return
-        return output_vectors.squeeze(dim=0)
+        output_vectors = mean_pool(output_vectors, attention_mask)
+        return self.output_projection(output_vectors)
+    
 
 
 class BiEncoder(transformers.PreTrainedModel):
