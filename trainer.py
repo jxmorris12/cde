@@ -158,7 +158,9 @@ class CustomTrainer(transformers.Trainer):
         )
 
     
-    def train(self, *args, **kwargs):
+    def _inner_training_loop(self, *args, **kwargs):
+        """Override pre-training loop to do a couple of things. This happens after model is loaded from checkpoint."""
+        # Log examples table!
         if self._is_main_worker:
             # On beginning of train, log tables of examples.
             train_table: wandb.Table = self._get_examples_table(
@@ -174,7 +176,11 @@ class CustomTrainer(transformers.Trainer):
                 "examples/train": train_table,
                 "examples/eval": eval_table,
             })
-        super().train(*args, **kwargs)
+        
+        # Run eval at beginning of training
+        self.evaluate_retrieval_datasets(model=self.model)
+
+        super()._inner_training_loop(*args, **kwargs)
         
     def training_step(self, model: torch.nn.Module, inputs: Dict[str, Union[torch.Tensor, Any]]) -> torch.Tensor:
         # Reset dataloader index
