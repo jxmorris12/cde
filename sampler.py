@@ -178,7 +178,7 @@ class AutoClusterSampler(FixedSubdomainSampler):
             query_key=dataset._document_input_ids_key,
             document_key=dataset._query_input_ids_key,
             query_to_doc=query_to_doc,
-            batch_size=batch_size,
+            batch_size=224, # TODO: Argparse as self.cluster_batch_size
         )
         assert len(self.dataset) == len(cluster_assignments)
         self.batch_assignments = collections.defaultdict(list)
@@ -208,7 +208,7 @@ class AutoClusterWithinDomainSampler(FixedSubdomainSampler):
             dataset=self.dataset,
             subdomains=self.batch_assignments,
             query_to_doc=query_to_doc,
-            batch_size=batch_size,
+            batch_size=224, # TODO: Argparse as self.cluster_batch_size
             model=model,
         )
         run_assertions = False

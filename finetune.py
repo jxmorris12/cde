@@ -66,6 +66,12 @@ def main():
     # torch.autograd.set_detect_anomaly(True)
     torch.compiler.reset()
     torch._dynamo.config.optimize_ddp = False
+    # Following things are taken from 
+    # https://github.com/pytorch/benchmark
+    # to hopefully increase speed.
+    # torch._dynamo.config.automatic_dynamic_shapes = False
+    # torch._dynamo.config.force_parameter_static_shapes = False
+    torch._dynamo.config.cache_size_limit = 1000
 
     datasets.logging.set_verbosity_info()
     os.environ["WANDB__SERVICE_WAIT"] = "30"
@@ -108,8 +114,9 @@ def main():
         # 'dbpedia',
 
     ]
-    # beir_dataset_names = [] # tmp
-    # beir_dataset_names = ['arguana'] # tmp
+
+    if training_args.tiny_debug: beir_dataset_names = []
+
     beir_dict = {
         d: BeirDataset(dataset=d, embedder=model_args.embedder_rerank) 
         for d in sorted(beir_dataset_names)
@@ -217,7 +224,6 @@ def main():
     checkpoint = get_checkpoint(training_args)
     logging.info("train() loaded checkpoint %s", checkpoint)
     trainer.evaluate_retrieval_datasets(model=model)
-    # assert torch.cuda.device_count() > 0, "can't train without CUDA"
     trainer.train(resume_from_checkpoint=checkpoint)
     trainer.evaluate_retrieval_datasets(model=model)
 

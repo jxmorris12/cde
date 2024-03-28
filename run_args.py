@@ -228,6 +228,14 @@ class TrainingArguments(transformers.TrainingArguments):
             )
         },
     )
+    tiny_debug: Optional[bool] = field(
+        default=False,
+        metadata={
+            "help": (
+                "Run in jack's tiny debug mode. Disables eval."
+            )
+        },
+    )
     def __setattr__(self, name, value):
         super(transformers.TrainingArguments, self).__setattr__(name, value)
 

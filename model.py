@@ -30,9 +30,11 @@ class EncoderDecoderWithDatasetEmbedder(transformers.PreTrainedModel):
             config,
             embedder: transformers.PreTrainedModel, 
             dataset_embedder: transformers.PreTrainedModel, 
+            dataset_backbone: transformers.PreTrainedModel,
         ):
         super().__init__(config=config)
-        self.tokenizer = transformers.AutoTokenizer.from_pretrained('bert-base-uncased')
+        self.tokenizer = transformers.AutoTokenizer.from_pretrained('t5-base')
+        del dataset_backbone
 
         if config.limit_layers:
             print(f"Limiting layers to {config.limit_layers}")
@@ -41,6 +43,12 @@ class EncoderDecoderWithDatasetEmbedder(transformers.PreTrainedModel):
         
         self.embedder = embedder
         self.dataset_embedder = dataset_embedder
+
+        if hasattr(dataset_embedder, "encoder"):
+            self.dataset_embedder = dataset_embedder.encoder
+        else:
+            self.dataset_embedder = dataset_embedder
+        self.dataset_embedder_hidden_size = self.dataset_embedder.config.hidden_size
 
         # TODO - consider BART or another encoder-decoder.
         disabled_attention_bias_count = 0
@@ -57,6 +65,15 @@ class EncoderDecoderWithDatasetEmbedder(transformers.PreTrainedModel):
         print(f"Disabled {disabled_attention_bias_count} attention biases")
 
         self.hidden_size = self.embedder.config.hidden_size
+        
+        self.input_mlp = torch.nn.Sequential(
+            torch.nn.Linear(self.dataset_embedder_hidden_size, self.hidden_size * 2),
+            torch.nn.GELU(),
+            torch.nn.Linear(self.hidden_size * 2, self.hidden_size),
+            torch.nn.GELU(),
+            torch.nn.Linear(self.hidden_size, self.hidden_size),
+        )
+
         self.mlp = torch.nn.Sequential(
             torch.nn.Linear(self.hidden_size, self.hidden_size * 2),
             torch.nn.GELU(),
@@ -67,6 +84,8 @@ class EncoderDecoderWithDatasetEmbedder(transformers.PreTrainedModel):
         if config.disable_dropout:
             disable_dropout(self)
         
+        self.temp = config.contrastive_temp
+       
         self.dataset_positional_embeddings = torch.nn.Parameter(
             torch.randn((1024, self.hidden_size)), requires_grad=True
         )
@@ -78,7 +97,6 @@ class EncoderDecoderWithDatasetEmbedder(transformers.PreTrainedModel):
             dataset_input_ids: torch.Tensor,
             dataset_attention_mask: torch.Tensor,
     ) -> torch.Tensor:
-        # print("shapes:", input_ids.shape, dataset_input_ids.shape, "(", attention_mask.shape, dataset_attention_mask.shape, ")")
         batch_size = input_ids.shape[0]
         corpus_size = dataset_input_ids.shape[0]
         dataset_outputs = self.dataset_embedder(
@@ -90,13 +108,21 @@ class EncoderDecoderWithDatasetEmbedder(transformers.PreTrainedModel):
             attention_mask=dataset_attention_mask,
         )
         assert len(dataset_embeddings.shape) == 2 # (b, d)
-        dataset_embeddings = (
-            dataset_embeddings + self.dataset_positional_embeddings[:batch_size, :]
-        )
+        dataset_embeddings = self.input_mlp(dataset_embeddings)
+        # dataset_embeddings = (
+        #     dataset_embeddings + self.dataset_positional_embeddings[:batch_size, :]
+        # )
         dataset_embeddings = dataset_embeddings[None, :, :].expand(batch_size, -1, -1)
-        batch_size = dataset_input_ids.shape[0]
+        _corpus_size = dataset_input_ids.shape[0]
+
+        dataset_backbone_attention_mask = torch.ones(
+            dataset_embeddings.shape[0:2], 
+            device=dataset_embeddings.device,
+            dtype=torch.long
+        )
         outputs = self.embedder(
             inputs_embeds=dataset_embeddings,
+            attention_mask=dataset_backbone_attention_mask,
             decoder_input_ids=input_ids,
             decoder_attention_mask=attention_mask,
         )
@@ -134,6 +160,10 @@ class TwoEmbeddersWithMLP(transformers.PreTrainedModel):
             limit_layers(dataset_backbone, config.limit_layers)
         self.embedder = embedder
         self.dataset_embedder = dataset_embedder
+        if hasattr(dataset_embedder, "encoder"):
+            self.dataset_embedder = dataset_embedder.encoder
+        else:
+            self.dataset_embedder = dataset_embedder
         self.dataset_backbone = dataset_backbone
 
         # TODO make this a little nicer. (Not every model has 'embeddings...')
@@ -236,22 +266,29 @@ class DatasetTransformer(transformers.PreTrainedModel):
 
         # TODO make this a little nicer. (Not every model has 'embeddings...')
         self.backbone = dataset_backbone
-        self.backbone.embeddings.weight.requires_grad = False
-        self.backbone.embeddings.weight.fill_(0.0)
+        # self.backbone.embeddings.word_embeddings.weight.requires_grad = False
+        # self.backbone.embeddings.word_embeddings.weight.fill_(0.0)
+        self.backbone.config.rotary_emb_fraction = 0.0
+        rotary_disabled = 0
+        for module in self.backbone.modules():
+            if hasattr(module, "rotary_emb_dim"):
+                rotary_disabled += 1
+                module.rotary_emb_dim = 0
+        print(f"disabled {rotary_disabled} rotary modules")
 
         self.embedding_dim = self.embedder.config.hidden_size
         self.hidden_size = self.backbone.config.hidden_size
 
-        self.n_sequence = 4
+        self.n_sequence = 8
         self.prompt_projection = torch.nn.Sequential(
             torch.nn.Linear(self.embedding_dim, self.hidden_size),
             torch.nn.ReLU(),
             torch.nn.Linear(self.hidden_size, self.hidden_size * self.n_sequence)
         )
-        self.query_projection = torch.nn.Sequential(
-            torch.nn.Linear(self.embedding_dim, self.hidden_size),
+        self.output_projection = torch.nn.Sequential(
+            torch.nn.Linear(self.hidden, self.hidden_size),
             torch.nn.ReLU(),
-            torch.nn.Linear(self.hidden_size, self.hidden_size * self.n_sequence)
+            torch.nn.Linear(self.hidden_size, self.hidden_size)
         )
         self.corpus_projection = torch.nn.Sequential(
             torch.nn.Linear(self.embedding_dim, self.hidden_size),
@@ -287,7 +324,7 @@ class DatasetTransformer(transformers.PreTrainedModel):
                 attention_mask=attention_mask).last_hidden_state
         )
         document_embeddings = mean_pool(outputs, attention_mask)
-        document_embeddings = document_embeddings[None, :, :]
+        document_embeddings = document_embeddings[None, :, :] # (1, b, d)
         
         batch_size = input_ids.shape[0]
         document_embeddings = self.corpus_projection(document_embeddings)
@@ -303,12 +340,20 @@ class DatasetTransformer(transformers.PreTrainedModel):
         soft_prompt = self.prompt_projection(soft_prompt).reshape((1, self.n_sequence, self.hidden_size))
         
         inputs_embeds = document_embeddings
-        inputs_embeds = torch.cat((soft_prompt, inputs_embeds), dim=1)
+        inputs_embeds = torch.cat((soft_prompt, inputs_embeds), dim=1) # (1, b + n_sequence, d)
+
+        backbone_attention_mask = torch.ones(
+            inputs_embeds.shape[0:2],
+            dtype=torch.long,
+            device=inputs_embeds.device,
+        )
         output = self.backbone(
             inputs_embeds=inputs_embeds,
-        )
+            attention_mask=backbone_attention_mask,
+        ) # (1, b + n_sequence, d)
         # trim soft prompt
         output_vectors = output.last_hidden_state[:, self.n_sequence:, :]
+        output_vectors = self.output_projection(output_vectors) # TODO: test :)
         # average with original vectors
         output_vectors = (document_embeddings * self.gamma) + (output_vectors * (1 - self.gamma))
         # return
