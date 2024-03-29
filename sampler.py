@@ -144,8 +144,14 @@ class FixedSubdomainSampler(RandomSampler):
         # 4. Randomly reorder batches
         batch_perm = torch.randperm(num_batches, generator=g)
         # 5. Flatten and return
-        # print(f"[sampler] finished running get_indices on rank {get_rank()}")
-        return all_assignments[batch_perm].flatten().tolist()
+        print(f"[sampler] finished running get_indices on rank {get_rank()}")
+        all_indices = []
+        for batch_tensor in tqdm_if_main_worker(all_assignments[batch_perm], colour="green", desc="Sampler shuffling per-batch"): 
+            batch_list = batch_tensor.tolist()
+            random.shuffle(batch_list)
+            all_indices.extend(batch_list)
+        return all_indices
+        # return all_assignments[batch_perm].flatten().tolist()
 
     def __iter__(self):  
         piece_size = int(math.ceil(self.total_size / self.world_size))

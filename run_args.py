@@ -65,7 +65,7 @@ class ModelArguments:
     architecture: str = field(
         default="biencoder",
         metadata = {
-            "choices": ["biencoder", "query_independent_dt", "two_head_mlp", "encoder_decoder_de"],
+            "choices": ["biencoder", "query_independent_dt", "query_independent_dt_deeper", "two_head_mlp", "encoder_decoder_de"],
         }
     )
     limit_layers: Optional[int] = field(

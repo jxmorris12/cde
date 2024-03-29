@@ -258,7 +258,7 @@ class CustomTrainer(transformers.Trainer):
         return loss, logits, labels
 
     def _split_inputs(self, inputs: Dict[str, torch.Tensor]) -> Tuple[
-        Dict[str, torch.Tensor], Dict[str, torch.Tensor], Dict[str, torch.Tensor], Dict[str, torch.Tensor]]:
+        Dict[str, torch.Tensor], Dict[str, torch.Tensor], Dict[str, torch.Tensor]]:
         """Splits input and creates dataset inputs based on trainer settings.
 
         Args:
@@ -285,21 +285,27 @@ class CustomTrainer(transformers.Trainer):
                 (batch_size, fake_seq_length), device=query_inputs["input_ids"].device,
                 dtype=torch.long
             )
-            query_inputs["dataset_input_ids"] = fake_dataset_input_ids
-            query_inputs["dataset_attention_mask"] = fake_dataset_attention_mask
-            document_inputs["dataset_input_ids"] = fake_dataset_input_ids
-            document_inputs["dataset_attention_mask"] = fake_dataset_attention_mask
+            dataset_inputs["input_ids"] = fake_dataset_input_ids
+            dataset_inputs["attention_mask"] = fake_dataset_attention_mask
         elif self.args.dataset_info == "batch":
-            query_inputs["dataset_input_ids"] = document_inputs["input_ids"]
-            query_inputs["dataset_attention_mask"] = document_inputs["attention_mask"]
-            document_inputs["dataset_input_ids"] = document_inputs["input_ids"]
-            document_inputs["dataset_attention_mask"] = document_inputs["attention_mask"]
+            dataset_inputs["input_ids"] = document_inputs["input_ids"]
+            dataset_inputs["attention_mask"] = document_inputs["attention_mask"]
         else:
-            document_inputs["dataset_input_ids"] = dataset_inputs["input_ids"]
-            document_inputs["dataset_attention_mask"] = dataset_inputs["attention_mask"]
-            query_inputs["dataset_input_ids"] = dataset_inputs["input_ids"]
-            query_inputs["dataset_attention_mask"] = dataset_inputs["attention_mask"]
-        return (query_inputs, document_inputs, negative_document_inputs, dataset_inputs)
+            pass
+        
+        # Randomly reorder dataset input ids.
+        R1 = torch.randperm(dataset_inputs["input_ids"].shape[0])
+        R2 = torch.randperm(dataset_inputs["input_ids"].shape[0])
+
+        # Store on query 
+        query_inputs["dataset_input_ids"] = dataset_inputs["input_ids"][R1]
+        query_inputs["dataset_attention_mask"] = dataset_inputs["attention_mask"][R1]
+
+        # Store on doc
+        document_inputs["dataset_input_ids"] = dataset_inputs["input_ids"][R2]
+        document_inputs["dataset_attention_mask"] = dataset_inputs["attention_mask"][R2]
+
+        return (query_inputs, document_inputs, negative_document_inputs)
 
     def compute_loss(
         self,
@@ -307,7 +313,7 @@ class CustomTrainer(transformers.Trainer):
         inputs: Dict[str, torch.Tensor],
         return_outputs: bool = False,
     ) -> Union[Tuple[torch.Tensor, Dict[str, torch.Tensor]], torch.Tensor]:
-        query_inputs, document_inputs, negative_document_inputs, dataset_inputs = self._split_inputs(inputs=inputs)
+        query_inputs, document_inputs, negative_document_inputs = self._split_inputs(inputs=inputs)
 
         if self.use_gc:
             return self.gc(
@@ -403,12 +409,13 @@ class CustomTrainer(transformers.Trainer):
         )
 
         # Rerank top-100 results using the reranker provided
-        with torch.autocast("cuda", dtype=torch.bfloat16):
+        rerank_device = ("cuda" if torch.cuda.is_available() else "cpu")
+        with torch.autocast(rerank_device, dtype=torch.bfloat16):
             rerank_results_model = reranker.rerank(
-                eval_dataset.corpus, 
-                eval_dataset.corpus_embeddings,
-                eval_dataset.queries, 
-                eval_dataset.query_embeddings,
+                corpus=eval_dataset.corpus, 
+                corpus_embeddings=eval_dataset.corpus_embeddings,
+                queries=eval_dataset.queries, 
+                query_embeddings=eval_dataset.query_embeddings,
                 results=eval_dataset.ance_results, 
                 top_k=self.args.eval_rerank_topk
             )

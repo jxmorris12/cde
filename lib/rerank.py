@@ -56,7 +56,8 @@ class RerankHelper:
         world_size = get_world_size()
         query_keys = sorted(list(results.keys()))
         doc_id_to_key = collections.defaultdict(dict)
-        for j, query_id in tqdm_if_main_worker(enumerate(query_keys), total=min(self.max_reranking_queries, len(query_keys)), desc=f"[{self.name}]"):
+        num_eval_queries = min(self.max_reranking_queries, len(query_keys))
+        for j, query_id in tqdm_if_main_worker(enumerate(query_keys), total=num_eval_queries, desc=f"[{self.name}]"):
             topk_docs = sorted(results[query_id].items(), key=lambda item: item[1], reverse=True)[:top_k]
             for doc_j, (doc_id, _) in enumerate(topk_docs):
                 doc_id_to_key[query_id][doc_j] = doc_id
@@ -140,8 +141,12 @@ class RerankHelper:
             (pair_ids, extra_ones_pair),
             dim=0
         )
-        extra_ones_rerank = torch.ones(
-            (max_length - len(rerank_scores_biencoder), *rerank_scores_biencoder.shape[1:]), device=device, dtype=torch.float32) * big_neg_number
+        extra_ones_rerank = (
+            torch.ones(
+                (max_length - len(rerank_scores_biencoder), *rerank_scores_biencoder.shape[1:]), 
+                device=device, dtype=torch.float32
+            ) * big_neg_number
+        )
         rerank_scores_biencoder = torch.cat(
             (rerank_scores_biencoder, extra_ones_rerank),
             dim=0
