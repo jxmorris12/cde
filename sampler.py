@@ -148,7 +148,7 @@ class FixedSubdomainSampler(RandomSampler):
         all_indices = []
         for batch_tensor in tqdm_if_main_worker(all_assignments[batch_perm], colour="green", desc="Sampler shuffling per-batch"): 
             batch_list = batch_tensor.tolist()
-            random.shuffle(batch_list)
+            # random.shuffle(batch_list)
             all_indices.extend(batch_list)
         return all_indices
         # return all_assignments[batch_perm].flatten().tolist()

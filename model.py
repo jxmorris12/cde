@@ -500,12 +500,7 @@ class DatasetTransformerDeeper(transformers.PreTrainedModel):
         backbone_attention_mask = torch.cat(
             (attention_mask, dataset_embedder_attention_mask), dim=1
         )
-        # reorder inputs to move zeros to the end
-        new_idxs = backbone_attention_mask.cumsum(1) - 1
-        new_idxs_3d = new_idxs[..., None].repeat((1, 1, backbone_inputs_embeds.shape[2]))
-        backbone_inputs_embeds = backbone_inputs_embeds.gather(1, new_idxs_3d)
-        backbone_attention_mask = backbone_attention_mask.gather(1, new_idxs)
-
+   
         # call transformer
         backbone_output = self.backbone(
             inputs_embeds=backbone_inputs_embeds,
