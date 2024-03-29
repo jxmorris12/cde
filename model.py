@@ -494,40 +494,30 @@ class DatasetTransformerDeeper(transformers.PreTrainedModel):
         dataset_embedder_output_vectors = self.dataset_embedder_projection(dataset_embedder_output_vectors)
         dataset_embedder_attention_mask = dataset_embedder_attention_mask[:, n_soft_prompt_tokens:]
 
+        # flip inputs for now :-)
+        dataset_embedder_output_vectors = dataset_embedder_output_vectors.flip(1)
+        dataset_embedder_attention_mask = dataset_embedder_attention_mask.flip(1)
+
         # prepare inputs for deeper transformer
         backbone_inputs_embeds = self.backbone.embeddings.word_embeddings(input_ids) # (b, s) -> (b, s, d)
-        backbone_inputs_embeds = torch.cat((backbone_inputs_embeds, dataset_embedder_output_vectors), dim=1) # (v, 4+b+s, d)
+        backbone_inputs_embeds = torch.cat((dataset_embedder_output_vectors, backbone_inputs_embeds), dim=1) # (v, 4+b+s, d)
         backbone_attention_mask = torch.cat(
-            (attention_mask, dataset_embedder_attention_mask), dim=1
+            (dataset_embedder_attention_mask, attention_mask), dim=1
         )
-
-        ##########################################################################################
-        # TODO abstract this insane reordering logic into a helper function :-)
-        # reorder inputs to move zeros to the end
-        # get indices for gather
-        backbone_new_idxs = (backbone_attention_mask.cumsum(1) * backbone_attention_mask) - 1
-        # backbone_zero_idxs = (1 - backbone_attention_mask).argmax(1)
-        # backbone_new_idxs = torch.where(backbone_new_idxs >= 0, backbone_new_idxs, backbone_zero_idxs[:, None])
-        # replace -1s with indices of a zero
-        # new_idxs_3d = backbone_new_idxs[..., None].repeat((1, 1, backbone_inputs_embeds.shape[2]))
-        # new_inputs_embeds = torch.zeros_like(backbone_inputs_embeds, device=backbone_inputs_embeds.device)
-        # new_backbone_attention_mask = torch.zeros_like(backbone_attention_mask, device=backbone_attention_mask.device)
-        # breakpoint()
-        # new_backbone_attention_mask[backbone_new_idxs] = 1
-        # backbone_inputs_embeds = backbone_inputs_embeds.gather(1, new_idxs_3d)
-        # old_backbone_attention_mask = backbone_attention_mask.clone()
-        # breakpoint()
-        # backbone_attention_mask = backbone_attention_mask.gather(1, backbone_new_idxs)
-        # assert (
-        #     (old_backbone_attention_mask.sum(1) == backbone_attention_mask.sum(1)).all()
-        # )
    
         # call transformer
         backbone_output = self.backbone(
             inputs_embeds=backbone_inputs_embeds,
             attention_mask=backbone_attention_mask
         )
-        backbone_output_vectors = mean_pool(backbone_output.last_hidden_state, backbone_attention_mask)
+
+        # trim vectors
+        n_to_trim = dataset_embedder_attention_mask.shape[1]
+        backbone_output_vectors = backbone_output.last_hidden_state
+        backbone_output_vectors = backbone_output_vectors[:, n_to_trim:]
+        backbone_attention_mask = backbone_attention_mask[:, n_to_trim:]
+        
+        backbone_output_vectors = mean_pool(backbone_output_vectors, backbone_attention_mask)
         return self.backbone_output_projection(backbone_output_vectors)
     
 
