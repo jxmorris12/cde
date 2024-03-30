@@ -495,8 +495,8 @@ class DatasetTransformerDeeper(transformers.PreTrainedModel):
         dataset_embedder_attention_mask = dataset_embedder_attention_mask[:, n_soft_prompt_tokens:]
 
         # flip inputs for now :-)
-        dataset_embedder_output_vectors = dataset_embedder_output_vectors.flip(1)
-        dataset_embedder_attention_mask = dataset_embedder_attention_mask.flip(1)
+        # dataset_embedder_output_vectors = dataset_embedder_output_vectors.flip(1)
+        # dataset_embedder_attention_mask = dataset_embedder_attention_mask.flip(1)
 
         # prepare inputs for deeper transformer
         backbone_inputs_embeds = self.backbone.embeddings.word_embeddings(input_ids) # (b, s) -> (b, s, d)
@@ -504,6 +504,22 @@ class DatasetTransformerDeeper(transformers.PreTrainedModel):
         backbone_attention_mask = torch.cat(
             (dataset_embedder_attention_mask, attention_mask), dim=1
         )
+        backbone_output_attention_mask = torch.cat(
+            (
+                torch.zeros_like(
+                    dataset_embedder_attention_mask, 
+                    device=dataset_embedder_attention_mask.device
+                ), 
+                attention_mask
+            ), dim=1
+        )
+
+        # reorder_indices 
+        new_idxs = backbone_attention_mask.argsort(stable=True, descending=True)
+        backbone_attention_mask = backbone_attention_mask.gather(1, new_idxs)
+        backbone_output_attention_mask = backbone_output_attention_mask.gather(1, new_idxs)
+        new_idxs_3d = new_idxs[..., None].expand_as(backbone_inputs_embeds)
+        backbone_inputs_embeds = backbone_inputs_embeds.gather(1, new_idxs_3d)
    
         # call transformer
         backbone_output = self.backbone(
@@ -512,12 +528,10 @@ class DatasetTransformerDeeper(transformers.PreTrainedModel):
         )
 
         # trim vectors
-        n_to_trim = dataset_embedder_attention_mask.shape[1]
-        backbone_output_vectors = backbone_output.last_hidden_state
-        backbone_output_vectors = backbone_output_vectors[:, n_to_trim:]
-        backbone_attention_mask = backbone_attention_mask[:, n_to_trim:]
-        
-        backbone_output_vectors = mean_pool(backbone_output_vectors, backbone_attention_mask)
+        backbone_output_vectors = mean_pool(
+            backbone_output.last_hidden_state, 
+            backbone_output_attention_mask
+        )
         return self.backbone_output_projection(backbone_output_vectors)
     
 
