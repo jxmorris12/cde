@@ -71,7 +71,7 @@ def main():
     # to hopefully increase speed.
     # torch._dynamo.config.automatic_dynamic_shapes = False
     # torch._dynamo.config.force_parameter_static_shapes = False
-    torch._dynamo.config.cache_size_limit = 1000
+    torch._dynamo.config.cache_size_limit = 10_000
 
     datasets.logging.set_verbosity_info()
     os.environ["WANDB__SERVICE_WAIT"] = "30"

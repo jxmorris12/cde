@@ -388,45 +388,33 @@ class DatasetTransformerDeeper(transformers.PreTrainedModel):
             limit_layers(dataset_backbone, config.limit_layers)
         
         self.dataset_embedder = dataset_embedder
-        self.embedder = embedder
         self.dataset_backbone = dataset_backbone
+        self.output_embedder = embedder
 
-        self.hidden_size = self.embedder.config.hidden_size
+        self.hidden_size = self.dataset_embedder.config.hidden_size
 
-        # TODO make this a little nicer. (Not every model has 'embeddings...')
-        self.backbone = dataset_backbone
-        # self.backbone.embeddings.word_embeddings.weight.requires_grad = False
-        # self.backbone.embeddings.word_embeddings.weight.fill_(0.0)
-        self.backbone.config.rotary_emb_fraction = 0.0
-        rotary_disabled = 0
-        for module in self.backbone.modules():
-            if hasattr(module, "rotary_emb_dim"):
-                rotary_disabled += 1
-                module.rotary_emb_dim = 0
-        print(f"disabled {rotary_disabled} rotary modules")
-
-        self.embedding_dim = self.embedder.config.hidden_size
-        self.hidden_size = self.backbone.config.hidden_size
+        self.embedding_dim = self.dataset_embedder.config.hidden_size
+        self.hidden_size = self.dataset_backbone.config.hidden_size
 
         self.n_sequence = 4
         self.prompt_projection = torch.nn.Sequential(
             torch.nn.Linear(self.embedding_dim, self.hidden_size),
-            torch.nn.ReLU(),
+            torch.nn.GELU(),
             torch.nn.Linear(self.hidden_size, self.hidden_size * self.n_sequence)
         )
-        self.backbone_output_projection = torch.nn.Sequential(
+        self.output_projection = torch.nn.Sequential(
             torch.nn.Linear(self.hidden_size, self.hidden_size),
-            torch.nn.ReLU(),
+            torch.nn.GELU(),
+            torch.nn.Linear(self.hidden_size, self.hidden_size)
+        )
+        self.backbone_projection = torch.nn.Sequential(
+            torch.nn.Linear(self.hidden_size, self.hidden_size),
+            torch.nn.GELU(),
             torch.nn.Linear(self.hidden_size, self.hidden_size)
         )
         self.dataset_embedder_projection = torch.nn.Sequential(
-            torch.nn.Linear(self.hidden_size, self.hidden_size),
-            torch.nn.ReLU(),
-            torch.nn.Linear(self.hidden_size, self.hidden_size)
-        )
-        self.corpus_projection = torch.nn.Sequential(
             torch.nn.Linear(self.embedding_dim, self.hidden_size),
-            torch.nn.ReLU(),
+            torch.nn.GELU(),
             torch.nn.Linear(self.hidden_size, self.hidden_size)
         )
 
@@ -449,16 +437,16 @@ class DatasetTransformerDeeper(transformers.PreTrainedModel):
                 [d1, d2, d3, hn1_1, hn1_2, hn2_1, hn2_2, hn3_1, hn3_2]
                 for a corpus with three documents and two hard negatives per document
         """
-        embedder_outputs = (
-            self.embedder(
+        dataset_embedder_outputs = (
+            self.dataset_embedder(
                 input_ids=dataset_input_ids,
                 attention_mask=dataset_attention_mask).last_hidden_state
         )
-        dataset_embeddings = mean_pool(embedder_outputs, dataset_attention_mask) # (b, s, d) -> (b, d)
+        dataset_embeddings = mean_pool(dataset_embedder_outputs, dataset_attention_mask) # (b, s, d) -> (b, d)
         dataset_embeddings = dataset_embeddings[None, :, :] # (b, d) -> (1, b, d)
         
         batch_size = input_ids.shape[0]
-        dataset_embeddings = self.corpus_projection(dataset_embeddings) # (1, b, d) -> (1, b, d)
+        dataset_embeddings = self.dataset_embedder_projection(dataset_embeddings) # (1, b, d) -> (1, b, d)
         _, corpus_size, hidden_dim = dataset_embeddings.shape
         assert _ == 1
         
@@ -472,67 +460,67 @@ class DatasetTransformerDeeper(transformers.PreTrainedModel):
         soft_prompt = torch.cat((soft_prompt, dataset_embeddings), dim=1)
         soft_prompt = soft_prompt.expand((len(input_ids), -1, -1)) # -> (b, 4+b, d)
         
-        inputs_embeds = self.dataset_embedder.embeddings.word_embeddings(input_ids) # (b, s) -> (b, s, d)
+        inputs_embeds = self.dataset_backbone.embeddings.word_embeddings(input_ids) # (b, s) -> (b, s, d)
         inputs_embeds = torch.cat((soft_prompt, inputs_embeds), dim=1) # (v, 4+b+s, d)
 
-        dataset_embedder_attention_mask = torch.ones(
+        backbone_attention_mask = torch.ones(
             soft_prompt.shape[0:2],
             dtype=torch.long,
             device=soft_prompt.device,
         )
-        dataset_embedder_attention_mask = torch.cat((dataset_embedder_attention_mask, attention_mask), dim=1)
-        output = self.dataset_embedder(
+        backbone_attention_mask = torch.cat((backbone_attention_mask, attention_mask), dim=1)
+        backbone_output = self.dataset_backbone(
             inputs_embeds=inputs_embeds,
-            attention_mask=dataset_embedder_attention_mask,
+            attention_mask=backbone_attention_mask,
         ) # (1, 4 + b + s, d)
+        
         # trim soft prompt
-        dataset_embedder_output_vectors = output.last_hidden_state
+        backbone_output_vectors = backbone_output.last_hidden_state
 
         # use only these tokens
         n_soft_prompt_tokens = soft_prompt.shape[1]
-        dataset_embedder_output_vectors = output.last_hidden_state[:, n_soft_prompt_tokens:, :]
-        dataset_embedder_attention_mask = dataset_embedder_attention_mask[:, n_soft_prompt_tokens:]
-        dataset_embedder_output_vectors = self.dataset_embedder_projection(dataset_embedder_output_vectors)
+        backbone_output_vectors = backbone_output.last_hidden_state[:, n_soft_prompt_tokens:, :]
+        backbone_attention_mask = backbone_attention_mask[:, n_soft_prompt_tokens:]
+        backbone_output_vectors = self.backbone_projection(backbone_output_vectors)
 
         # prepare inputs for deeper transformer
-        backbone_inputs_embeds = self.backbone.embeddings.word_embeddings(input_ids) # (b, s) -> (b, s, d)
-        backbone_inputs_embeds = torch.cat((dataset_embedder_output_vectors, backbone_inputs_embeds), dim=1) # (v, 4+b+s, d)
-        backbone_attention_mask = torch.cat(
-            (dataset_embedder_attention_mask, attention_mask), dim=1
+        embedder_inputs_embeds = self.output_embedder.embeddings.word_embeddings(input_ids) # (b, s) -> (b, s, d)
+        embedder_inputs_embeds = torch.cat((backbone_output_vectors, embedder_inputs_embeds), dim=1) # (v, 4+b+s, d)
+        embedder_attention_mask = torch.cat(
+            (backbone_attention_mask, attention_mask), dim=1
         )
-        backbone_output_attention_mask = torch.cat(
+        embedder_output_attention_mask = torch.cat(
             (
                 torch.zeros_like(
-                    dataset_embedder_attention_mask, 
-                    device=dataset_embedder_attention_mask.device
+                    backbone_attention_mask, 
+                    device=backbone_attention_mask.device
                 ), 
                 attention_mask
             ), dim=1
         )
 
         # reorder_indices 
-        new_idxs = backbone_attention_mask.argsort(stable=True, descending=True)
-        new_idxs_3d = new_idxs[..., None].expand_as(backbone_inputs_embeds)
+        new_idxs = embedder_attention_mask.argsort(stable=True, descending=True)
+        new_idxs_3d = new_idxs[..., None].expand_as(embedder_inputs_embeds)
         
-        backbone_attention_mask = backbone_attention_mask.gather(1, new_idxs)
-        backbone_output_attention_mask = backbone_output_attention_mask.gather(1, new_idxs)
-
-        BIE = backbone_inputs_embeds.clone()
-        backbone_inputs_embeds = backbone_inputs_embeds.gather(1, new_idxs_3d)
-        breakpoint()
+        embedder_attention_mask = embedder_attention_mask.gather(1, new_idxs)
+        embedder_output_attention_mask = embedder_output_attention_mask.gather(1, new_idxs)
+        embedder_inputs_embeds = embedder_inputs_embeds.gather(1, new_idxs_3d)
    
         # call transformer
-        backbone_output = self.backbone(
-            inputs_embeds=backbone_inputs_embeds,
-            attention_mask=backbone_attention_mask
+        output = self.output_embedder(
+            inputs_embeds=embedder_inputs_embeds,
+            attention_mask=embedder_attention_mask
         )
 
         # trim vectors
-        backbone_output_vectors = mean_pool(
-            backbone_output.last_hidden_state, 
-            backbone_output_attention_mask
+        # TODO: Argparse for output pooling strategy.
+        output_vectors = mean_pool(
+            output.last_hidden_state, 
+            embedder_attention_mask
+            # embedder_output_attention_mask
         )
-        return self.backbone_output_projection(backbone_output_vectors)
+        return self.output_projection(output_vectors)
     
 
 
