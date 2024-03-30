@@ -470,7 +470,7 @@ class DatasetTransformerDeeper(transformers.PreTrainedModel):
         soft_prompt = torch.ones((1, self.embedding_dim), device=dataset_embeddings.device, dtype=torch.float32)
         soft_prompt = self.prompt_projection(soft_prompt).reshape((1, self.n_sequence, self.hidden_size))
         soft_prompt = torch.cat((soft_prompt, dataset_embeddings), dim=1)
-        soft_prompt = soft_prompt.repeat((len(input_ids), 1, 1)) # -> (b, 4+b, d)
+        soft_prompt = soft_prompt.expand((len(input_ids), -1, -1)) # -> (b, 4+b, d)
         
         inputs_embeds = self.dataset_embedder.embeddings.word_embeddings(input_ids) # (b, s) -> (b, s, d)
         inputs_embeds = torch.cat((soft_prompt, inputs_embeds), dim=1) # (v, 4+b+s, d)
@@ -491,12 +491,8 @@ class DatasetTransformerDeeper(transformers.PreTrainedModel):
         # use only these tokens
         n_soft_prompt_tokens = soft_prompt.shape[1]
         dataset_embedder_output_vectors = output.last_hidden_state[:, n_soft_prompt_tokens:, :]
-        dataset_embedder_output_vectors = self.dataset_embedder_projection(dataset_embedder_output_vectors)
         dataset_embedder_attention_mask = dataset_embedder_attention_mask[:, n_soft_prompt_tokens:]
-
-        # flip inputs for now :-)
-        # dataset_embedder_output_vectors = dataset_embedder_output_vectors.flip(1)
-        # dataset_embedder_attention_mask = dataset_embedder_attention_mask.flip(1)
+        dataset_embedder_output_vectors = self.dataset_embedder_projection(dataset_embedder_output_vectors)
 
         # prepare inputs for deeper transformer
         backbone_inputs_embeds = self.backbone.embeddings.word_embeddings(input_ids) # (b, s) -> (b, s, d)
@@ -516,10 +512,14 @@ class DatasetTransformerDeeper(transformers.PreTrainedModel):
 
         # reorder_indices 
         new_idxs = backbone_attention_mask.argsort(stable=True, descending=True)
+        new_idxs_3d = new_idxs[..., None].expand_as(backbone_inputs_embeds)
+        
         backbone_attention_mask = backbone_attention_mask.gather(1, new_idxs)
         backbone_output_attention_mask = backbone_output_attention_mask.gather(1, new_idxs)
-        new_idxs_3d = new_idxs[..., None].expand_as(backbone_inputs_embeds)
+
+        BIE = backbone_inputs_embeds.clone()
         backbone_inputs_embeds = backbone_inputs_embeds.gather(1, new_idxs_3d)
+        breakpoint()
    
         # call transformer
         backbone_output = self.backbone(

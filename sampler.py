@@ -151,7 +151,6 @@ class FixedSubdomainSampler(RandomSampler):
             random.shuffle(batch_list)
             all_indices.extend(batch_list)
         return all_indices
-        # return all_assignments[batch_perm].flatten().tolist()
 
     def __iter__(self):  
         piece_size = int(math.ceil(self.total_size / self.world_size))
