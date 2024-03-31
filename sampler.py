@@ -28,6 +28,7 @@ class Sampler(abc.ABC, torch.utils.data.Sampler):
             batch_size: int, 
             shuffle: bool, 
             max_num_batches: Optional[int] = None,
+            num_samples: Optional[int] = None,
         ):
         self.dataset = dataset
         self.batch_size = batch_size
@@ -35,7 +36,7 @@ class Sampler(abc.ABC, torch.utils.data.Sampler):
         # https://github.com/pytorch/pytorch/blob/main/torch/utils/data/distributed.py#L68
         self.rank = get_rank()
         self.world_size = get_world_size()
-        self.num_samples = math.floor(len(self.dataset) / self.world_size)
+        self.num_samples = num_samples or (math.floor(len(self.dataset) / self.world_size))
         self.total_size = self.num_samples * self.world_size
         self.shuffle = shuffle
         self.seed = 42
@@ -108,12 +109,14 @@ class FixedSubdomainSampler(RandomSampler):
             dataset: Union[NomicSupervisedDataset, RedditDataset], 
             batch_size: int, 
             shuffle: bool, 
+            num_samples: Optional[int] = None,
         ):
         super().__init__(
             dataset=dataset, 
             batch_size=batch_size, 
             shuffle=shuffle,
             max_num_batches=None,
+            num_samples=num_samples,
         )
         assert hasattr(self.dataset, 'subdomain_idxs')
         self.batch_assignments = self.dataset.subdomain_idxs
@@ -170,11 +173,13 @@ class AutoClusterSampler(FixedSubdomainSampler):
             batch_size: int,
             shuffle: bool,
             model: str,
+            num_samples: Optional[int] = None,
         ):
         super().__init__(
             dataset=dataset, 
             batch_size=batch_size, 
             shuffle=False,
+            num_samples=num_samples,
         )
         self.dataset = dataset
         cluster_assignments = cluster_dataset(
@@ -201,12 +206,14 @@ class AutoClusterWithinDomainSampler(FixedSubdomainSampler):
             batch_size: int,
             shuffle: bool,
             model: str,
+            num_samples: Optional[int] = None,
         ):
         # TODO: shuffle?
         super().__init__(
             dataset=dataset, 
             batch_size=batch_size, 
             shuffle=False,
+            num_samples=num_samples,
         )
         self.dataset = dataset
         self.batch_assignments = cluster_subdomains(
@@ -231,6 +238,7 @@ def get_sampler(
     batch_size: int,
     shuffle: bool,
     data_args,
+    num_samples: Optional[int] = None,
 ) -> Sampler:
     strategy = data_args.sampling_strategy
     if strategy == "random":
@@ -238,12 +246,14 @@ def get_sampler(
             dataset=dataset, 
             batch_size=batch_size,
             shuffle=shuffle,
+            num_samples=num_samples,
         )
     elif strategy == "domain":
         return FixedSubdomainSampler(
             dataset=dataset, 
             batch_size=batch_size,
             shuffle=shuffle,
+            num_samples=num_samples,
         )
     elif strategy == "cluster":
         return AutoClusterSampler(
@@ -252,6 +262,7 @@ def get_sampler(
             shuffle=shuffle,
             query_to_doc=data_args.clustering_query_to_doc, 
             model=data_args.clustering_model,
+            num_samples=num_samples,
         )
     elif strategy == "cluster_within_domain":
         return AutoClusterWithinDomainSampler(
@@ -260,6 +271,7 @@ def get_sampler(
             shuffle=shuffle,
             query_to_doc=data_args.clustering_query_to_doc, 
             model=data_args.clustering_model,
+            num_samples=num_samples,
         )
     else:
         raise ValueError(f"invalid sampling strategy {strategy}")

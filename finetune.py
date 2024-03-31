@@ -1,4 +1,6 @@
 from typing import Optional
+
+import copy
 import os
 import logging
 import os
@@ -173,11 +175,14 @@ def main():
         batch_size=training_args.per_device_train_batch_size,
         shuffle=True,
     )
+    data_args_eval = copy.copy(data_args)
+    data_args_eval.sampling_strategy = "domain" # always set this for eval
     eval_sampler = get_sampler(
         data_args=data_args,
-        dataset=train_dataset,
+        dataset=(eval_dataset or train_dataset),
         batch_size=training_args.per_device_eval_batch_size,
         shuffle=False,
+        num_samples=(training_args.per_device_eval_batch_size * training_args.max_eval_batches),
     )
 
     model_config = ModelConfig(**vars(model_args))

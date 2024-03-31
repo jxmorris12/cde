@@ -508,53 +508,15 @@ class NomicSupervisedDataset:
         return self[random_query_idx]
     
     def __getitem__(self, query_id: int) -> Dict[str, torch.Tensor]: 
-        os.environ['TOKENIZERS_PARALLELISM'] = '1'
-        query_ex = self.dataset[query_id]
-
-        tokenize_fn = functools.partial(
-            self.tokenizer, 
-            return_tensors="pt", 
-            padding="max_length", 
-            truncation=True,
-            max_length=self.max_seq_length
-        )
-        query_encoded = tokenize_fn(query_ex["query"])
-        query_input_ids = query_encoded.input_ids[0]
-        query_attention_mask = query_encoded.attention_mask[0]
-
-        document_encoded = tokenize_fn(query_ex["query"])
-        document_input_ids = document_encoded.input_ids[0]
-        document_attention_mask = document_encoded.attention_mask[0]
-
-        # TODO: Tokenize hard negatives.
-        # hn_document_encoded = tokenize_fn(query_ex[""]
-        # hn_document_input_ids = self.dataset[query_id][self._negative_document_input_ids_key]
-        # hn_document_input_ids = hn_document_input_ids[:self.num_hard_negatives]
-        # if not isinstance(hn_document_input_ids, torch.Tensor):
-        #     hn_document_input_ids = torch.tensor(hn_document_input_ids)
-        #
-        subdomain_id = query_ex['dataset']
-        # random_idx_within_subdomain = random.choice(self.subdomain_idxs[subdomain_id])
-        # dataset_input_ids = self.dataset[random_idx_within_subdomain][self._dataset_input_ids_key]
-        # 
+        ex = self.dataset[query_id]
+        
         return {
             'idx': query_id,
             ######################################################################
-            # 'batch_dataset_input_ids': document_input_ids_dataset_embedder,
-            # 'batch_dataset_attention_mask': (document_input_ids_dataset_embedder != self.pad_token_id).int(),
-            # ######################################################################
-            # 'dataset_input_ids': dataset_input_ids,
-            # 'dataset_attention_mask': (dataset_input_ids != self.pad_token_id).int(),
+            "query": ex["query"],
+            "document": ex["document"],
             ######################################################################
-            'query_input_ids': query_input_ids,
-            'query_attention_mask': query_attention_mask,
-            ######################################################################
-            'document_input_ids': document_input_ids,
-            'document_attention_mask': document_attention_mask,
-            ######################################################################
-            # 'negative_document_input_ids': hn_document_input_ids,
-            # 'negative_document_attention_mask': (hn_document_input_ids != self.pad_token_id).int(),
-            ######################################################################
+            # TODO add hard negatives :-)
         }
 
 
