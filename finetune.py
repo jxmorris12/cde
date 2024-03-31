@@ -147,7 +147,11 @@ def main():
             tokenizer=embedder_tokenizer,
             max_seq_length=model_args.max_seq_length,
         )
-        eval_dataset = None
+        eval_dataset = NomicSupervisedDataset(
+            tokenizer=embedder_tokenizer,
+            num_hard_negatives=7,
+            max_seq_length=model_args.max_seq_length,
+        )
         # Need to tokenize and collate for this dataset
         collator_cls = TokenizerCollator
     elif data_args.dataset == 'nomic':
@@ -196,8 +200,8 @@ def main():
         print("starting wandb run with name", wandb_run_id)
         wandb.init(
             entity="jack-morris",
-            project="tti-nomic-3",
-            name=wandb_run_id,
+            project="tti-nomic-4",
+            name=wandb_run_id, # + "-RESUME",
     )
         wandb.config.update(
             {

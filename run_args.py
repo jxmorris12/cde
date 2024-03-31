@@ -264,7 +264,7 @@ class TrainingArguments(transformers.TrainingArguments):
         self.dataloader_pin_memory = True
         today_date = datetime.date.today()
         formatted_date = today_date.strftime("%Y-%m-%d")
-        self.exp_name__no_date = "self.exp_name"
+        # formatted_date = "2024-03-29" # TODO: allow argparse override!
         self.exp_name = f"{formatted_date}-{self.exp_name}"
         self.output_dir = os.path.join("saves", self.exp_name)
         logging.info(f"outputting model to directory: {self.output_dir}")

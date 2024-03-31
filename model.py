@@ -164,15 +164,15 @@ class TwoEmbeddersWithMLP(transformers.PreTrainedModel):
             self.dataset_embedder = dataset_embedder.encoder
         else:
             self.dataset_embedder = dataset_embedder
-        self.dataset_backbone = dataset_backbone
+        self.backbone = dataset_backbone
 
         # TODO make this a little nicer. (Not every model has 'embeddings...')
-        self.dataset_backbone = dataset_backbone
-        self.dataset_backbone.embeddings.word_embeddings.weight.requires_grad = False
-        self.dataset_backbone.embeddings.word_embeddings.weight.fill_(0.0)
+        self.backbone = dataset_backbone
+        self.backbone.embeddings.word_embeddings.weight.requires_grad = False
+        self.backbone.embeddings.word_embeddings.weight.fill_(0.0)
 
         self.hidden_size = self.embedder.config.hidden_size
-        joint_hidden_size = (self.embedder.config.hidden_size + self.dataset_backbone.config.hidden_size)
+        joint_hidden_size = (self.embedder.config.hidden_size + self.backbone.config.hidden_size)
         self.mlp = torch.nn.Sequential(
             torch.nn.Linear(joint_hidden_size, joint_hidden_size),
             torch.nn.GELU(),
@@ -201,7 +201,7 @@ class TwoEmbeddersWithMLP(transformers.PreTrainedModel):
             ).last_hidden_state,
             attention_mask=dataset_attention_mask,
         )
-        emb_dtype = self.dataset_backbone.embeddings.word_embeddings.weight.dtype
+        emb_dtype = self.backbone.embeddings.word_embeddings.weight.dtype
         dataset_backbone_input_embeddings = dataset_backbone_input_embeddings.to(emb_dtype)
         assert len(dataset_backbone_input_embeddings.shape) == 2 # (b, d)
         dataset_backbone_input_embeddings = dataset_backbone_input_embeddings[:, None, :]
@@ -210,7 +210,7 @@ class TwoEmbeddersWithMLP(transformers.PreTrainedModel):
             device=dataset_input_ids.device,
             dtype=torch.long
         )
-        dataset_intermediate_embeddings = self.dataset_backbone(
+        dataset_intermediate_embeddings = self.backbone(
             inputs_embeds=dataset_backbone_input_embeddings,
             attention_mask=dataset_backbone_attention_mask,
         ).last_hidden_state
@@ -260,22 +260,11 @@ class DatasetTransformer(transformers.PreTrainedModel):
         
         del dataset_embedder
         self.embedder = embedder
-        self.dataset_backbone = dataset_backbone
+        self.backbone = dataset_backbone
 
         self.hidden_size = self.embedder.config.hidden_size
 
-        # TODO make this a little nicer. (Not every model has 'embeddings...')
         self.backbone = dataset_backbone
-        # self.backbone.embeddings.word_embeddings.weight.requires_grad = False
-        # self.backbone.embeddings.word_embeddings.weight.fill_(0.0)
-        self.backbone.config.rotary_emb_fraction = 0.0
-        rotary_disabled = 0
-        for module in self.backbone.modules():
-            if hasattr(module, "rotary_emb_dim"):
-                rotary_disabled += 1
-                module.rotary_emb_dim = 0
-        print(f"disabled {rotary_disabled} rotary modules")
-
         self.embedding_dim = self.embedder.config.hidden_size
         self.hidden_size = self.backbone.config.hidden_size
 
@@ -295,9 +284,7 @@ class DatasetTransformer(transformers.PreTrainedModel):
             torch.nn.ReLU(),
             torch.nn.Linear(self.hidden_size, self.hidden_size)
         )
-
         self.temp = config.contrastive_temp
-        self.gamma = config.gamma
         if config.disable_dropout:
             disable_dropout(self)
 
@@ -325,7 +312,7 @@ class DatasetTransformer(transformers.PreTrainedModel):
         
         batch_size = input_ids.shape[0]
         dataset_embeddings = self.corpus_projection(dataset_embeddings) # (1, b, d) -> (1, b, d)
-        _, corpus_size, hidden_dim = dataset_embeddings.shape
+        _, corpus_size, _hidden_dim = dataset_embeddings.shape
         assert _ == 1
         
         # TODO: we shouldn't need to apply the below constraint if we property disable backbone
@@ -336,7 +323,7 @@ class DatasetTransformer(transformers.PreTrainedModel):
         soft_prompt = torch.ones((1, self.embedding_dim), device=dataset_embeddings.device, dtype=torch.float32)
         soft_prompt = self.prompt_projection(soft_prompt).reshape((1, self.n_sequence, self.hidden_size))
         soft_prompt = torch.cat((soft_prompt, dataset_embeddings), dim=1)
-        soft_prompt = soft_prompt.repeat((len(input_ids), 1, 1)) # -> (b, 4+b, d)
+        soft_prompt = soft_prompt.expand((len(input_ids), -1, -1)) # -> (b, 4+b, d) # soft_prompt.repeat((len(input_ids), 1, 1))
         
         inputs_embeds = self.backbone.embeddings.word_embeddings(input_ids) # (b, s) -> (b, s, d)
         inputs_embeds = torch.cat((soft_prompt, inputs_embeds), dim=1) # (v, 4+b+s, d)
@@ -353,9 +340,6 @@ class DatasetTransformer(transformers.PreTrainedModel):
         ) # (1, 4 + b + s, d)
         # trim soft prompt
         output_vectors = output.last_hidden_state
-
-        # print("forward shapes -- input_ids:", input_ids.shape, "output_vectors", output_vectors.shape, "dataset_input_ids", dataset_input_ids.shape)
-        # print("forward dataset_input_ids unique numel --", dataset_input_ids.unique().numel())
 
         # use only these tokens
         n_soft_prompt_tokens = soft_prompt.shape[1]
@@ -388,13 +372,13 @@ class DatasetTransformerDeeper(transformers.PreTrainedModel):
             limit_layers(dataset_backbone, config.limit_layers)
         
         self.dataset_embedder = dataset_embedder
-        self.dataset_backbone = dataset_backbone
+        self.backbone = dataset_backbone
         self.output_embedder = embedder
 
         self.hidden_size = self.dataset_embedder.config.hidden_size
 
         self.embedding_dim = self.dataset_embedder.config.hidden_size
-        self.hidden_size = self.dataset_backbone.config.hidden_size
+        self.hidden_size = self.backbone.config.hidden_size
 
         self.n_sequence = 4
         self.prompt_projection = torch.nn.Sequential(
@@ -460,7 +444,7 @@ class DatasetTransformerDeeper(transformers.PreTrainedModel):
         soft_prompt = torch.cat((soft_prompt, dataset_embeddings), dim=1)
         soft_prompt = soft_prompt.expand((len(input_ids), -1, -1)) # -> (b, 4+b, d)
         
-        inputs_embeds = self.dataset_backbone.embeddings.word_embeddings(input_ids) # (b, s) -> (b, s, d)
+        inputs_embeds = self.backbone.embeddings.word_embeddings(input_ids) # (b, s) -> (b, s, d)
         inputs_embeds = torch.cat((soft_prompt, inputs_embeds), dim=1) # (v, 4+b+s, d)
 
         backbone_attention_mask = torch.ones(
@@ -469,7 +453,7 @@ class DatasetTransformerDeeper(transformers.PreTrainedModel):
             device=soft_prompt.device,
         )
         backbone_attention_mask = torch.cat((backbone_attention_mask, attention_mask), dim=1)
-        backbone_output = self.dataset_backbone(
+        backbone_output = self.backbone(
             inputs_embeds=inputs_embeds,
             attention_mask=backbone_attention_mask,
         ) # (1, 4 + b + s, d)
@@ -489,22 +473,22 @@ class DatasetTransformerDeeper(transformers.PreTrainedModel):
         embedder_attention_mask = torch.cat(
             (backbone_attention_mask, attention_mask), dim=1
         )
-        embedder_output_attention_mask = torch.cat(
-            (
-                torch.zeros_like(
-                    backbone_attention_mask, 
-                    device=backbone_attention_mask.device
-                ), 
-                attention_mask
-            ), dim=1
-        )
+        # embedder_output_attention_mask = torch.cat(
+        #     (
+        #         torch.zeros_like(
+        #             backbone_attention_mask, 
+        #             device=backbone_attention_mask.device
+        #         ), 
+        #         attention_mask
+        #     ), dim=1
+        # )
 
         # reorder_indices 
         new_idxs = embedder_attention_mask.argsort(stable=True, descending=True)
         new_idxs_3d = new_idxs[..., None].expand_as(embedder_inputs_embeds)
         
         embedder_attention_mask = embedder_attention_mask.gather(1, new_idxs)
-        embedder_output_attention_mask = embedder_output_attention_mask.gather(1, new_idxs)
+        # embedder_output_attention_mask = embedder_output_attention_mask.gather(1, new_idxs)
         embedder_inputs_embeds = embedder_inputs_embeds.gather(1, new_idxs_3d)
    
         # call transformer

@@ -93,7 +93,7 @@ class RerankHelper:
 
             if self.fake_dataset_info:
                 batch_size = document_inputs["input_ids"].shape[0]
-                fake_seq_length = 64
+                fake_seq_length = 128
                 fake_dataset_input_ids = torch.ones(
                     (batch_size, fake_seq_length), device=document_inputs["input_ids"].device,
                     dtype=torch.long

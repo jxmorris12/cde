@@ -178,7 +178,9 @@ class CustomTrainer(transformers.Trainer):
             })
         
         # Run eval at beginning of training
-        self.evaluate_retrieval_datasets(model=self.model)
+        run_eval_on_start_of_training = False
+        if run_eval_on_start_of_training:
+            self.evaluate_retrieval_datasets(model=self.model)
 
         super()._inner_training_loop(*args, **kwargs)
         
@@ -276,7 +278,7 @@ class CustomTrainer(transformers.Trainer):
 
         if self.args.dataset_info == "fake":
             batch_size = query_inputs["input_ids"].shape[0]
-            fake_seq_length = 64
+            fake_seq_length = 128
             fake_dataset_input_ids = torch.ones(
                 (batch_size, fake_seq_length), device=query_inputs["input_ids"].device,
                 dtype=torch.long
