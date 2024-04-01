@@ -117,7 +117,7 @@ def main():
 
     ]
 
-    if training_args.tiny_debug: beir_dataset_names = []
+    if training_args.tiny_debug: beir_dataset_names = [ 'fiqa' ]
 
     beir_dict = {
         d: BeirDataset(dataset=d, embedder=model_args.embedder_rerank) 
@@ -173,6 +173,7 @@ def main():
         data_args=data_args,
         dataset=train_dataset,
         batch_size=training_args.per_device_train_batch_size,
+        cluster_size=224,
         shuffle=True,
     )
     data_args_eval = copy.copy(data_args)
@@ -181,6 +182,7 @@ def main():
         data_args=data_args,
         dataset=(eval_dataset or train_dataset),
         batch_size=training_args.per_device_eval_batch_size,
+        cluster_size=224,
         shuffle=False,
         num_samples=(training_args.per_device_eval_batch_size * training_args.max_eval_batches),
     )

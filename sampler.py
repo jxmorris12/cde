@@ -171,6 +171,7 @@ class AutoClusterSampler(FixedSubdomainSampler):
             dataset: Union[NomicSupervisedDataset, RedditDataset],
             query_to_doc: bool, 
             batch_size: int,
+            cluster_size: int,
             shuffle: bool,
             model: str,
             num_samples: Optional[int] = None,
@@ -188,7 +189,7 @@ class AutoClusterSampler(FixedSubdomainSampler):
             query_key=dataset._document_input_ids_key,
             document_key=dataset._query_input_ids_key,
             query_to_doc=query_to_doc,
-            batch_size=224, # TODO: Argparse as self.cluster_batch_size
+            batch_size=cluster_size, # TODO: Argparse as self.cluster_batch_size
         )
         assert len(self.dataset) == len(cluster_assignments)
         self.batch_assignments = collections.defaultdict(list)
@@ -204,6 +205,7 @@ class AutoClusterWithinDomainSampler(FixedSubdomainSampler):
             dataset: Union[NomicSupervisedDataset, RedditDataset],
             query_to_doc: bool, 
             batch_size: int,
+            cluster_size: int,
             shuffle: bool,
             model: str,
             num_samples: Optional[int] = None,
@@ -220,7 +222,7 @@ class AutoClusterWithinDomainSampler(FixedSubdomainSampler):
             dataset=self.dataset,
             subdomains=self.batch_assignments,
             query_to_doc=query_to_doc,
-            batch_size=224, # TODO: Argparse as self.cluster_batch_size
+            batch_size=cluster_size, # TODO: Argparse as self.cluster_batch_size
             model=model,
         )
         run_assertions = False
@@ -236,6 +238,7 @@ class AutoClusterWithinDomainSampler(FixedSubdomainSampler):
 def get_sampler(
     dataset: datasets.Dataset,
     batch_size: int,
+    cluster_size: int,
     shuffle: bool,
     data_args,
     num_samples: Optional[int] = None,
@@ -260,6 +263,7 @@ def get_sampler(
             dataset=dataset, 
             batch_size=batch_size,
             shuffle=shuffle,
+            cluster_size=cluster_size,
             query_to_doc=data_args.clustering_query_to_doc, 
             model=data_args.clustering_model,
             num_samples=num_samples,
@@ -269,6 +273,7 @@ def get_sampler(
             dataset=dataset, 
             batch_size=batch_size,
             shuffle=shuffle,
+            cluster_size=cluster_size,
             query_to_doc=data_args.clustering_query_to_doc, 
             model=data_args.clustering_model,
             num_samples=num_samples,

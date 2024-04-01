@@ -4,9 +4,10 @@ import datasets
 import os
 import torch
 import transformers
-
 import wandb
 
+
+from beir.retrieval.evaluation import EvaluateRetrieval
 from gradcache import GradCache
 from dataset import BeirDataset
 from lib import get_rank, RerankHelper, TensorRunningAverages
@@ -386,8 +387,6 @@ class CustomTrainer(transformers.Trainer):
         ) -> Dict[str, float]:
         # github.com/jxmorris12/tti/blob/master/trainer.py
         # github.com/beir-cellar/beir/blob/main/examples/retrieval/evaluation/reranking/evaluate_bm25_ce_reranking.py
-        from beir.retrieval.evaluation import EvaluateRetrieval
-
         data_collator = self._get_collator_with_removed_columns(
             self.data_collator, description="evaluation")
         dataloader = torch.utils.data.DataLoader(
@@ -410,7 +409,7 @@ class CustomTrainer(transformers.Trainer):
             fake_dataset_info=(self.args.dataset_info == "fake"),
         )
 
-        # Rerank top-100 results using the reranker provided
+        # Rerank top-k results using the reranker provided
         rerank_device = ("cuda" if torch.cuda.is_available() else "cpu")
         with torch.autocast(rerank_device, dtype=torch.bfloat16):
             rerank_results_model = reranker.rerank(
@@ -426,9 +425,21 @@ class CustomTrainer(transformers.Trainer):
         ndcg, _map, recall, precision = EvaluateRetrieval.evaluate(
             eval_dataset.qrels, rerank_results_model, [1, 5, 10, 100]
         )
-        return {
+        retrieval_metrics = {
             **ndcg, **_map, **recall, **precision
         }
+        # Take the average scores of things. We're hoping this will give us a less noisy metric.
+        weighted_scores = []
+        for query_key, query_scores in rerank_results_model.items():
+            for true_doc_key, true_doc_weight in eval_dataset.qrels[query_key].items():
+                weighted_scores.append(
+                    query_scores.get(true_doc_key, 0.0) * true_doc_weight
+                )
+        retrieval_metrics["score_weighted_qrels/mean"] = sum(weighted_scores) / len(weighted_scores)
+        retrieval_metrics["score_weighted_qrels/sum"] = sum(weighted_scores)
+        retrieval_metrics["score_weighted_qrels/total"] = len(weighted_scores)
+
+        return retrieval_metrics
 
     def evaluate(
         self,
@@ -464,7 +475,10 @@ class CustomTrainer(transformers.Trainer):
 
         if len(all_metrics) and get_rank() == 0:
             ndcg_str = "NDCG@10"
-            print("evaluate_retrieval_datasets =>", { k: v for k,v in all_metrics.items() if k.endswith(ndcg_str) })
+            ndcg_metrics = { k: v for k,v in all_metrics.items() if k.endswith(ndcg_str) }
+            print("evaluate_retrieval_datasets =>", ndcg_metrics)
+            all_metrics["NDCG@10/sum"] = sum(ndcg_metrics.values())
+            all_metrics["NDCG@10/mean"] =  sum(ndcg_metrics.values()) / len(ndcg_metrics)
         return all_metrics
 
     def _maybe_log_save_evaluate(self, tr_loss: float, grad_norm: float, model: torch.nn.Module, *args, **kwargs):
