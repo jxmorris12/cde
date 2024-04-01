@@ -163,6 +163,9 @@ class TrainingArguments(transformers.TrainingArguments):
         default=False, metadata={"help": "Whether or not to log to Weights & Biases."}
     )
     report_to: str = "wandb"
+    remove_unused_columns: Optional[bool] = field(
+        default=False, metadata={"help": "Remove columns not required by the model when using an nlp.Dataset."}
+    )
 
     per_device_train_batch_size: int = field(
         default=64, metadata={"help": "Batch size per GPU/TPU core/CPU for training."}
@@ -229,7 +232,7 @@ class TrainingArguments(transformers.TrainingArguments):
         },
     )
     max_eval_batches: int = field(
-        default=10,
+        default=64,
         metadata={
             "help": "Max batches to use for eval (to reduce noise)"
         }

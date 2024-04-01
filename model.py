@@ -315,17 +315,15 @@ class DatasetTransformer(transformers.PreTrainedModel):
         _, corpus_size, _hidden_dim = dataset_embeddings.shape
         assert _ == 1
         
-        # TODO: we shouldn't need to apply the below constraint if we property disable backbone
-        # model positionality.
-        backbone_max_seq_length = self.backbone.config.max_position_embeddings
-        assert batch_size + (2 * self.n_sequence + corpus_size) <= backbone_max_seq_length, "too many hard negatives for backbone model"
+        # backbone_max_seq_length = self.backbone.config.max_trained_positions
+        # assert batch_size + (2 * self.n_sequence + corpus_size) <= backbone_max_seq_length, "too many hard negatives for backbone model"
 
         soft_prompt = torch.ones((1, self.embedding_dim), device=dataset_embeddings.device, dtype=torch.float32)
         soft_prompt = self.prompt_projection(soft_prompt).reshape((1, self.n_sequence, self.hidden_size))
         soft_prompt = torch.cat((soft_prompt, dataset_embeddings), dim=1)
         soft_prompt = soft_prompt.expand((len(input_ids), -1, -1)) # -> (b, 4+b, d) # soft_prompt.repeat((len(input_ids), 1, 1))
         
-        inputs_embeds = self.backbone.embeddings.word_embeddings(input_ids) # (b, s) -> (b, s, d)
+        inputs_embeds = self.backbone.embeddings(input_ids) # (b, s) -> (b, s, d)
         inputs_embeds = torch.cat((soft_prompt, inputs_embeds), dim=1) # (v, 4+b+s, d)
 
         backbone_attention_mask = torch.ones(

@@ -181,13 +181,13 @@ def main():
     data_args_eval = copy.copy(data_args)
     data_args_eval.sampling_strategy = "domain" # always set this for eval
     eval_sampler = get_sampler(
-        data_args=data_args,
-        sampling_strategy="domain",
         dataset=(eval_dataset or train_dataset),
+        sampling_strategy="domain",
         batch_size=training_args.per_device_eval_batch_size,
         cluster_size=224,
         shuffle=False,
         clustering_model="gtr_base",
+        clustering_query_to_doc=data_args.clustering_query_to_doc,
         num_samples=(training_args.per_device_eval_batch_size * training_args.max_eval_batches),
     )
 

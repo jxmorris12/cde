@@ -91,6 +91,7 @@ class TokenizerCollator(transformers.DataCollatorWithPadding):
         os.environ['TOKENIZERS_PARALLELISM'] = '1'
         query = []
         document = []
+        random_document = []
 
         out_ex = {}
         out_ex["idx"] = []
@@ -99,6 +100,7 @@ class TokenizerCollator(transformers.DataCollatorWithPadding):
             query.append(ex["query"])
             document.append(ex["document"])
             out_ex["idx"].append(ex["idx"])
+            if "random_document" in ex: random_document.append(ex["random_document"])
 
         
         tokenize_fn = functools.partial(
@@ -109,13 +111,17 @@ class TokenizerCollator(transformers.DataCollatorWithPadding):
             max_length=self.max_length
         )
         query_encoded = tokenize_fn(query)
-        document_encoded = tokenize_fn(document)
-        
         out_ex["query_input_ids"] = query_encoded.input_ids
         out_ex["query_attention_mask"] = query_encoded.attention_mask
 
+        document_encoded = tokenize_fn(document)
         out_ex["document_input_ids"] = document_encoded.input_ids
         out_ex["document_attention_mask"] = document_encoded.attention_mask
+
+        if len(random_document):
+            random_document_encoded = tokenize_fn(random_document)
+            out_ex["random_document_input_ids"] = random_document_encoded.input_ids
+            out_ex["random_document_attention_mask"] = random_document_encoded.attention_mask
 
         out_ex["idx"] = torch.tensor(out_ex["idx"])
 

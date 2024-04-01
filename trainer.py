@@ -49,6 +49,7 @@ class CustomTrainer(transformers.Trainer):
             "dataset_input_ids", "dataset_attention_mask",
             "batch_dataset_input_ids", "batch_dataset_attention_mask",
             "batch_dataset_input_ids", "batch_dataset_attention_mask",
+            "random_document_input_ids", "random_document_attention_mask",
             "negative_document_input_ids", "negative_document_attention_mask",
             "query_input_ids", "query_attention_mask",
         ]
@@ -281,6 +282,7 @@ class CustomTrainer(transformers.Trainer):
         """
         query_inputs = inputs_for_key(inputs, key="query")
         document_inputs = inputs_for_key(inputs, key="document")
+        random_document_inputs = inputs_for_key(inputs, key="random_document")
         negative_document_inputs = inputs_for_key(inputs, key="negative_document")
         dataset_inputs = inputs_for_key(inputs, key="dataset")
 
@@ -300,6 +302,9 @@ class CustomTrainer(transformers.Trainer):
         elif self.args.dataset_info == "batch":
             dataset_inputs["input_ids"] = document_inputs["input_ids"]
             dataset_inputs["attention_mask"] = document_inputs["attention_mask"]
+        elif self.args.dataset_info == "random":
+            dataset_inputs["input_ids"] = random_document_inputs["input_ids"]
+            dataset_inputs["attention_mask"] = random_document_inputs["attention_mask"]
         else:
             pass
         

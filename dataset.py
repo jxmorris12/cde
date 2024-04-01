@@ -510,13 +510,17 @@ class NomicSupervisedDataset:
     def __getitem__(self, query_id: int) -> Dict[str, torch.Tensor]: 
         ex = self.dataset[query_id]
         
+
+        random_idx = random.choice(range(len(self.dataset)))
         return {
             'idx': query_id,
             ######################################################################
             "query": ex["query"],
             "document": ex["document"],
             ######################################################################
-            # TODO add hard negatives :-)
+            "random_document": self.dataset[random_idx]["document"],
+            ######################################################################
+            # TODO re-add hard negatives :-)
         }
 
 
@@ -593,12 +597,15 @@ class NomicUnsupervisedDataset(torch.utils.data.Dataset):
     
     def __getitem__(self, query_id: int) -> Dict[str, torch.Tensor]: 
         ex = self.dataset[query_id]
+
+        random_idx = random.choice(range(len(self.dataset)))
         return {
             'idx': query_id,
             ######################################################################
             'query': ex["query"],
             'document': ex["document"],
             ######################################################################
+            'random_document': self.dataset[random_idx]["document"],
         }
 
 
