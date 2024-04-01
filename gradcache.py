@@ -235,13 +235,7 @@ class GradCache:
         with autocast() if self.fp16 else nullcontext():
             loss = self.loss_fn(*reps, **loss_kwargs)
 
-        self.backward_fn(loss)  # [modified]
-
-        # print("** printing grads **")
-        # grad_params = []
-        # for n,p in self.model.named_parameters(): 
-        #     if p.grad is not None: grad_params.append(n)
-        # print(grad_params)
+        self.backward_fn(loss)
         
         self.optimizer.step()
         self.model.zero_grad()

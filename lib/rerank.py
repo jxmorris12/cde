@@ -22,7 +22,7 @@ class RerankHelper:
         self.batch_size = batch_size
         self.max_seq_length = max_seq_length
         self.name = name
-        self.max_reranking_queries = 5 # 00
+        self.max_reranking_queries = 500
         self.fake_dataset_info = fake_dataset_info
     
     def _score(self, query_embedding: torch.Tensor, corpus_embeddings: torch.Tensor) -> float:

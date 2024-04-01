@@ -1,7 +1,9 @@
 from typing import Any, Dict, List, Optional, Tuple, Union
 
-import datasets
+import functools
 import os
+
+import datasets
 import torch
 import transformers
 import wandb
@@ -10,7 +12,7 @@ import wandb
 from beir.retrieval.evaluation import EvaluateRetrieval
 from gradcache import GradCache
 from dataset import BeirDataset
-from lib import get_rank, RerankHelper, TensorRunningAverages
+from lib import get_rank, get_world_size, RerankHelper, TensorRunningAverages
 from sampler import Sampler
 
 
@@ -76,12 +78,12 @@ class CustomTrainer(transformers.Trainer):
         super().create_optimizer(*args, **kwargs)
 
         if self.use_gc:
-            print(f"initializing GradCache with chunk_size={self.args.max_batch_size_fits_in_memory}.")
+            print(f"[rank {get_rank()}] initializing GradCache with chunk_size={self.args.max_batch_size_fits_in_memory}.")
             self.gc = GradCache(
                 model=self.model,
                 optimizer=self.optimizer,
                 chunk_sizes=self.args.max_batch_size_fits_in_memory,
-                loss_fn=self._contrastive_loss, 
+                loss_fn=functools.partial(self._contrastive_loss, return_scores=False), 
                 fp16=self.args.fp16,
                 scaler=self.scaler if self.args.fp16 else None,
                 backward_fn=self.accelerator.backward,
@@ -205,7 +207,8 @@ class CustomTrainer(transformers.Trainer):
     def _contrastive_loss(
                 self, 
                 e1: torch.Tensor, e2: torch.Tensor, 
-                one_hot_labels: torch.Tensor
+                one_hot_labels: torch.Tensor,
+                return_scores: bool = True
             ) -> Tuple[torch.Tensor, torch.Tensor]:
         # TODO: How does this handle hard negatives?
         e1 = e1 / e1.norm(p=2, dim=1, keepdim=True) # Query
@@ -241,7 +244,11 @@ class CustomTrainer(transformers.Trainer):
         if self.is_in_train:
             for key, val in metrics.items():
                 self._log_extra(key, val)
-        return loss, scores
+        
+        if return_scores:
+            return loss, scores
+        else:
+            return loss
     
     def prediction_step(
         self,
@@ -318,14 +325,54 @@ class CustomTrainer(transformers.Trainer):
     ) -> Union[Tuple[torch.Tensor, Dict[str, torch.Tensor]], torch.Tensor]:
         query_inputs, document_inputs, negative_document_inputs = self._split_inputs(inputs=inputs)
 
-        if self.use_gc:
+        # Create labels based on document IDs.
+        document_unique_ids = document_inputs["input_ids"].sum(dim=1)
+        if self.args.automatically_deduplicate_documents:
+            one_hot_labels = (
+                document_unique_ids[:, None] == document_unique_ids[None, :])
+        else:
+            idx = inputs["idx"]
+            one_hot_labels = (idx[:, None] == idx[None, :]).float()
+        
+        # Aggregate labels for duplicate queries.
+        query_unique_ids = query_inputs["input_ids"].sum(dim=1)
+        if self.args.automatically_deduplicate_queries:
+            one_hot_labels = (
+                (query_unique_ids[:, None] == query_unique_ids[None, :]).float() @ one_hot_labels.float())
+            one_hot_labels = one_hot_labels.bool()
+
+        num_unique_documents = document_unique_ids.unique().numel()
+        num_collisions_documents = len(document_unique_ids) - num_unique_documents
+        num_unique_queries = query_unique_ids.unique().numel()
+        num_collisions_queries = len(one_hot_labels) - num_unique_queries
+
+
+        # Dataset input stats
+        ds_input_document_unique_tokens = document_inputs["dataset_input_ids"].unique().numel()
+
+        metrics = {
+            "stats_unique": num_unique_documents,
+            "stats_unique_queries": num_unique_queries,
+            "stats_collisions": num_collisions_documents,
+            "stats_collisions_queries": num_collisions_queries,
+            "stats_dataset_inputs_unique_tokens": ds_input_document_unique_tokens,
+        }
+        if self.is_in_train:
+            for key, val in metrics.items():
+                self._log_extra(key, val)
+
+        if self.use_gc and torch.is_grad_enabled():
+            # TODO: Restore gradcache w/ hard negatives.
             return self.gc(
-                query_inputs, document_inputs, negative_document_inputs, no_sync_except_last=False)
+                query_inputs, 
+                document_inputs, 
+                one_hot_labels=one_hot_labels,
+                no_sync_except_last=(get_world_size() > 1)
+            )
         else:
             e1 = model(**query_inputs)
             e2 = model(**document_inputs)
 
-            corpus_unique_ids = document_inputs["input_ids"].sum(dim=1)
             if len(negative_document_inputs):
                 negative_document_inputs["dataset_input_ids"] = document_inputs["dataset_input_ids"]
                 negative_document_inputs["dataset_attention_mask"] = document_inputs["dataset_attention_mask"]
@@ -335,42 +382,6 @@ class CustomTrainer(transformers.Trainer):
                 corpus_unique_ids = torch.cat(
                     (corpus_unique_ids, negative_document_unique_ids), dim=0
                 )
-            
-            # Create labels based on document IDs.
-            document_unique_ids = document_inputs["input_ids"].sum(dim=1)
-            if self.args.automatically_deduplicate_documents:
-                one_hot_labels = (
-                    document_unique_ids[:, None] == corpus_unique_ids[None, :])
-            else:
-                idx = inputs["idx"]
-                one_hot_labels = (idx[:, None] == idx[None, :]).float()
-            
-            # Aggregate labels for duplicate queries.
-            query_unique_ids = query_inputs["input_ids"].sum(dim=1)
-            if self.args.automatically_deduplicate_queries:
-                one_hot_labels = (
-                    (query_unique_ids[:, None] == query_unique_ids[None, :]).float() @ one_hot_labels.float())
-                one_hot_labels = one_hot_labels.bool()
-
-            num_unique_documents = corpus_unique_ids.unique().numel()
-            num_collisions_documents = len(corpus_unique_ids) - num_unique_documents
-            num_unique_queries = query_unique_ids.unique().numel()
-            num_collisions_queries = len(one_hot_labels) - num_unique_queries
-
-
-            # Dataset input stats
-            ds_input_document_unique_tokens = document_inputs["dataset_input_ids"].unique().numel()
-
-            metrics = {
-                "stats_unique": num_unique_documents,
-                "stats_unique_queries": num_unique_queries,
-                "stats_collisions": num_collisions_documents,
-                "stats_collisions_queries": num_collisions_queries,
-                "stats_dataset_inputs_unique_tokens": ds_input_document_unique_tokens,
-            }
-            if self.is_in_train:
-                for key, val in metrics.items():
-                    self._log_extra(key, val)
 
             loss, _scores = self._contrastive_loss(
                 e1, e2, 
@@ -417,7 +428,7 @@ class CustomTrainer(transformers.Trainer):
                 corpus_embeddings=eval_dataset.corpus_embeddings,
                 queries=eval_dataset.queries, 
                 query_embeddings=eval_dataset.query_embeddings,
-                results=eval_dataset.ance_results, 
+                results=eval_dataset.ance_results,
                 top_k=self.args.eval_rerank_topk
             )
 
