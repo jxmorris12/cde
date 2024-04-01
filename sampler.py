@@ -237,46 +237,47 @@ class AutoClusterWithinDomainSampler(FixedSubdomainSampler):
 
 def get_sampler(
     dataset: datasets.Dataset,
+    sampling_strategy: str,
     batch_size: int,
     cluster_size: int,
     shuffle: bool,
-    data_args,
+    clustering_model: str,
+    clustering_query_to_doc: bool = True,
     num_samples: Optional[int] = None,
 ) -> Sampler:
-    strategy = data_args.sampling_strategy
-    if strategy == "random":
+    if sampling_strategy == "random":
         return RandomSampler(
             dataset=dataset, 
             batch_size=batch_size,
             shuffle=shuffle,
             num_samples=num_samples,
         )
-    elif strategy == "domain":
+    elif sampling_strategy == "domain":
         return FixedSubdomainSampler(
             dataset=dataset, 
             batch_size=batch_size,
             shuffle=shuffle,
             num_samples=num_samples,
         )
-    elif strategy == "cluster":
+    elif sampling_strategy == "cluster":
         return AutoClusterSampler(
             dataset=dataset, 
             batch_size=batch_size,
             shuffle=shuffle,
             cluster_size=cluster_size,
-            query_to_doc=data_args.clustering_query_to_doc, 
-            model=data_args.clustering_model,
+            query_to_doc=clustering_query_to_doc, 
+            model=clustering_model,
             num_samples=num_samples,
         )
-    elif strategy == "cluster_within_domain":
+    elif sampling_strategy == "cluster_within_domain":
         return AutoClusterWithinDomainSampler(
             dataset=dataset, 
             batch_size=batch_size,
             shuffle=shuffle,
             cluster_size=cluster_size,
-            query_to_doc=data_args.clustering_query_to_doc, 
-            model=data_args.clustering_model,
+            query_to_doc=clustering_query_to_doc, 
+            model=clustering_model,
             num_samples=num_samples,
         )
     else:
-        raise ValueError(f"invalid sampling strategy {strategy}")
+        raise ValueError(f"unknown sampling strategy {sampling_strategy}")

@@ -346,7 +346,6 @@ class CustomTrainer(transformers.Trainer):
         num_unique_queries = query_unique_ids.unique().numel()
         num_collisions_queries = len(one_hot_labels) - num_unique_queries
 
-
         # Dataset input stats
         ds_input_document_unique_tokens = document_inputs["dataset_input_ids"].unique().numel()
 

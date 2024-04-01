@@ -170,20 +170,24 @@ def main():
     
     print("[*] loading sampler")
     train_sampler = get_sampler(
-        data_args=data_args,
         dataset=train_dataset,
+        sampling_strategy=data_args.sampling_strategy,
         batch_size=training_args.per_device_train_batch_size,
         cluster_size=224,
         shuffle=True,
+        clustering_model=data_args.clustering_model,
+        clustering_query_to_doc=data_args.clustering_query_to_doc,
     )
     data_args_eval = copy.copy(data_args)
     data_args_eval.sampling_strategy = "domain" # always set this for eval
     eval_sampler = get_sampler(
         data_args=data_args,
+        sampling_strategy="domain",
         dataset=(eval_dataset or train_dataset),
         batch_size=training_args.per_device_eval_batch_size,
         cluster_size=224,
         shuffle=False,
+        clustering_model="gtr_base",
         num_samples=(training_args.per_device_eval_batch_size * training_args.max_eval_batches),
     )
 
