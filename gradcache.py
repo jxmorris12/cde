@@ -77,24 +77,23 @@ class GradCache:
         self.get_rep_fn = get_rep_fn
         self.loss_fn = loss_fn
 
-        if fp16:
-            assert (
-                scaler is not None
-            ), "mixed precision training requires a gradient scaler passed in"
-
-        self.fp16 = fp16
+        assert not fp16, "fp16 no longer supported! please use bf16."
         self.scaler = scaler
         # [added]
         self.backward_fn = backward_fn
 
         self._get_input_tensors_strict = False
+        self.model_has_two_stages = hasattr(self.model, "forward_first_stage")
 
     def __call__(self, *args, **kwargs):
         """
         Call the cache_step function.
         :return: Current step loss.
         """
-        return self.cache_step(*args, **kwargs)
+        if self.model_has_two_stages:
+            return self.cache_step_two_stage(*args, **kwargs)
+        else:
+            return self.cache_step_one_stage(*args, **kwargs)
 
     def split_inputs(self, model_input, chunk_size: int) -> List:
         """
@@ -172,21 +171,20 @@ class GradCache:
         :param model_input: input to the model call
         :return: model output
         """
-        with autocast() if self.fp16 else nullcontext():
-            if isinstance(model_input, Tensor):
-                return model(model_input)
-            elif isinstance(model_input, list):
-                return model(*model_input)
-            elif isinstance(model_input, (dict, UserDict)):
-                return model(**model_input)
-            elif isinstance(model_input, tuple) and list(map(type, model_input)) == [
-                list,
-                dict,
-            ]:
-                model_args, model_kwargs = model_input
-                return model(*model_args, **model_kwargs)
-            else:
-                raise NotImplementedError
+        if isinstance(model_input, Tensor):
+            return model(model_input)
+        elif isinstance(model_input, list):
+            return model(*model_input)
+        elif isinstance(model_input, (dict, UserDict)):
+            return model(**model_input)
+        elif isinstance(model_input, tuple) and list(map(type, model_input)) == [
+            list,
+            dict,
+        ]:
+            model_args, model_kwargs = model_input
+            return model(*model_args, **model_kwargs)
+        else:
+            raise NotImplementedError
 
     def get_reps(self, model_out) -> Tensor:
         """
@@ -232,8 +230,7 @@ class GradCache:
         :return: A tuple of a) gradient cache for each encoder model, and b) loss tensor
         """
         reps = [r.detach().requires_grad_() for r in reps]
-        with autocast() if self.fp16 else nullcontext():
-            loss = self.loss_fn(*reps, **loss_kwargs)
+        loss = self.loss_fn(*reps, **loss_kwargs)
 
         self.backward_fn(loss)
         
@@ -245,7 +242,7 @@ class GradCache:
         return cache, loss.detach()
 
     @typing.no_type_check
-    def forward_backward(
+    def forward_backward_one_stage(
         self,
         model: nn.Module,
         model_inputs,
@@ -270,7 +267,6 @@ class GradCache:
                 sync_contexts = [
                     model.no_sync for _ in range(len(model_inputs) - 1)
                 ] + [nullcontext]
-                # sync_flags = [False * (len(model_inputs) - 1)] + [True] # [different result (?)]
                 sync_flags = [True] * (len(model_inputs))  # [added]
             else:
                 sync_contexts = [nullcontext for _ in range(len(model_inputs))]
@@ -287,32 +283,18 @@ class GradCache:
                     surrogate = torch.dot(reps.flatten(), gradient.flatten())
                     if sync_flag:
                         model.require_backward_grad_sync = True
-                    if self.fp16:  # [added]
-                        self.scaler._enabled = False
-                        self.backward_fn(surrogate)
-                        self.scaler._enabled = True
-                    else:
-                        self.backward_fn(surrogate)  # [modified]
+                    self.backward_fn(surrogate)  # [modified]
         else:  # [use base model (i.e. transformer)]
-
-            # [remove no_sync_except_last: pytorch lightning would handle gradient sync automatically]
             for x, state, gradient in zip(
                 model_inputs, random_states, cached_gradients
             ):
-                with nullcontext():
-                    with state:
-                        y = self.model_call(model, x)
-                    reps = self.get_reps(y)
-                    surrogate = torch.dot(reps.flatten(), gradient.flatten())
-                    if self.fp16:  # [added]
-                        self.scaler._enabled = False
-                        self.backward_fn(surrogate)
-                        self.scaler._enabled = True
-                    else:
-                        self.backward_fn(surrogate)  # [added]
-
-    @typing.no_type_check
-    def cache_step(
+                with state:
+                    y = self.model_call(model, x)
+                reps = self.get_reps(y)
+                surrogate = torch.dot(reps.flatten(), gradient.flatten())
+                self.backward_fn(surrogate)  # [added]
+    
+    def cache_step_one_stage(
         self, *model_inputs, no_sync_except_last: bool = False, **loss_kwargs
     ) -> Tensor:
         """
@@ -342,10 +324,132 @@ class GradCache:
         for model, x, model_cache, rnd_states in zip(
             self.models, model_inputs, cache, all_rnd_states
         ):
-            self.forward_backward(
+            self.forward_backward_one_stage(
                 model,
                 x,
                 model_cache,
+                rnd_states,
+                no_sync_except_last=no_sync_except_last,
+            )
+
+        return loss
+
+    def forward_backward_two_stage(
+        self,
+        model: nn.Module,
+        model_inputs,
+        cached_gradients: List[Tensor],
+        random_states: List[RandContext],
+        no_sync_except_last: bool = False,
+    ):
+        """
+        Run the second forward and the backward pass to compute gradient for a model.
+        :param model: Encoder model.
+        :param model_inputs: Chunked input to the encoder model.
+        :param cached_gradients: Chunked gradient cache tensor for each input.
+        :param random_states: Each input's device random state during the first forward.
+        :param no_sync_except_last: If True, under distributed setup, only trigger gradient reduction across processes
+        for the last sub-batch's forward-backward pass.
+        """
+        if isinstance(
+            model, nn.parallel.DistributedDataParallel
+        ):  
+
+            if no_sync_except_last:
+                sync_contexts = [
+                    model.no_sync for _ in range(len(model_inputs) - 1)
+                ] + [nullcontext]
+                sync_flags = [True] * (len(model_inputs))  # [added]
+            else:
+                sync_contexts = [nullcontext for _ in range(len(model_inputs))]
+                sync_flags = [False] * (len(model_inputs))  # [added]
+
+            # [modified]
+            for x, state, gradient, sync_context, sync_flag in zip(
+                model_inputs, random_states, cached_gradients, sync_contexts, sync_flags
+            ):
+                with sync_context():
+                    with state:
+                        y = self.model_call(model, x)
+                    reps = self.get_reps(y)
+                    surrogate = torch.dot(reps.flatten(), gradient.flatten())
+                    if sync_flag:
+                        model.require_backward_grad_sync = True
+                    self.backward_fn(surrogate)  # [modified]
+        else:  # [use base model (i.e. transformer)]
+
+            for x, state, gradient in zip(
+                model_inputs, random_states, cached_gradients
+            ):
+                with nullcontext():
+                    with state:
+                        y = self.model_call(model, x)
+                    reps = self.get_reps(y)
+                    surrogate = torch.dot(reps.flatten(), gradient.flatten())
+                    self.backward_fn(surrogate)  # [added]
+
+    def cache_step_two_stage(
+        self, *model_inputs, no_sync_except_last: bool = False, **loss_kwargs
+    ) -> Tensor:
+        """
+        Run a cached step to compute gradient over the inputs.
+        :param model_inputs: Input to each encoder model. Should be in similar order as the class's model.
+        :param no_sync_except_last: If True, under distributed setup, for each model, only trigger gradient reduction
+        across processes for the last sub-batch's forward-backward pass.
+        :param loss_kwargs: Additional keyword arguments to the loss function.
+        :return: The current's loss.
+        """
+
+        model_inputs = [
+            self.split_inputs(x, chunk_size)
+            for x, chunk_size in zip(model_inputs, self.chunk_sizes)
+        ]
+
+        ##
+        ## First stage no grad
+        ##
+        all_reps_1 = []
+        all_rnd_states_1 = []
+        for model, x in zip(self.models, model_inputs):
+            model_reps = []
+            with torch.no_grad():
+                for x in model_inputs:
+                    all_rnd_states_1.append(RandContext(*self.get_input_tensors(x)))
+                    y = model.forward_first_stage(
+                        **x
+                    )
+                    model_reps.append(self.get_reps(y))
+            # concatenate all sub-batch representations
+            all_reps_1.append(torch.cat(model_reps, dim=0))
+
+        ##
+        ## Second stage no grad
+        ##
+        # concatenate all sub-batch representations
+        all_reps_2 = []
+        all_rnd_states_2 = []
+        for model, x in zip(self.models, model_inputs):
+            model_reps = []
+            with torch.no_grad():
+                for x in model_inputs:
+                    all_rnd_states_2.append(RandContext(*self.get_input_tensors(x)))
+                    y = self.model_call(model, x)
+                    model_reps.append(self.get_reps(y))
+            # concatenate all sub-batch representations
+            all_reps_2.append(torch.cat(model_reps, dim=0))
+
+        cache, loss = self.build_cache(*all_reps_2, **loss_kwargs)
+        cached_gradients_list = [
+            c.split(chunk_size) for c, chunk_size in zip(cache, self.chunk_sizes)
+        ]
+
+        for model, x, cached_gradients, rnd_states in zip(
+            self.models, model_inputs, cached_gradients_list, all_rnd_states_2
+        ):
+            self.forward_backward_two_stage(
+                model,
+                x,
+                cached_gradients,
                 rnd_states,
                 no_sync_except_last=no_sync_except_last,
             )
