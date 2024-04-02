@@ -264,7 +264,7 @@ class GradCache:
         """
         if isinstance(
             model, nn.parallel.DistributedDataParallel
-        ):  # [use ddp_model, make sure to handle the ddp hack in lightning trainer]
+        ):  
 
             if no_sync_except_last:
                 sync_contexts = [
@@ -325,12 +325,6 @@ class GradCache:
         """
         all_reps = []
         all_rnd_states = []
-
-        # [removed: we check it in forward_backward(.)]
-        # if no_sync_except_last:
-        #     assert all(map(lambda m: isinstance(m, nn.parallel.DistributedDataParallel), self.models)), \
-        #         'Some of models are not wrapped in DistributedDataParallel. Make sure you are running DDP with ' \
-        #         'proper initializations.'
 
         model_inputs = [
             self.split_inputs(x, chunk_size)

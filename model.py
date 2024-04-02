@@ -22,121 +22,6 @@ def disable_dropout(model: torch.nn.Module):
     )
 
 
-class EncoderDecoderWithDatasetEmbedder(transformers.PreTrainedModel):
-    embedder: transformers.PreTrainedModel
-    dataset_embedder: transformers.PreTrainedModel
-    def __init__(
-            self, 
-            config,
-            embedder: transformers.PreTrainedModel, 
-            dataset_embedder: transformers.PreTrainedModel, 
-            dataset_backbone: transformers.PreTrainedModel,
-        ):
-        super().__init__(config=config)
-        self.tokenizer = transformers.AutoTokenizer.from_pretrained('t5-base')
-        del dataset_backbone
-
-        if config.limit_layers:
-            print(f"Limiting layers to {config.limit_layers}")
-            limit_layers(embedder, config.limit_layers)
-            limit_layers(dataset_embedder, config.limit_layers)
-        
-        self.embedder = embedder
-        self.dataset_embedder = dataset_embedder
-
-        if hasattr(dataset_embedder, "encoder"):
-            self.dataset_embedder = dataset_embedder.encoder
-        else:
-            self.dataset_embedder = dataset_embedder
-        self.dataset_embedder_hidden_size = self.dataset_embedder.config.hidden_size
-
-        # TODO - consider BART or another encoder-decoder.
-        disabled_attention_bias_count = 0
-        for M in self.embedder.encoder.modules(): 
-            if hasattr(M, "has_relative_attention_bias"):
-                setattr(M, "has_relative_attention_bias", False)
-                # print("> disabled encoder bias")
-                disabled_attention_bias_count += 1
-        for M in self.embedder.decoder.modules():
-            if isinstance(M, transformers.models.t5.modeling_t5.T5LayerCrossAttention):
-                setattr(M, "has_relative_attention_bias", False)
-                # print("> disabled decoder bias")
-                disabled_attention_bias_count += 1
-        print(f"Disabled {disabled_attention_bias_count} attention biases")
-
-        self.hidden_size = self.embedder.config.hidden_size
-        
-        self.input_mlp = torch.nn.Sequential(
-            torch.nn.Linear(self.dataset_embedder_hidden_size, self.hidden_size * 2),
-            torch.nn.GELU(),
-            torch.nn.Linear(self.hidden_size * 2, self.hidden_size),
-            torch.nn.GELU(),
-            torch.nn.Linear(self.hidden_size, self.hidden_size),
-        )
-
-        self.mlp = torch.nn.Sequential(
-            torch.nn.Linear(self.hidden_size, self.hidden_size * 2),
-            torch.nn.GELU(),
-            torch.nn.Linear(self.hidden_size * 2, self.hidden_size),
-            torch.nn.GELU(),
-            torch.nn.Linear(self.hidden_size, self.hidden_size),
-        )
-        if config.disable_dropout:
-            disable_dropout(self)
-        
-        self.temp = config.contrastive_temp
-       
-        self.dataset_positional_embeddings = torch.nn.Parameter(
-            torch.randn((1024, self.hidden_size)), requires_grad=True
-        )
-    
-    def forward(
-            self,
-            input_ids: torch.Tensor,
-            attention_mask: torch.Tensor,
-            dataset_input_ids: torch.Tensor,
-            dataset_attention_mask: torch.Tensor,
-    ) -> torch.Tensor:
-        batch_size = input_ids.shape[0]
-        corpus_size = dataset_input_ids.shape[0]
-        dataset_outputs = self.dataset_embedder(
-            input_ids=dataset_input_ids,
-            attention_mask=dataset_attention_mask
-        ).last_hidden_state
-        dataset_embeddings = mean_pool(
-            hidden_states=dataset_outputs,
-            attention_mask=dataset_attention_mask,
-        )
-        assert len(dataset_embeddings.shape) == 2 # (b, d)
-        dataset_embeddings = self.input_mlp(dataset_embeddings)
-        # dataset_embeddings = (
-        #     dataset_embeddings + self.dataset_positional_embeddings[:batch_size, :]
-        # )
-        dataset_embeddings = dataset_embeddings[None, :, :].expand(batch_size, -1, -1)
-        _corpus_size = dataset_input_ids.shape[0]
-
-        dataset_backbone_attention_mask = torch.ones(
-            dataset_embeddings.shape[0:2], 
-            device=dataset_embeddings.device,
-            dtype=torch.long
-        )
-        outputs = self.embedder(
-            inputs_embeds=dataset_embeddings,
-            attention_mask=dataset_backbone_attention_mask,
-            decoder_input_ids=input_ids,
-            decoder_attention_mask=attention_mask,
-        )
-        # select last hidden token
-        gather_idxs = attention_mask.cumsum(1).argmax(1)
-        batch_idxs = torch.arange(batch_size, device=gather_idxs.device)
-        embeddings = outputs.last_hidden_state[batch_idxs, gather_idxs]
-        assert embeddings.shape == (batch_size, self.hidden_size)
-        # project
-        output_embeddings = self.mlp(embeddings)
-        assert output_embeddings.shape == (batch_size, self.hidden_size)
-        return output_embeddings
-
-
 class TwoEmbeddersWithMLP(transformers.PreTrainedModel):
     embedder: transformers.PreTrainedModel
     dataset_embedder: transformers.PreTrainedModel
@@ -268,7 +153,7 @@ class DatasetTransformer(transformers.PreTrainedModel):
         self.embedding_dim = self.embedder.config.hidden_size
         self.hidden_size = self.backbone.config.hidden_size
 
-        self.n_sequence = 4
+        self.n_sequence = 8
         self.prompt_projection = torch.nn.Sequential(
             torch.nn.Linear(self.embedding_dim, self.hidden_size),
             torch.nn.ReLU(),
@@ -287,31 +172,30 @@ class DatasetTransformer(transformers.PreTrainedModel):
         self.temp = config.contrastive_temp
         if config.disable_dropout:
             disable_dropout(self)
-
-    def forward(
-            self, 
-            input_ids: torch.Tensor,
-            attention_mask: torch.Tensor,
+        
+    
+    def forward_first_stage(
+            self,
             dataset_input_ids: torch.Tensor,
             dataset_attention_mask: torch.Tensor,
-        ) -> torch.Tensor:
-        """
-        query_embedding (float torch.Tensor) - shape (batch_size, embedding_dim)
-        document_embeddings (float torch.Tensor) - shape (corpus_size, embedding_dim)
-            where the corpus_size >= batch_size and is structured like this:
-                [d1, d2, d3, hn1_1, hn1_2, hn2_1, hn2_2, hn3_1, hn3_2]
-                for a corpus with three documents and two hard negatives per document
-        """
+    ) -> torch.Tensor:
         outputs = (
             self.embedder(
                 input_ids=dataset_input_ids,
                 attention_mask=dataset_attention_mask).last_hidden_state
         )
         dataset_embeddings = mean_pool(outputs, dataset_attention_mask) # (b, s, d) -> (b, d)
+        return self.corpus_projection(dataset_embeddings) # (1, b, d) -> (1, b, d)
+        
+    def forward_second_stage(
+            self, 
+            input_ids: torch.Tensor,
+            attention_mask: torch.Tensor,
+            dataset_embeddings: torch.Tensor,
+        ) -> torch.Tensor:
         dataset_embeddings = dataset_embeddings[None, :, :] # (b, d) -> (1, b, d)
         
         batch_size = input_ids.shape[0]
-        dataset_embeddings = self.corpus_projection(dataset_embeddings) # (1, b, d) -> (1, b, d)
         _, corpus_size, _hidden_dim = dataset_embeddings.shape
         assert _ == 1
         
@@ -321,6 +205,7 @@ class DatasetTransformer(transformers.PreTrainedModel):
         soft_prompt = torch.ones((1, self.embedding_dim), device=dataset_embeddings.device, dtype=torch.float32)
         soft_prompt = self.prompt_projection(soft_prompt).reshape((1, self.n_sequence, self.hidden_size))
         soft_prompt = torch.cat((soft_prompt, dataset_embeddings), dim=1)
+        # TODO: Shuffle/add dropout here during training?
         soft_prompt = soft_prompt.expand((len(input_ids), -1, -1)) # -> (b, 4+b, d) # soft_prompt.repeat((len(input_ids), 1, 1))
         
         inputs_embeds = self.backbone.embeddings(input_ids) # (b, s) -> (b, s, d)
@@ -341,13 +226,44 @@ class DatasetTransformer(transformers.PreTrainedModel):
 
         # use only these tokens
         n_soft_prompt_tokens = soft_prompt.shape[1]
+
+        soft_prompt_vectors = output.last_hidden_state[:, :n_soft_prompt_tokens, :]
+        soft_prompt_mask = attention_mask[:, :n_soft_prompt_tokens]
+        soft_prompt_pooled = mean_pool(soft_prompt_vectors, soft_prompt_mask)
+
         output_vectors = output.last_hidden_state[:, n_soft_prompt_tokens:, :]
-        attention_mask = attention_mask[:, n_soft_prompt_tokens:]
+        output_attention_mask = attention_mask[:, n_soft_prompt_tokens:]
+        output_pooled = mean_pool(output_vectors, output_attention_mask)
 
         # average with original vectors
-        output_vectors = mean_pool(output_vectors, attention_mask)
-        return self.output_projection(output_vectors)
-    
+        # TODO: Argparse for pooling strategy.
+        # output_vectors = torch.cat((soft_prompt_pooled, output_pooled), dim=1) # (b, d) + (b, d) -> (b, 2d)
+        output_vectors = output_pooled
+        return self.output_projection(output_vectors) # (b, 2d) -> (b, d)
+
+    def forward(
+            self, 
+            input_ids: torch.Tensor,
+            attention_mask: torch.Tensor,
+            dataset_input_ids: torch.Tensor,
+            dataset_attention_mask: torch.Tensor,
+        ) -> torch.Tensor:
+        """
+        query_embedding (float torch.Tensor) - shape (batch_size, embedding_dim)
+        document_embeddings (float torch.Tensor) - shape (corpus_size, embedding_dim)
+            where the corpus_size >= batch_size and is structured like this:
+                [d1, d2, d3, hn1_1, hn1_2, hn2_1, hn2_2, hn3_1, hn3_2]
+                for a corpus with three documents and two hard negatives per document
+        """
+        dataset_embeddings = self.forward_first_stage(
+            dataset_input_ids=dataset_input_ids, 
+            dataset_attention_mask=dataset_attention_mask
+        )
+        return self.forward_second_stage(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            dataset_embeddings=dataset_embeddings,
+        )
 
 
 class DatasetTransformerDeeper(transformers.PreTrainedModel):
@@ -442,7 +358,7 @@ class DatasetTransformerDeeper(transformers.PreTrainedModel):
         soft_prompt = torch.cat((soft_prompt, dataset_embeddings), dim=1)
         soft_prompt = soft_prompt.expand((len(input_ids), -1, -1)) # -> (b, 4+b, d)
         
-        inputs_embeds = self.backbone.embeddings.word_embeddings(input_ids) # (b, s) -> (b, s, d)
+        inputs_embeds = self.backbone.embeddings(input_ids) # (b, s) -> (b, s, d)
         inputs_embeds = torch.cat((soft_prompt, inputs_embeds), dim=1) # (v, 4+b+s, d)
 
         backbone_attention_mask = torch.ones(
@@ -569,8 +485,6 @@ class BiEncoder(transformers.PreTrainedModel):
 def get_model_class(name: str):
     if name == 'two_head_mlp':
         return TwoEmbeddersWithMLP
-    elif name == 'encoder_decoder_de':
-        return EncoderDecoderWithDatasetEmbedder
     elif name == 'query_independent_dt':
         return DatasetTransformer
     elif name == 'query_independent_dt_deeper':
