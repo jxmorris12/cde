@@ -1,6 +1,7 @@
 from typing import Optional
 
 import copy
+import functools
 import os
 import logging
 import os
@@ -180,9 +181,9 @@ def main():
     )
     data_args_eval = copy.copy(data_args)
     data_args_eval.sampling_strategy = "domain" # always set this for eval
-    eval_sampler = get_sampler(
+    eval_sampler_fn = functools.partial(
+        get_sampler,
         dataset=(eval_dataset or train_dataset),
-        sampling_strategy="domain",
         batch_size=training_args.per_device_eval_batch_size,
         cluster_size=224,
         shuffle=False,
@@ -190,7 +191,11 @@ def main():
         clustering_query_to_doc=data_args.clustering_query_to_doc,
         num_samples=(training_args.per_device_eval_batch_size * training_args.max_eval_batches),
     )
-
+    eval_samplers = {
+        "cluster_within_domain": eval_sampler_fn(sampling_strategy="cluster_within_domain"),
+        "domain": eval_sampler_fn(sampling_strategy="domain"),
+        "random": eval_sampler_fn(sampling_strategy="random"),
+    }
     model_config = ModelConfig(**vars(model_args))
     model_cls = get_model_class(model_args.architecture)
     model = model_cls(
@@ -233,7 +238,7 @@ def main():
         dataset_tokenizer=dataset_tokenizer,
         embedder_tokenizer=embedder_tokenizer,
         train_sampler=train_sampler,
-        eval_sampler=eval_sampler,
+        eval_samplers=eval_samplers,
         retrieval_datasets=retrieval_datasets,
     )
     checkpoint = get_checkpoint(training_args)

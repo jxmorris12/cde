@@ -1,10 +1,13 @@
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import functools
+import math
 import os
+import time
 
 import datasets
 import torch
+from transformers.trainer_utils import speed_metrics
 import transformers
 import wandb
 
@@ -26,21 +29,21 @@ class CustomTrainer(transformers.Trainer):
     embedder_tokenizer: transformers.PreTrainedTokenizer
     dataset_tokenizer:  transformers.PreTrainedTokenizer
     train_sampler: Sampler
-    eval_sampler: Sampler
+    eval_samplers: Dict[str, Sampler]
 
     def __init__(self, *args,
                  embedder_tokenizer: transformers.PreTrainedTokenizer,
                  dataset_tokenizer:  transformers.PreTrainedTokenizer,
                  retrieval_datasets: Dict[str, datasets.Dataset],
                  train_sampler: Sampler,
-                 eval_sampler: Sampler,
+                 eval_samplers: Dict[str, Sampler],
                   **kwargs
                 ):
         super().__init__(*args, **kwargs)
         self.max_seq_length = self.model.config.max_seq_length
         self.retrieval_datasets = retrieval_datasets
         self._train_sampler = train_sampler
-        self._eval_sampler = eval_sampler
+        self._eval_samplers = eval_samplers
         self._signature_columns = [
             "idx",
             "query", "document",
@@ -63,7 +66,7 @@ class CustomTrainer(transformers.Trainer):
         return self._train_sampler
     
     def _get_eval_sampler(self, eval_dataset: datasets.Dataset) -> torch.utils.data.Sampler:
-        return self._eval_sampler
+        return next(iter(self._eval_samplers.values()))
     
     def _log_extra(self, key: str, val: torch.Tensor):
         self._extra_logs.update(key, val)
@@ -107,7 +110,9 @@ class CustomTrainer(transformers.Trainer):
         self.train_dataloader = train_dataloader
         return train_dataloader
         
-    def get_eval_dataloader(self, eval_dataset: Optional[torch.utils.data.Dataset]) -> torch.utils.data.DataLoader:
+    def get_eval_dataloader(self, 
+                            eval_dataset: Optional[torch.utils.data.Dataset], 
+                            sampler: Optional[Sampler] = None) -> torch.utils.data.DataLoader:
         """This is a clever bit of code that will do evaluation with
         a different dataset per evaluation batch.
         """
@@ -120,7 +125,7 @@ class CustomTrainer(transformers.Trainer):
         
         eval_dataloader = torch.utils.data.DataLoader(
             eval_dataset,
-            sampler=self._get_eval_sampler(eval_dataset),
+            sampler=(sampler or self._get_eval_sampler(eval_dataset)),
             batch_size=self.args.per_device_eval_batch_size,
             collate_fn=data_collator,
             drop_last=self.args.dataloader_drop_last,
@@ -469,6 +474,77 @@ class CustomTrainer(transformers.Trainer):
                 eval_dataset=eval_dataset,
                 **kwargs
             )
+    
+    def _run_eval_dataloader(
+            self,
+            eval_dataloader: torch.utils.data.DataLoader,
+            metric_key_prefix: str,
+            ignore_keys: Optional[List[str]] = None,
+        ) -> Dict[str, float]:
+        self._memory_tracker.start()
+        start_time = time.time()
+
+        eval_loop = self.prediction_loop if self.args.use_legacy_prediction_loop else self.evaluation_loop
+        output = eval_loop(
+            eval_dataloader,
+            description="Evaluation",
+            # No point gathering the predictions if there are no metrics, otherwise we defer to
+            # self.args.prediction_loss_only
+            prediction_loss_only=True if self.compute_metrics is None else None,
+            ignore_keys=ignore_keys,
+            metric_key_prefix=metric_key_prefix,
+        )
+
+        total_batch_size = self.args.eval_batch_size * self.args.world_size
+        if f"{metric_key_prefix}_jit_compilation_time" in output.metrics:
+            start_time += output.metrics[f"{metric_key_prefix}_jit_compilation_time"]
+        output.metrics.update(
+            speed_metrics(
+                metric_key_prefix,
+                start_time,
+                num_samples=output.num_samples,
+                num_steps=math.ceil(output.num_samples / total_batch_size),
+            )
+        )
+
+        self.log(output.metrics)
+
+        self.control = self.callback_handler.on_evaluate(self.args, self.state, self.control, output.metrics)
+
+        self._memory_tracker.stop_and_update_metrics(output.metrics)
+        return output.metrics
+        
+    def evaluate(
+        self,
+        eval_dataset: Optional[Union[datasets.Dataset, Dict[str, datasets.Dataset]]] = None,
+        ignore_keys: Optional[List[str]] = None,
+        metric_key_prefix: str = "eval",
+    ) -> Dict[str, float]:
+        # handle multipe eval datasets
+        eval_dataset = eval_dataset if eval_dataset is not None else self.eval_dataset
+        if isinstance(eval_dataset, dict):
+            metrics = {}
+            for eval_dataset_name, _eval_dataset in eval_dataset.items():
+                dataset_metrics = self.evaluate(
+                    eval_dataset=_eval_dataset,
+                    ignore_keys=ignore_keys,
+                    metric_key_prefix=f"{metric_key_prefix}_{eval_dataset_name}",
+                )
+                metrics.update(dataset_metrics)
+            return metrics
+
+        # aggregate metrics over multiple samplers
+        all_metrics = {}
+        for sampler_name, sampler in self._eval_samplers.items():
+            eval_with_sampler_key = "_".join([metric_key_prefix, sampler_name])
+            eval_dataloader = self.get_eval_dataloader(eval_dataset, sampler=sampler)
+            metrics = self._run_eval_dataloader(
+                eval_dataloader=eval_dataloader,
+                ignore_keys=eval_dataloader,
+                metric_key_prefix=eval_with_sampler_key
+            )
+            all_metrics = (metrics | all_metrics)
+        return all_metrics
 
     def evaluate_retrieval_datasets(self, model: torch.nn.Module) -> Dict[str, float]:
         all_metrics = {}
