@@ -216,6 +216,7 @@ class DatasetTransformer(transformers.PreTrainedModel):
                     torch.cat(
                         (torch.arange(self.n_sequence), self.n_sequence + torch.randperm(corpus_size)), dim=0) 
                         for _ in range(batch_size)])
+            randomized_order = randomized_order.to(soft_prompt.device)
             soft_prompt.gather(1, randomized_order[..., None].expand_as(soft_prompt))     
         inputs_embeds = self.backbone.embeddings(input_ids) # (b, s) -> (b, s, d)
         inputs_embeds = torch.cat((soft_prompt, inputs_embeds), dim=1) # (v, 4+b+s, d)

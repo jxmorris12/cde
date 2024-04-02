@@ -390,28 +390,28 @@ class GradCache:
         ##
         ## First stage no grad
         ##
-        dataset_embedding = []
-        all_rnd_states_1 = []
-        document_model = self.model_objs[0] # TODO: Generalize this
-        rnd_states = []
+        first_stage_embedding = []
+        first_stage_rnd_states = []
+        first_stage_model = self.model_objs[0] # TODO: Generalize this
+        first_stage_inputs = model_inputs[0]
         with torch.no_grad():
-            for x in model_inputs[0]:
-                all_rnd_states_1.append(RandContext(*self.get_input_tensors(x)))
+            for x in first_stage_inputs:
+                first_stage_rnd_states.append(RandContext(*self.get_input_tensors(x)))
                 with autocast() if self.bf16 else nullcontext():
-                    y = document_model.forward_first_stage(
+                    y = first_stage_model.forward_first_stage(
                         dataset_input_ids=x['dataset_input_ids'],
                         dataset_attention_mask=x['dataset_attention_mask'],
                     )
-                dataset_embedding.append(self.get_reps(y))
+                first_stage_embedding.append(self.get_reps(y))
         # concatenate all sub-batch representations
-        dataset_embedding = torch.cat(dataset_embedding, dim=0)
+        first_stage_embedding = torch.cat(first_stage_embedding, dim=0)
 
         ##
         ## Second stage no grad
         ##
         # concatenate all sub-batch representations
-        all_reps_2 = []
-        all_rnd_states_2 = []
+        output_embeddings = []
+        second_stage_rnd_states = []
         for model, x in zip(self.model_objs, model_inputs):
             model_reps = []
             rnd_states = []
@@ -422,15 +422,15 @@ class GradCache:
                         y = model.forward_second_stage(
                             input_ids=z["input_ids"],
                             attention_mask=z["attention_mask"],
-                            dataset_embeddings=dataset_embedding,
+                            dataset_embeddings=first_stage_embedding,
                         )
                     model_reps.append(self.get_reps(y))
             # concatenate all sub-batch representations
-            all_reps_2.append(torch.cat(model_reps, dim=0))
-            all_rnd_states_2.append(rnd_states)
+            output_embeddings.append(torch.cat(model_reps, dim=0))
+            second_stage_rnd_states.append(rnd_states)
 
-        cache, loss = self.build_cache(*all_reps_2, **loss_kwargs)
-        cached_gradients_2 = [
+        cache, loss = self.build_cache(*output_embeddings, **loss_kwargs)
+        second_stage_gradients = [
             c.split(chunk_size) for c, chunk_size in zip(cache, self.chunk_sizes)
         ]
 
@@ -446,9 +446,9 @@ class GradCache:
         else:
             sync_contexts = [nullcontext for _ in range(len(model_inputs))]
 
-        dataset_embedding = dataset_embedding.detach().requires_grad_()
+        first_stage_embedding = first_stage_embedding.detach().requires_grad_()
         for model, x, random_states, cached_gradients in zip(
-            self.model_objs, model_inputs, all_rnd_states_2, cached_gradients_2
+            self.model_objs, model_inputs, second_stage_rnd_states, second_stage_gradients
         ):
             for z, state, gradient, sync_context in zip(
                 x, random_states, cached_gradients, sync_contexts
@@ -457,7 +457,7 @@ class GradCache:
                     y = model.forward_second_stage(
                         input_ids=z["input_ids"],
                         attention_mask=z["attention_mask"],
-                        dataset_embeddings=dataset_embedding,
+                        dataset_embeddings=first_stage_embedding,
                     )
                 reps = self.get_reps(y)
                 surrogate = torch.dot(reps.flatten(), gradient.flatten())
@@ -466,16 +466,16 @@ class GradCache:
         ###
         ### Compute gradients wrt first stage
         ###
-        cached_gradients_1 = dataset_embedding.split(self.chunk_sizes[0])
+        first_stage_gradients = first_stage_embedding.split(self.chunk_sizes[0])
         for x, state, gradient, sync_context in zip(
-            model_inputs[0], all_rnd_states_1, cached_gradients_1, sync_contexts
+            first_stage_inputs, first_stage_rnd_states, first_stage_gradients, sync_contexts
         ):
             with state, sync_context(), (autocast() if self.bf16 else nullcontext()):
-                    y = document_model.forward_first_stage(
-                        dataset_input_ids=x['dataset_input_ids'],
-                        dataset_attention_mask=x['dataset_attention_mask'],
-                    )
+                y = first_stage_model.forward_first_stage(
+                    dataset_input_ids=x['dataset_input_ids'],
+                    dataset_attention_mask=x['dataset_attention_mask'],
+                )
             reps = self.get_reps(y)
             surrogate = torch.dot(reps.flatten(), gradient.flatten())
-            self.backward_fn(surrogate)  # [added]
+            self.backward_fn(surrogate)
         return loss

@@ -182,12 +182,10 @@ class TrainingArguments(transformers.TrainingArguments):
         default=30_000, 
         metadata={"help": "Run an evaluation every X steps."}
     )
-
     max_batch_size_fits_in_memory: int = field(
         default=64, 
         metadata={"help": "Max batch size for contrastive learning"}
     )
-
     eval_rerank_topk: int = field(
         default=128,
          metadata={"help": "Number of reranked examples during eval"}

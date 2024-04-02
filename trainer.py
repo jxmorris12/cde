@@ -201,6 +201,8 @@ class CustomTrainer(transformers.Trainer):
             loss = self.compute_loss(model, inputs)
         if self.args.n_gpu > 1:
             loss = loss.mean()
+        self.optimizer.step() 
+        self.model.zero_grad()
         return loss.detach() / self.args.gradient_accumulation_steps
 
     def _contrastive_loss(
@@ -370,8 +372,6 @@ class CustomTrainer(transformers.Trainer):
                 one_hot_labels=one_hot_labels,
                 no_sync_except_last=(get_world_size() > 1)
             )
-            self.optimizer.step() # TODO: Is this right place?
-            self.model.zero_grad()
             return loss
         else:
             e1 = model(**query_inputs)
