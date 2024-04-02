@@ -84,8 +84,6 @@ def test_loss_gradcache():
         model=model,
         chunk_sizes=2,
         loss_fn=functools.partial(contrastive_loss, model),
-        fp16=False,
-        scaler=None,
         backward_fn=(lambda t: t.backward()),
     )
     dataloader = torch.utils.data.DataLoader(

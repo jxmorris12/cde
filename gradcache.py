@@ -263,13 +263,11 @@ class GradCache:
             else:
                 sync_contexts = [nullcontext for _ in range(len(model_inputs))]
 
-            # [modified]
             for x, state, gradient, sync_context in zip(
                 model_inputs, random_states, cached_gradients, sync_contexts
             ):
-                with sync_context():
-                    with state:
-                        y = self.model_call(model, x)
+                with state, sync_context():
+                    y = self.model_call(model, x)
                     reps = self.get_reps(y)
                     surrogate = torch.dot(reps.flatten(), gradient.flatten())
                     self.backward_fn(surrogate)  # [modified]
@@ -439,7 +437,9 @@ class GradCache:
         ###
         ### Compute gradients wrt second stage
         ###
-        if no_sync_except_last:
+        model_is_ddp = isinstance(
+            model, nn.parallel.DistributedDataParallel)
+        if no_sync_except_last and model_is_ddp:
             sync_contexts = [
                 model.no_sync for _ in range(len(model_inputs) - 1)
             ] + [nullcontext]
@@ -447,13 +447,13 @@ class GradCache:
             sync_contexts = [nullcontext for _ in range(len(model_inputs))]
 
         dataset_embedding = dataset_embedding.detach().requires_grad_()
-        for model, x, random_states, cached_gradients, sync_context in zip(
+        for model, x, random_states, cached_gradients in zip(
             self.model_objs, model_inputs, all_rnd_states_2, cached_gradients_2
         ):
             for z, state, gradient, sync_context in zip(
                 x, random_states, cached_gradients, sync_contexts
             ):
-                with state, sync_context, (autocast() if self.bf16 else nullcontext()):
+                with state, sync_context(), (autocast() if self.bf16 else nullcontext()):
                     y = model.forward_second_stage(
                         input_ids=z["input_ids"],
                         attention_mask=z["attention_mask"],
@@ -470,7 +470,7 @@ class GradCache:
         for x, state, gradient, sync_context in zip(
             model_inputs[0], all_rnd_states_1, cached_gradients_1, sync_contexts
         ):
-            with state, sync_context, (autocast() if self.bf16 else nullcontext()):
+            with state, sync_context(), (autocast() if self.bf16 else nullcontext()):
                     y = document_model.forward_first_stage(
                         dataset_input_ids=x['dataset_input_ids'],
                         dataset_attention_mask=x['dataset_attention_mask'],
