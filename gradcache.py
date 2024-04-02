@@ -44,7 +44,7 @@ class GradCache:
         loss_fn: Callable[..., Tensor],
         split_input_fn: Callable[[Any, int], Any] = None,
         get_rep_fn: Callable[..., Tensor] = None,
-        fp16: bool = False,
+        bf16: bool = False,
         scaler: GradScaler = None,
         backward_fn=None,  # [added]
     ):
@@ -59,8 +59,7 @@ class GradCache:
         class will try its best to split the inputs of supported types. See `split_inputs` function.
         :param get_rep_fn: An optional function that takes generic model output and return representation tensors. If
         not provided, the generic output is assumed to be the representation tensor.
-        :param fp16: If True, run mixed precision training, which requires scaler to also be set.
-        :param scaler: A GradScaler object for automatic mixed precision training.
+        :param bf16: If True, run mixed precision training
         :[added] param backward_fn: The `manual_backward` function of pytorch lightning trainer when automatic_optimization is disabled.
         """
         self.model = model
@@ -75,9 +74,7 @@ class GradCache:
         self.split_input_fn = split_input_fn
         self.get_rep_fn = get_rep_fn
         self.loss_fn = loss_fn
-
-        assert not fp16, "fp16 no longer supported! please use bf16."
-        self.scaler = scaler
+        self.bf16 = bf16
         # [added]
         self.backward_fn = backward_fn
 
@@ -170,20 +167,21 @@ class GradCache:
         :param model_input: input to the model call
         :return: model output
         """
-        if isinstance(model_input, Tensor):
-            return model(model_input)
-        elif isinstance(model_input, list):
-            return model(*model_input)
-        elif isinstance(model_input, (dict, UserDict)):
-            return model(**model_input)
-        elif isinstance(model_input, tuple) and list(map(type, model_input)) == [
-            list,
-            dict,
-        ]:
-            model_args, model_kwargs = model_input
-            return model(*model_args, **model_kwargs)
-        else:
-            raise NotImplementedError
+        with autocast() if self.bf16 else nullcontext():
+            if isinstance(model_input, Tensor):
+                return model(model_input)
+            elif isinstance(model_input, list):
+                return model(*model_input)
+            elif isinstance(model_input, (dict, UserDict)):
+                return model(**model_input)
+            elif isinstance(model_input, tuple) and list(map(type, model_input)) == [
+                list,
+                dict,
+            ]:
+                model_args, model_kwargs = model_input
+                return model(*model_args, **model_kwargs)
+            else:
+                raise NotImplementedError
 
     def get_reps(self, model_out) -> Tensor:
         """
@@ -410,10 +408,11 @@ class GradCache:
         with torch.no_grad():
             for x in model_inputs[0]:
                 all_rnd_states_1.append(RandContext(*self.get_input_tensors(x)))
-                y = document_model.forward_first_stage(
-                    dataset_input_ids=x['dataset_input_ids'],
-                    dataset_attention_mask=x['dataset_attention_mask'],
-                )
+                with autocast() if self.bf16 else nullcontext():
+                    y = document_model.forward_first_stage(
+                        dataset_input_ids=x['dataset_input_ids'],
+                        dataset_attention_mask=x['dataset_attention_mask'],
+                    )
                 dataset_embedding.append(self.get_reps(y))
         # concatenate all sub-batch representations
         dataset_embedding = torch.cat(dataset_embedding, dim=0)
@@ -430,11 +429,12 @@ class GradCache:
             with torch.no_grad():
                 for z in x:
                     rnd_states.append(RandContext(*self.get_input_tensors(x)))
-                    y = model(
-                        input_ids=z["input_ids"],
-                        attention_mask=z["attention_mask"],
-                        dataset_embeddings=dataset_embedding,
-                    )
+                    with autocast() if self.bf16 else nullcontext():
+                        y = model.forward_second_stage(
+                            input_ids=z["input_ids"],
+                            attention_mask=z["attention_mask"],
+                            dataset_embeddings=dataset_embedding,
+                        )
                     model_reps.append(self.get_reps(y))
             # concatenate all sub-batch representations
             all_reps_2.append(torch.cat(model_reps, dim=0))
@@ -448,6 +448,15 @@ class GradCache:
         ###
         ### Compute gradients wrt second stage
         ###
+        if no_sync_except_last:
+            sync_contexts = [
+                model.no_sync for _ in range(len(model_inputs) - 1)
+            ] + [nullcontext]
+            sync_flags = [True] * (len(model_inputs))  # [added]
+        else:
+            sync_contexts = [nullcontext for _ in range(len(model_inputs))]
+            sync_flags = [False] * (len(model_inputs))  # [added]
+
         dataset_embedding = dataset_embedding.detach().requires_grad_()
         for model, x, random_states, cached_gradients in zip(
             self.model_objs, model_inputs, all_rnd_states_2, cached_gradients_2
@@ -457,11 +466,12 @@ class GradCache:
                 x, random_states, cached_gradients
             ):
                 with state:
-                    y = model.forward_second_stage(
-                        input_ids=z["input_ids"],
-                        attention_mask=z["attention_mask"],
-                        dataset_embeddings=dataset_embedding,
-                    )
+                    with autocast() if self.bf16 else nullcontext():
+                        y = model.forward_second_stage(
+                            input_ids=z["input_ids"],
+                            attention_mask=z["attention_mask"],
+                            dataset_embeddings=dataset_embedding,
+                        )
                 reps = self.get_reps(y)
                 surrogate = torch.dot(reps.flatten(), gradient.flatten())
                 self.backward_fn(surrogate)  # [added]
@@ -475,10 +485,11 @@ class GradCache:
             model_inputs[0], all_rnd_states_1, cached_gradients_1
         ):
             with state:
-                y = document_model.forward_first_stage(
-                    dataset_input_ids=x['dataset_input_ids'],
-                    dataset_attention_mask=x['dataset_attention_mask'],
-                )
+                with autocast() if self.bf16 else nullcontext():
+                    y = document_model.forward_first_stage(
+                        dataset_input_ids=x['dataset_input_ids'],
+                        dataset_attention_mask=x['dataset_attention_mask'],
+                    )
             reps = self.get_reps(y)
             surrogate = torch.dot(reps.flatten(), gradient.flatten())
             self.backward_fn(surrogate)  # [added]

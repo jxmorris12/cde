@@ -249,20 +249,15 @@ class DatasetTransformer(transformers.PreTrainedModel):
             attention_mask: torch.Tensor,
             dataset_input_ids: Optional[torch.Tensor] = None,
             dataset_attention_mask: Optional[torch.Tensor] = None,
-            dataset_embeddings: Optional[torch.Tensor] = None,
         ) -> torch.Tensor:
         """
-        query_embedding (float torch.Tensor) - shape (batch_size, embedding_dim)
-        document_embeddings (float torch.Tensor) - shape (corpus_size, embedding_dim)
-            where the corpus_size >= batch_size and is structured like this:
-                [d1, d2, d3, hn1_1, hn1_2, hn2_1, hn2_2, hn3_1, hn3_2]
-                for a corpus with three documents and two hard negatives per document
+        input_ids (long torch.Tensor) – ids of input tokens
+        attention_mask (bool torch.Tensor)
         """
-        if dataset_embeddings is None:
-            dataset_embeddings = self.forward_first_stage(
-                dataset_input_ids=dataset_input_ids, 
-                dataset_attention_mask=dataset_attention_mask
-            )
+        dataset_embeddings = self.forward_first_stage(
+            dataset_input_ids=dataset_input_ids, 
+            dataset_attention_mask=dataset_attention_mask
+        )
         return self.forward_second_stage(
             input_ids=input_ids,
             attention_mask=attention_mask,

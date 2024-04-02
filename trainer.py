@@ -82,8 +82,7 @@ class CustomTrainer(transformers.Trainer):
                 model=self.model,
                 chunk_sizes=self.args.max_batch_size_fits_in_memory,
                 loss_fn=functools.partial(self._contrastive_loss, return_scores=False), 
-                fp16=self.args.fp16,
-                scaler=self.scaler if self.args.fp16 else None,
+                bf16=self.args.bf16,
                 backward_fn=self.accelerator.backward,
             )
         else:
