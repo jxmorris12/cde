@@ -403,20 +403,20 @@ class GradCache:
         ##
         ## First stage no grad
         ##
-        all_reps_1 = []
+        dataset_embedding = []
         all_rnd_states_1 = []
-        for model, x in zip(self.model_objs, model_inputs):
-            model_reps = []
-            with torch.no_grad():
-                for z in x:
-                    all_rnd_states_1.append(RandContext(*self.get_input_tensors(x)))
-                    y = model.forward_first_stage(
-                        dataset_input_ids=z['dataset_input_ids'],
-                        dataset_attention_mask=z['dataset_attention_mask'],
-                    )
-                    model_reps.append(self.get_reps(y))
-            # concatenate all sub-batch representations
-            all_reps_1.append(torch.cat(model_reps, dim=0))
+        document_model = self.model_objs[0] # TODO: Generalize this
+        rnd_states = []
+        with torch.no_grad():
+            for x in model_inputs[0]:
+                all_rnd_states_1.append(RandContext(*self.get_input_tensors(x)))
+                y = document_model.forward_first_stage(
+                    dataset_input_ids=x['dataset_input_ids'],
+                    dataset_attention_mask=x['dataset_attention_mask'],
+                )
+                dataset_embedding.append(self.get_reps(y))
+        # concatenate all sub-batch representations
+        dataset_embedding = torch.cat(dataset_embedding, dim=0)
 
         ##
         ## Second stage no grad
@@ -426,29 +426,60 @@ class GradCache:
         all_rnd_states_2 = []
         for model, x in zip(self.model_objs, model_inputs):
             model_reps = []
+            rnd_states = []
             with torch.no_grad():
                 for z in x:
-                    all_rnd_states_2.append(RandContext(*self.get_input_tensors(x)))
-                    y = self.model_call(model, z)
+                    rnd_states.append(RandContext(*self.get_input_tensors(x)))
+                    y = model(
+                        input_ids=z["input_ids"],
+                        attention_mask=z["attention_mask"],
+                        dataset_embeddings=dataset_embedding,
+                    )
                     model_reps.append(self.get_reps(y))
             # concatenate all sub-batch representations
             all_reps_2.append(torch.cat(model_reps, dim=0))
+            all_rnd_states_2.append(rnd_states)
 
-        breakpoint()
         cache, loss = self.build_cache(*all_reps_2, **loss_kwargs)
-        cached_gradients_list = [
+        cached_gradients_2 = [
             c.split(chunk_size) for c, chunk_size in zip(cache, self.chunk_sizes)
         ]
 
-        for model, x, cached_gradients, rnd_states in zip(
-            self.models, model_inputs, cached_gradients_list, all_rnd_states_2
+        ###
+        ### Compute gradients wrt second stage
+        ###
+        dataset_embedding = dataset_embedding.detach().requires_grad_()
+        for model, x, random_states, cached_gradients in zip(
+            self.model_objs, model_inputs, all_rnd_states_2, cached_gradients_2
         ):
-            self.forward_backward_two_stage(
-                model,
-                x,
-                cached_gradients,
-                rnd_states,
-                no_sync_except_last=no_sync_except_last,
-            )
+            # TODO: Support DDP no-sync
+            for z, state, gradient in zip(
+                x, random_states, cached_gradients
+            ):
+                with state:
+                    y = model.forward_second_stage(
+                        input_ids=z["input_ids"],
+                        attention_mask=z["attention_mask"],
+                        dataset_embeddings=dataset_embedding,
+                    )
+                reps = self.get_reps(y)
+                surrogate = torch.dot(reps.flatten(), gradient.flatten())
+                self.backward_fn(surrogate)  # [added]
 
+        ###
+        ### Compute gradients wrt first stage
+        ###
+        cached_gradients_1 = dataset_embedding.split(self.chunk_sizes[0])
+        # TODO: Support DDP no-sync
+        for x, state, gradient in zip(
+            model_inputs[0], all_rnd_states_1, cached_gradients_1
+        ):
+            with state:
+                y = document_model.forward_first_stage(
+                    dataset_input_ids=x['dataset_input_ids'],
+                    dataset_attention_mask=x['dataset_attention_mask'],
+                )
+            reps = self.get_reps(y)
+            surrogate = torch.dot(reps.flatten(), gradient.flatten())
+            self.backward_fn(surrogate)  # [added]
         return loss

@@ -1,3 +1,5 @@
+from typing import Optional
+
 import torch
 import transformers
 
@@ -133,7 +135,7 @@ class DatasetTransformer(transformers.PreTrainedModel):
             config, #: transformers.PreTrainedConfig, 
             embedder: transformers.PreTrainedModel, 
             dataset_backbone: transformers.PreTrainedModel,
-            dataset_embedder: transformers.PreTrainedModel = None, 
+            dataset_embedder: transformers.PreTrainedModel = None,  #  ignored 
         ):
         super().__init__(config=config)
         self.tokenizer = transformers.AutoTokenizer.from_pretrained('bert-base-uncased')
@@ -245,8 +247,9 @@ class DatasetTransformer(transformers.PreTrainedModel):
             self, 
             input_ids: torch.Tensor,
             attention_mask: torch.Tensor,
-            dataset_input_ids: torch.Tensor,
-            dataset_attention_mask: torch.Tensor,
+            dataset_input_ids: Optional[torch.Tensor] = None,
+            dataset_attention_mask: Optional[torch.Tensor] = None,
+            dataset_embeddings: Optional[torch.Tensor] = None,
         ) -> torch.Tensor:
         """
         query_embedding (float torch.Tensor) - shape (batch_size, embedding_dim)
@@ -255,10 +258,11 @@ class DatasetTransformer(transformers.PreTrainedModel):
                 [d1, d2, d3, hn1_1, hn1_2, hn2_1, hn2_2, hn3_1, hn3_2]
                 for a corpus with three documents and two hard negatives per document
         """
-        dataset_embeddings = self.forward_first_stage(
-            dataset_input_ids=dataset_input_ids, 
-            dataset_attention_mask=dataset_attention_mask
-        )
+        if dataset_embeddings is None:
+            dataset_embeddings = self.forward_first_stage(
+                dataset_input_ids=dataset_input_ids, 
+                dataset_attention_mask=dataset_attention_mask
+            )
         return self.forward_second_stage(
             input_ids=input_ids,
             attention_mask=attention_mask,
