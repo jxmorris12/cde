@@ -175,7 +175,9 @@ class DatasetTransformer(transformers.PreTrainedModel):
         if config.disable_dropout:
             disable_dropout(self)
         
-    
+        self.randomize_dataset_sequence_order = True
+        
+
     def forward_first_stage(
             self,
             dataset_input_ids: torch.Tensor,
@@ -207,9 +209,14 @@ class DatasetTransformer(transformers.PreTrainedModel):
         soft_prompt = torch.ones((1, self.embedding_dim), device=dataset_embeddings.device, dtype=torch.float32)
         soft_prompt = self.prompt_projection(soft_prompt).reshape((1, self.n_sequence, self.hidden_size))
         soft_prompt = torch.cat((soft_prompt, dataset_embeddings), dim=1)
-        # TODO: Shuffle/add dropout here during training?
         soft_prompt = soft_prompt.expand((len(input_ids), -1, -1)) # -> (b, 4+b, d) # soft_prompt.repeat((len(input_ids), 1, 1))
-        
+        if self.training and self.randomize_dataset_sequence_order:
+            randomized_order = torch.stack(
+                [
+                    torch.cat(
+                        (torch.arange(self.n_sequence), self.n_sequence + torch.randperm(corpus_size)), dim=0) 
+                        for _ in range(batch_size)])
+            soft_prompt.gather(1, randomized_order[..., None].expand_as(soft_prompt))     
         inputs_embeds = self.backbone.embeddings(input_ids) # (b, s) -> (b, s, d)
         inputs_embeds = torch.cat((soft_prompt, inputs_embeds), dim=1) # (v, 4+b+s, d)
 
