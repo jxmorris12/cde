@@ -132,8 +132,8 @@ class DatasetTransformer(transformers.PreTrainedModel):
             self, 
             config, #: transformers.PreTrainedConfig, 
             embedder: transformers.PreTrainedModel, 
-            dataset_embedder: transformers.PreTrainedModel, 
             dataset_backbone: transformers.PreTrainedModel,
+            dataset_embedder: transformers.PreTrainedModel = None, 
         ):
         super().__init__(config=config)
         self.tokenizer = transformers.AutoTokenizer.from_pretrained('bert-base-uncased')

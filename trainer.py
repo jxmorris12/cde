@@ -15,13 +15,8 @@ import wandb
 from beir.retrieval.evaluation import EvaluateRetrieval
 from gradcache import GradCache
 from dataset import BeirDataset
-from lib import get_rank, get_world_size, RerankHelper, TensorRunningAverages
+from lib import get_rank, get_world_size, inputs_for_key, RerankHelper, TensorRunningAverages
 from sampler import Sampler
-
-
-def inputs_for_key(inputs: Dict[str, torch.Tensor], key: str):
-    key += "_"
-    return {k.replace(key, ""): v for k,v in inputs.items() if k.startswith(key)}
 
 
 class CustomTrainer(transformers.Trainer):
@@ -85,7 +80,6 @@ class CustomTrainer(transformers.Trainer):
             print(f"[rank {get_rank()}] initializing GradCache with chunk_size={self.args.max_batch_size_fits_in_memory}.")
             self.gc = GradCache(
                 model=self.model,
-                optimizer=self.optimizer,
                 chunk_sizes=self.args.max_batch_size_fits_in_memory,
                 loss_fn=functools.partial(self._contrastive_loss, return_scores=False), 
                 fp16=self.args.fp16,
@@ -216,7 +210,6 @@ class CustomTrainer(transformers.Trainer):
                 one_hot_labels: torch.Tensor,
                 return_scores: bool = True
             ) -> Tuple[torch.Tensor, torch.Tensor]:
-        # TODO: How does this handle hard negatives?
         e1 = e1 / e1.norm(p=2, dim=1, keepdim=True) # Query
         e2 = e2 / e2.norm(p=2, dim=1, keepdim=True) # Document
         scores = e1 @ e2.T
@@ -372,12 +365,15 @@ class CustomTrainer(transformers.Trainer):
 
         if self.use_gc and torch.is_grad_enabled():
             # TODO: Restore gradcache w/ hard negatives.
-            return self.gc(
+            loss = self.gc(
                 query_inputs, 
                 document_inputs, 
                 one_hot_labels=one_hot_labels,
                 no_sync_except_last=(get_world_size() > 1)
             )
+            self.optimizer.step() # TODO: Is this right place?
+            self.model.zero_grad()
+            return loss
         else:
             e1 = model(**query_inputs)
             e2 = model(**document_inputs)

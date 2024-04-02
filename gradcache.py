@@ -41,7 +41,6 @@ class GradCache:
         self,
         model: nn.Module,
         chunk_sizes: Union[int, List[int]],
-        optimizer: torch.optim.Optimizer,
         loss_fn: Callable[..., Tensor],
         split_input_fn: Callable[[Any, int], Any] = None,
         get_rep_fn: Callable[..., Tensor] = None,
@@ -66,7 +65,7 @@ class GradCache:
         """
         self.model = model
         self.models = [model.forward, model.forward]
-        self.optimizer = optimizer
+        self.model_objs = [model, model]
 
         if isinstance(chunk_sizes, int):
             self.chunk_sizes = [chunk_sizes for _ in range(len(self.models))]
@@ -233,9 +232,6 @@ class GradCache:
         loss = self.loss_fn(*reps, **loss_kwargs)
 
         self.backward_fn(loss)
-        
-        self.optimizer.step()
-        self.model.zero_grad()
 
         cache = [r.grad for r in reps]
 
@@ -399,24 +395,24 @@ class GradCache:
         :param loss_kwargs: Additional keyword arguments to the loss function.
         :return: The current's loss.
         """
-
         model_inputs = [
             self.split_inputs(x, chunk_size)
             for x, chunk_size in zip(model_inputs, self.chunk_sizes)
-        ]
+        ] # List of dicts where sub-batch size in each dict is at most chunk size
 
         ##
         ## First stage no grad
         ##
         all_reps_1 = []
         all_rnd_states_1 = []
-        for model, x in zip(self.models, model_inputs):
+        for model, x in zip(self.model_objs, model_inputs):
             model_reps = []
             with torch.no_grad():
-                for x in model_inputs:
+                for z in x:
                     all_rnd_states_1.append(RandContext(*self.get_input_tensors(x)))
                     y = model.forward_first_stage(
-                        **x
+                        dataset_input_ids=z['dataset_input_ids'],
+                        dataset_attention_mask=z['dataset_attention_mask'],
                     )
                     model_reps.append(self.get_reps(y))
             # concatenate all sub-batch representations
@@ -428,16 +424,17 @@ class GradCache:
         # concatenate all sub-batch representations
         all_reps_2 = []
         all_rnd_states_2 = []
-        for model, x in zip(self.models, model_inputs):
+        for model, x in zip(self.model_objs, model_inputs):
             model_reps = []
             with torch.no_grad():
-                for x in model_inputs:
+                for z in x:
                     all_rnd_states_2.append(RandContext(*self.get_input_tensors(x)))
-                    y = self.model_call(model, x)
+                    y = self.model_call(model, z)
                     model_reps.append(self.get_reps(y))
             # concatenate all sub-batch representations
             all_reps_2.append(torch.cat(model_reps, dim=0))
 
+        breakpoint()
         cache, loss = self.build_cache(*all_reps_2, **loss_kwargs)
         cached_gradients_list = [
             c.split(chunk_size) for c, chunk_size in zip(cache, self.chunk_sizes)

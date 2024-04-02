@@ -389,4 +389,8 @@ def load_embedder_and_tokenizer(name: str) -> Tuple:
         model = transformers.AutoModel.from_pretrained(name, trust_remote_code=True)
     tokenizer = transformers.AutoTokenizer.from_pretrained(name)
     return model, tokenizer
-    
+
+
+def inputs_for_key(inputs: Dict[str, torch.Tensor], key: str):
+    key += "_"
+    return {k.replace(key, ""): v for k,v in inputs.items() if k.startswith(key)}
