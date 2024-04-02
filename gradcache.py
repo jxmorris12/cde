@@ -256,27 +256,22 @@ class GradCache:
         if isinstance(
             model, nn.parallel.DistributedDataParallel
         ):  
-
             if no_sync_except_last:
                 sync_contexts = [
                     model.no_sync for _ in range(len(model_inputs) - 1)
                 ] + [nullcontext]
-                sync_flags = [True] * (len(model_inputs))  # [added]
             else:
                 sync_contexts = [nullcontext for _ in range(len(model_inputs))]
-                sync_flags = [False] * (len(model_inputs))  # [added]
 
             # [modified]
-            for x, state, gradient, sync_context, sync_flag in zip(
-                model_inputs, random_states, cached_gradients, sync_contexts, sync_flags
+            for x, state, gradient, sync_context in zip(
+                model_inputs, random_states, cached_gradients, sync_contexts
             ):
                 with sync_context():
                     with state:
                         y = self.model_call(model, x)
                     reps = self.get_reps(y)
                     surrogate = torch.dot(reps.flatten(), gradient.flatten())
-                    if sync_flag:
-                        model.require_backward_grad_sync = True
                     self.backward_fn(surrogate)  # [modified]
         else:  # [use base model (i.e. transformer)]
             for x, state, gradient in zip(
@@ -353,22 +348,18 @@ class GradCache:
                 sync_contexts = [
                     model.no_sync for _ in range(len(model_inputs) - 1)
                 ] + [nullcontext]
-                sync_flags = [True] * (len(model_inputs))  # [added]
             else:
                 sync_contexts = [nullcontext for _ in range(len(model_inputs))]
-                sync_flags = [False] * (len(model_inputs))  # [added]
 
             # [modified]
-            for x, state, gradient, sync_context, sync_flag in zip(
-                model_inputs, random_states, cached_gradients, sync_contexts, sync_flags
+            for x, state, gradient, sync_context in zip(
+                model_inputs, random_states, cached_gradients, sync_contexts
             ):
                 with sync_context():
                     with state:
                         y = self.model_call(model, x)
                     reps = self.get_reps(y)
                     surrogate = torch.dot(reps.flatten(), gradient.flatten())
-                    if sync_flag:
-                        model.require_backward_grad_sync = True
                     self.backward_fn(surrogate)  # [modified]
         else:  # [use base model (i.e. transformer)]
 
@@ -452,26 +443,22 @@ class GradCache:
             sync_contexts = [
                 model.no_sync for _ in range(len(model_inputs) - 1)
             ] + [nullcontext]
-            sync_flags = [True] * (len(model_inputs))  # [added]
         else:
             sync_contexts = [nullcontext for _ in range(len(model_inputs))]
-            sync_flags = [False] * (len(model_inputs))  # [added]
 
         dataset_embedding = dataset_embedding.detach().requires_grad_()
-        for model, x, random_states, cached_gradients in zip(
+        for model, x, random_states, cached_gradients, sync_context in zip(
             self.model_objs, model_inputs, all_rnd_states_2, cached_gradients_2
         ):
-            # TODO: Support DDP no-sync
-            for z, state, gradient in zip(
-                x, random_states, cached_gradients
+            for z, state, gradient, sync_context in zip(
+                x, random_states, cached_gradients, sync_contexts
             ):
-                with state:
-                    with autocast() if self.bf16 else nullcontext():
-                        y = model.forward_second_stage(
-                            input_ids=z["input_ids"],
-                            attention_mask=z["attention_mask"],
-                            dataset_embeddings=dataset_embedding,
-                        )
+                with state, sync_context, (autocast() if self.bf16 else nullcontext()):
+                    y = model.forward_second_stage(
+                        input_ids=z["input_ids"],
+                        attention_mask=z["attention_mask"],
+                        dataset_embeddings=dataset_embedding,
+                    )
                 reps = self.get_reps(y)
                 surrogate = torch.dot(reps.flatten(), gradient.flatten())
                 self.backward_fn(surrogate)  # [added]
@@ -480,12 +467,10 @@ class GradCache:
         ### Compute gradients wrt first stage
         ###
         cached_gradients_1 = dataset_embedding.split(self.chunk_sizes[0])
-        # TODO: Support DDP no-sync
-        for x, state, gradient in zip(
-            model_inputs[0], all_rnd_states_1, cached_gradients_1
+        for x, state, gradient, sync_context in zip(
+            model_inputs[0], all_rnd_states_1, cached_gradients_1, sync_contexts
         ):
-            with state:
-                with autocast() if self.bf16 else nullcontext():
+            with state, sync_context, (autocast() if self.bf16 else nullcontext()):
                     y = document_model.forward_first_stage(
                         dataset_input_ids=x['dataset_input_ids'],
                         dataset_attention_mask=x['dataset_attention_mask'],
