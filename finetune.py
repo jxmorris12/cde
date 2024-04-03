@@ -100,7 +100,7 @@ def main():
     beir_dataset_names = [
          'webis-touche2020',
          'quora',
-         'arguana', # problem: query-doc IDs don't match? (TODO: investigate...)
+        #  'arguana',
          'nfcorpus',
          'scidocs', 
          'scifact',
@@ -118,7 +118,8 @@ def main():
 
     ]
 
-    if training_args.tiny_debug: beir_dataset_names = [ 'fiqa' ]
+    if training_args.tiny_debug: 
+        beir_dataset_names = [ 'fiqa' ]
 
     beir_dict = {
         d: BeirDataset(dataset=d, embedder=model_args.embedder_rerank) 
@@ -152,7 +153,7 @@ def main():
         )
         eval_dataset = NomicSupervisedDataset(
             tokenizer=embedder_tokenizer,
-            num_hard_negatives=7,
+            num_hard_negatives=0,
             max_seq_length=model_args.max_seq_length,
         )
         eval_dataset = None
@@ -164,7 +165,6 @@ def main():
             num_hard_negatives=data_args.num_hard_negatives,
             max_seq_length=model_args.max_seq_length,
         )
-        eval_dataset = None
         # Need to tokenize and collate for this dataset
         collator_cls = TokenizerCollator
     else:

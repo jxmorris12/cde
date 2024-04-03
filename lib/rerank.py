@@ -24,8 +24,11 @@ class RerankHelper:
         self.batch_size = batch_size
         self.max_seq_length = max_seq_length
         self.name = name
-        self.max_reranking_queries = 5
         self.fake_dataset_info = fake_dataset_info
+        # Subsample queries from large sets so that we can evaluate
+        # in a reasonable amount of time. Also remember this will be
+        # distributed across GPUs. So it's not that bad.
+        self.max_reranking_queries = 500
     
     def _forward_batched(self, **kwargs) -> torch.Tensor:
         return forward_batched(
@@ -61,6 +64,10 @@ class RerankHelper:
         num_eval_queries = min(self.max_reranking_queries, len(query_keys))
         for j, query_id in tqdm_if_main_worker(enumerate(query_keys), total=num_eval_queries, desc=f"[{self.name}]"):
             topk_docs = sorted(results[query_id].items(), key=lambda item: item[1], reverse=True)[:top_k]
+
+            # TODO: Enable assertion
+            # assert len(topk_docs) == topk_docs, f"fewer than {top_k} docs available in dataset {self.name}"
+
             for doc_j, (doc_id, _) in enumerate(topk_docs):
                 doc_id_to_key[query_id][doc_j] = doc_id
 
@@ -109,7 +116,11 @@ class RerankHelper:
             else:
                 dataset_input_ids = document_inputs.input_ids
                 dataset_attention_mask = document_inputs.attention_mask
-            
+            if len(dataset_input_ids) < top_k:
+                # TODO: Fix so we always have this and don't need to hack like this
+                dataset_input_ids = torch.cat([dataset_input_ids, dataset_input_ids], dim=0)[:top_k]
+                dataset_attention_mask = torch.cat([dataset_attention_mask, dataset_attention_mask], dim=0)[:top_k]
+            # TODO: Cache first-stage outputs here so that things are ~30% faster.
             query_embedding = self._forward_batched(
                 input_ids=query_inputs.input_ids,
                 attention_mask=query_inputs.attention_mask,
@@ -126,8 +137,8 @@ class RerankHelper:
             biencoder_score = torch.nn.functional.cosine_similarity(
                 query_embedding, 
                 document_embeddings
-            ).flatten().cpu().tolist()
-            rerank_scores_biencoder.extend(biencoder_score)
+            ).flatten().cpu()
+            rerank_scores_biencoder.extend(biencoder_score.tolist())
         
         pair_ids = torch.tensor(pair_ids, device=device)
         rerank_scores_biencoder = torch.tensor(rerank_scores_biencoder, device=device)

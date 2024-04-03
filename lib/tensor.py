@@ -97,11 +97,9 @@ def forward_batched(
     if hasattr(model, "forward_first_stage"):
         i = 0
         dataset_embeddings = []
-        while i < len(input_ids):
+        while i < len(dataset_input_ids):
             dataset_embeddings.append(
-                model(
-                    input_ids=input_ids[i:i+batch_size],
-                    attention_mask=attention_mask[i:i+batch_size],
+                model.forward_first_stage(
                     dataset_input_ids=dataset_input_ids[i:i+batch_size],
                     dataset_attention_mask=dataset_attention_mask[i:i+batch_size],
                 )

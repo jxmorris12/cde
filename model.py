@@ -177,12 +177,12 @@ class DatasetTransformer(transformers.PreTrainedModel):
         
         self.randomize_dataset_sequence_order = True
         
-
     def forward_first_stage(
             self,
             dataset_input_ids: torch.Tensor,
             dataset_attention_mask: torch.Tensor,
     ) -> torch.Tensor:
+        # print("forward_first_stage //", dataset_input_ids.shape, dataset_attention_mask.shape)
         outputs = (
             self.embedder(
                 input_ids=dataset_input_ids,
@@ -197,6 +197,7 @@ class DatasetTransformer(transformers.PreTrainedModel):
             attention_mask: torch.Tensor,
             dataset_embeddings: torch.Tensor,
         ) -> torch.Tensor:
+        # print("forward_second_stage //", input_ids.shape, input_ids.shape, "//", dataset_embeddings.shape)
         dataset_embeddings = dataset_embeddings[None, :, :] # (b, d) -> (1, b, d)
         
         batch_size = input_ids.shape[0]

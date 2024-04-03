@@ -5,8 +5,6 @@ from contextlib import nullcontext
 from itertools import repeat
 from typing import Any, Callable, List, Union
 
-import gc
-
 import torch
 from torch import Tensor, nn
 from torch.cuda.amp import GradScaler, autocast
@@ -32,11 +30,6 @@ class RandContext:
 logger = logging.getLogger(__name__)
 
 
-def _recycle_cpu_gpu_mem() -> None:
-    gc.collect()
-    torch.cuda.empty_cache()
-
-
 class GradCache:
     """
     Gradient Cache class. Implements input chunking, first graph-less forward pass, Gradient Cache creation, second
@@ -52,8 +45,6 @@ class GradCache:
         split_input_fn: Callable[[Any, int], Any] = None,
         get_rep_fn: Callable[..., Tensor] = None,
         bf16: bool = False,
-        scaler: GradScaler = None,
-        backward_fn=None,  # [added]
     ):
         """
         Initialize the Gradient Cache class instance.
@@ -67,7 +58,6 @@ class GradCache:
         :param get_rep_fn: An optional function that takes generic model output and return representation tensors. If
         not provided, the generic output is assumed to be the representation tensor.
         :param bf16: If True, run mixed precision training
-        :[added] param backward_fn: The `manual_backward` function of pytorch lightning trainer when automatic_optimization is disabled.
         """
         self.model = model
         self.models = [model.forward, model.forward]
@@ -82,9 +72,6 @@ class GradCache:
         self.get_rep_fn = get_rep_fn
         self.loss_fn = loss_fn
         self.bf16 = bf16
-        # [added]
-        self.backward_fn = backward_fn
-
         self._get_input_tensors_strict = False
         self.model_has_two_stages = hasattr(self.model, "forward_first_stage")
 
@@ -163,7 +150,6 @@ class GradCache:
             raise NotImplementedError(
                 f"get_input_tensors not implemented for type {type(model_input)}"
             )
-
         else:
             return []
 
@@ -226,7 +212,7 @@ class GradCache:
         return model_reps, rnd_states
 
     @typing.no_type_check
-    def build_cache(self, *reps: Tensor, **loss_kwargs) -> Union[List[Tensor], Tensor]:
+    def build_cache(self, backward_fn, *reps: Tensor, **loss_kwargs) -> Union[List[Tensor], Tensor]:
         """
         Compute the gradient cache
         :param reps: Computed representations from all encoder models
@@ -236,7 +222,7 @@ class GradCache:
         reps = [r.detach().requires_grad_() for r in reps]
         loss = self.loss_fn(*reps, **loss_kwargs)
 
-        self.backward_fn(loss)
+        backward_fn(loss)
 
         cache = [r.grad for r in reps]
 
@@ -246,6 +232,7 @@ class GradCache:
     def forward_backward_one_stage(
         self,
         model: nn.Module,
+        backward_fn: Callable,
         model_inputs,
         cached_gradients: List[Tensor],
         random_states: List[RandContext],
@@ -277,7 +264,7 @@ class GradCache:
                     y = self.model_call(model, x)
                     reps = self.get_reps(y)
                     surrogate = torch.dot(reps.flatten(), gradient.flatten())
-                    self.backward_fn(surrogate)  # [modified]
+                    backward_fn(surrogate)  # [modified]
         else:  # [use base model (i.e. transformer)]
             for x, state, gradient in zip(
                 model_inputs, random_states, cached_gradients
@@ -286,10 +273,10 @@ class GradCache:
                     y = self.model_call(model, x)
                 reps = self.get_reps(y)
                 surrogate = torch.dot(reps.flatten(), gradient.flatten())
-                self.backward_fn(surrogate)  # [added]
+                backward_fn(surrogate)  # [added]
     
     def cache_step_one_stage(
-        self, *model_inputs, no_sync_except_last: bool = False, **loss_kwargs
+        self, *model_inputs, no_sync_except_last: bool = False, backward_fn: Callable, **loss_kwargs
     ) -> Tensor:
         """
         Run a cached step to compute gradient over the inputs.
@@ -312,7 +299,7 @@ class GradCache:
             all_reps.append(model_reps)
             all_rnd_states.append(rnd_states)
 
-        cache, loss = self.build_cache(*all_reps, **loss_kwargs)
+        cache, loss = self.build_cache(backward_fn, *all_reps, **loss_kwargs)
         cache = [c.split(chunk_size) for c, chunk_size in zip(cache, self.chunk_sizes)]
 
         for model, x, model_cache, rnd_states in zip(
@@ -320,6 +307,7 @@ class GradCache:
         ):
             self.forward_backward_one_stage(
                 model,
+                backward_fn,
                 x,
                 model_cache,
                 rnd_states,
@@ -331,6 +319,7 @@ class GradCache:
     def forward_backward_two_stage(
         self,
         model: nn.Module,
+        backward_fn: Callable,
         model_inputs,
         cached_gradients: List[Tensor],
         random_states: List[RandContext],
@@ -365,7 +354,7 @@ class GradCache:
                         y = self.model_call(model, x)
                     reps = self.get_reps(y)
                     surrogate = torch.dot(reps.flatten(), gradient.flatten())
-                    self.backward_fn(surrogate)  # [modified]
+                    backward_fn(surrogate)  # [modified]
         else:  # [use base model (i.e. transformer)]
 
             for x, state, gradient in zip(
@@ -376,10 +365,10 @@ class GradCache:
                         y = self.model_call(model, x)
                     reps = self.get_reps(y)
                     surrogate = torch.dot(reps.flatten(), gradient.flatten())
-                    self.backward_fn(surrogate)  # [added]
+                    backward_fn(surrogate)  # [added]
 
     def cache_step_two_stage(
-        self, *model_inputs, no_sync_except_last: bool = False, **loss_kwargs
+        self, *model_inputs, no_sync_except_last: bool = False, backward_fn: Callable, run_backward: bool, **loss_kwargs
     ) -> Tensor:
         """
         Run a cached step to compute gradient over the inputs.
@@ -400,9 +389,9 @@ class GradCache:
         first_stage_embedding = []
         first_stage_rnd_states = []
         first_stage_model = self.model_objs[0] # TODO: Generalize this
-        first_stage_inputs = model_inputs[0]
+        first_stage_input_chunks = model_inputs[0]
         with torch.no_grad():
-            for x in first_stage_inputs:
+            for x in first_stage_input_chunks:
                 first_stage_rnd_states.append(RandContext(*self.get_input_tensors(x)))
                 with autocast() if self.bf16 else nullcontext():
                     y = first_stage_model.forward_first_stage(
@@ -412,33 +401,35 @@ class GradCache:
                 first_stage_embedding.append(self.get_reps(y))
         # concatenate all sub-batch representations
         first_stage_embedding = torch.cat(first_stage_embedding, dim=0)
-
-
         ##
         ## Second stage no grad
         ##
         # concatenate all sub-batch representations
         output_embeddings = []
         second_stage_rnd_states = []
-        for model, x in zip(self.model_objs, model_inputs):
+        for model, second_stage_input_chunks in zip(self.model_objs, model_inputs):
             model_reps = []
             rnd_states = []
             with torch.no_grad():
-                for z in x:
+                for x in second_stage_input_chunks:
                     rnd_states.append(RandContext(*self.get_input_tensors(x)))
                     with autocast() if self.bf16 else nullcontext():
                         y = model.forward_second_stage(
-                            input_ids=z["input_ids"],
-                            attention_mask=z["attention_mask"],
+                            input_ids=x["input_ids"],
+                            attention_mask=x["attention_mask"],
                             dataset_embeddings=first_stage_embedding,
                         )
                     model_reps.append(self.get_reps(y))
             # concatenate all sub-batch representations
             output_embeddings.append(torch.cat(model_reps, dim=0))
             second_stage_rnd_states.append(rnd_states)
-            # _recycle_cpu_gpu_mem()
 
-        output_gradient_cache, loss = self.build_cache(*output_embeddings, **loss_kwargs)
+        output_gradient_cache, loss = self.build_cache(backward_fn, *output_embeddings, **loss_kwargs)
+        if not run_backward:
+            # We also support a mode now where we don't actually compute gradients, we just
+            # compute loss in this multi-stage process, which is used for fair evaluation.
+            return loss
+
         second_stage_gradients = [
             c.split(chunk_size) for c, chunk_size in 
             zip(output_gradient_cache, self.chunk_sizes)
@@ -473,15 +464,14 @@ class GradCache:
                     )
                 reps = self.get_reps(y)
                 surrogate = torch.dot(reps.flatten(), gradient.flatten())
-                self.backward_fn(surrogate)  # [added]
-                # _recycle_cpu_gpu_mem()
+                backward_fn(surrogate)  # [added]
 
         ###
         ### Compute gradients wrt first stage
         ### 
         first_stage_gradients = first_stage_embedding.split(self.chunk_sizes[0])
         for x, state, gradient, sync_context in zip(
-            first_stage_inputs, first_stage_rnd_states, first_stage_gradients, sync_contexts
+            first_stage_input_chunks, first_stage_rnd_states, first_stage_gradients, sync_contexts
         ):
             with state, sync_context(), (autocast() if self.bf16 else nullcontext()):
                 y = first_stage_model.forward_first_stage(
@@ -490,7 +480,5 @@ class GradCache:
                 )
             reps = self.get_reps(y)
             surrogate = torch.dot(reps.flatten(), gradient.flatten())
-            self.backward_fn(surrogate)
-        # _recycle_cpu_gpu_mem()
-        # gc.collect()
+            backward_fn(surrogate)
         return loss

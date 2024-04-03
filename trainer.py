@@ -83,7 +83,6 @@ class CustomTrainer(transformers.Trainer):
                 chunk_sizes=self.args.max_batch_size_fits_in_memory,
                 loss_fn=functools.partial(self._contrastive_loss, return_scores=False), 
                 bf16=self.args.bf16,
-                backward_fn=self.accelerator.backward,
             )
         else:
             self.gc = None
@@ -203,6 +202,8 @@ class CustomTrainer(transformers.Trainer):
             loss = loss.mean()
         self.optimizer.step() 
         self.model.zero_grad()
+        print("SETTIGN EVAL!!")
+        self.control.should_evaluate = True  # TEMP!!!
         return loss.detach() / self.args.gradient_accumulation_steps
 
     def _contrastive_loss(
@@ -213,6 +214,8 @@ class CustomTrainer(transformers.Trainer):
             ) -> Tuple[torch.Tensor, torch.Tensor]:
         e1 = e1 / e1.norm(p=2, dim=1, keepdim=True) # Query
         e2 = e2 / e2.norm(p=2, dim=1, keepdim=True) # Document
+
+        print("_contrastive_loss!", e1.shape, e2.shape)
         scores = e1 @ e2.T
 
         batch_size, _ = scores.shape
@@ -364,13 +367,21 @@ class CustomTrainer(transformers.Trainer):
             for key, val in metrics.items():
                 self._log_extra(key, val)
 
-        if self.use_gc and torch.is_grad_enabled():
+        if self.use_gc:
             # TODO: Restore gradcache w/ hard negatives.
+            def empty_backward(_loss):
+                pass
+            backward_fn = (
+                self.accelerator.backward if self.model.training else empty_backward
+            )
+            print("calling gc with self.model.training", self.model.training, "//", backward_fn)
             loss = self.gc(
                 query_inputs, 
                 document_inputs, 
                 one_hot_labels=one_hot_labels,
-                no_sync_except_last=(get_world_size() > 1)
+                no_sync_except_last=(get_world_size() > 1),
+                backward_fn=backward_fn,
+                run_backward=self.model.training,
             )
             return loss
         else:
