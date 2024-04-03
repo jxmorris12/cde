@@ -114,8 +114,8 @@ def forward_batched(
         while j < len(input_ids):
             outputs.append(
                 model.forward_second_stage(
-                    input_ids=input_ids[i:i+batch_size],
-                    attention_mask=attention_mask[i:i+batch_size],
+                    input_ids=input_ids[j:j+batch_size],
+                    attention_mask=attention_mask[j:j+batch_size],
                     dataset_embeddings=dataset_embeddings
                 )
             )

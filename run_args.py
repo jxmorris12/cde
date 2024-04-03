@@ -259,6 +259,9 @@ class TrainingArguments(transformers.TrainingArguments):
         num_devices = max(1, torch.cuda.device_count())
         num_cpus = min(64, len(os.sched_getaffinity(0)))
         num_workers = int(num_cpus / num_devices)
+        if self.tiny_debug:
+            print("[tiny_debug] Setting num workers to 0")
+            num_workers = 0
         self.eval_steps = int(self.eval_steps / num_devices)
         self.save_steps = int(self.save_steps / num_devices)
         self.warmup_steps = int(self.warmup_steps / num_devices)

@@ -8,7 +8,9 @@ import datasets
 import torch
 import transformers
 
-from . import gather, get_rank, get_world_size, tqdm_if_main_worker, forward_batched
+from lib.dist import gather, get_rank, get_world_size
+from lib.tensor import forward_batched
+from lib.misc import tqdm_if_main_worker
 
 
 class RerankHelper:
@@ -22,8 +24,15 @@ class RerankHelper:
         self.batch_size = batch_size
         self.max_seq_length = max_seq_length
         self.name = name
-        self.max_reranking_queries = 500
+        self.max_reranking_queries = 5
         self.fake_dataset_info = fake_dataset_info
+    
+    def _forward_batched(self, **kwargs) -> torch.Tensor:
+        return forward_batched(
+            model=self.model,
+            batch_size=self.batch_size,
+            **kwargs,
+        )
     
     @torch.no_grad
     def rerank(self, 

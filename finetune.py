@@ -119,7 +119,6 @@ def main():
     ]
 
     if training_args.tiny_debug: beir_dataset_names = [ 'fiqa' ]
-    beir_dataset_names = []
 
     beir_dict = {
         d: BeirDataset(dataset=d, embedder=model_args.embedder_rerank) 
@@ -156,6 +155,7 @@ def main():
             num_hard_negatives=7,
             max_seq_length=model_args.max_seq_length,
         )
+        eval_dataset = None
         # Need to tokenize and collate for this dataset
         collator_cls = TokenizerCollator
     elif data_args.dataset == 'nomic':

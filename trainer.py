@@ -418,7 +418,7 @@ class CustomTrainer(transformers.Trainer):
         reranker = RerankHelper(
             model=model, 
             tokenizer=self.embedder_tokenizer, 
-            batch_size=self.args.eval_batch_size,
+            batch_size=self.args.max_batch_size_fits_in_memory,
             max_seq_length=self.max_seq_length,
             name=metric_key_prefix,
             fake_dataset_info=(self.args.dataset_info == "fake"),
@@ -527,6 +527,8 @@ class CustomTrainer(transformers.Trainer):
                 )
                 metrics.update(dataset_metrics)
             return metrics
+        elif eval_dataset is None:
+            return {}
 
         # aggregate metrics over multiple samplers
         all_metrics = {}
