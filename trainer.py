@@ -202,8 +202,9 @@ class CustomTrainer(transformers.Trainer):
             loss = loss.mean()
         self.optimizer.step() 
         self.model.zero_grad()
-        print("SETTIGN EVAL!!")
-        self.control.should_evaluate = True  # TEMP!!!
+        # Uncomment next line to test eval straightaway.
+        # self.control.should_evaluate = True  #########
+        ##############################################
         return loss.detach() / self.args.gradient_accumulation_steps
 
     def _contrastive_loss(
@@ -214,8 +215,6 @@ class CustomTrainer(transformers.Trainer):
             ) -> Tuple[torch.Tensor, torch.Tensor]:
         e1 = e1 / e1.norm(p=2, dim=1, keepdim=True) # Query
         e2 = e2 / e2.norm(p=2, dim=1, keepdim=True) # Document
-
-        print("_contrastive_loss!", e1.shape, e2.shape)
         scores = e1 @ e2.T
 
         batch_size, _ = scores.shape
@@ -374,7 +373,6 @@ class CustomTrainer(transformers.Trainer):
             backward_fn = (
                 self.accelerator.backward if self.model.training else empty_backward
             )
-            print("calling gc with self.model.training", self.model.training, "//", backward_fn)
             loss = self.gc(
                 query_inputs, 
                 document_inputs, 
@@ -443,7 +441,7 @@ class CustomTrainer(transformers.Trainer):
                 corpus_embeddings=eval_dataset.corpus_embeddings,
                 queries=eval_dataset.queries, 
                 query_embeddings=eval_dataset.query_embeddings,
-                results=eval_dataset.ance_results,
+                results=eval_dataset.rerank_results,
                 top_k=self.args.eval_rerank_topk
             )
 

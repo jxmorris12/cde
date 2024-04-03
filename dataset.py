@@ -101,47 +101,34 @@ def load_msmarco_hard_negatives() -> Dict[str, Dict[str, Any]]:
     return train_queries
 
 
-def get_ance_results(dataset: str, data_path: str, model_name: str = "msmarco-roberta-base-ance-firstp") -> Dict:
-    use_parallel = True
-    if use_parallel:
-        from sentence_transformers import SentenceTransformer
-        from mteb import HFDataLoader, RetrievalEvaluator        
+def get_reranking_results(data_path: str, model_name: str = "msmarco-roberta-base-ance-firstp") -> Dict:
+    # TODO: Merge with embed_with_cache (from lib).
+    # TODO: Support >1000 results per-query...
+    from sentence_transformers import SentenceTransformer
+    from mteb import HFDataLoader, RetrievalEvaluator        
 
-        model = SentenceTransformer(model_name)
-        model.max_seq_length = 128
-        pool = model.start_multi_process_pool()
-        def encode(queries, batch_size: int, **kwargs):
-            return model.encode_multi_process(queries, batch_size=batch_size, pool=pool)
-        model.encode = encode
-        print("Loading:", data_path)
-        corpus, queries, qrels = HFDataLoader(data_folder=data_path, streaming=False, keep_in_memory=False).load(split="test")
-        retriever = RetrievalEvaluator(
-            model,
-            score_function="dot",
-            batch_size=2048,
-            corpus_chunk_size=2**18,
-        )
-        queries = {query['id']: query['text'] for query in queries}
-        corpus = {doc['id']: {'title': doc['title'] , 'text': doc['text']} for doc in corpus}
-        results = retriever(corpus, queries)
-        model.stop_multi_process_pool(pool)
-        return results
-    else:
-        from beir.retrieval import models
-        from beir.retrieval.search.dense import DenseRetrievalExactSearch as DRES
-        from beir.datasets.data_loader_hf import HFDataLoader
-        from beir.retrieval.evaluation import EvaluateRetrieval
-        model = DRES(
-            models.SentenceBERT("msmarco-roberta-base-ance-firstp", max_seq_length=128), 
-            batch_size=2048, 
-            corpus_chunk_size=2**20,
-        )
-        corpus, queries, qrels = beir.datasets.data_loader.GenericDataLoader(data_path).load(split="test")
-        retriever = EvaluateRetrieval(model, score_function="dot")
-        return retriever.retrieve(corpus, queries)
+    model = SentenceTransformer(model_name)
+    model.max_seq_length = 128
+    pool = model.start_multi_process_pool()
+    def encode(queries, batch_size: int, **kwargs):
+        return model.encode_multi_process(queries, batch_size=batch_size, pool=pool)
+    model.encode = encode
+    print("Loading:", data_path)
+    corpus, queries, _qrels = HFDataLoader(data_folder=data_path, streaming=False, keep_in_memory=False).load(split="test")
+    retriever = RetrievalEvaluator(
+        model,
+        score_function="dot",
+        batch_size=2048,
+        corpus_chunk_size=2**18,
+    )
+    queries = {query['id']: query['text'] for query in queries}
+    corpus = {doc['id']: {'title': doc['title'] , 'text': doc['text']} for doc in corpus}
+    results = retriever(corpus, queries)
+    model.stop_multi_process_pool(pool)
+    return results
 
 
-def load_beir_uncached(dataset: str, split: str) -> Tuple[datasets.Dataset, datasets.Dataset, Dict[str, Dict[str, int]], Dict]:
+def load_beir_uncached(dataset: str, split: str, embedder_rerank: str) -> Tuple[datasets.Dataset, datasets.Dataset, Dict[str, Dict[str, int]], Dict]:
     """Loads a BEIR test dataset through tools provided by BeIR.
 
     Returns:
@@ -152,7 +139,6 @@ def load_beir_uncached(dataset: str, split: str) -> Tuple[datasets.Dataset, data
         qrels
         ance_results
     """
-
     print("loading dataset uncached", dataset)
     #### Download msmarco.zip dataset and unzip the dataset
     url = "https://public.ukp.informatik.tu-darmstadt.de/thakur/BEIR/datasets/{}.zip".format(dataset)
@@ -164,8 +150,12 @@ def load_beir_uncached(dataset: str, split: str) -> Tuple[datasets.Dataset, data
     ### Load BEIR MSMARCO training dataset, this will be used for query and corpus for reference.
     corpus, queries, qrels = beir.datasets.data_loader.GenericDataLoader(data_path).load(split=split)
     # bm25_results = get_bm25_results(dataset=dataset, corpus=corpus, queries=queries)
-    print("... getting ance results")
-    ance_results = get_ance_results(dataset=dataset, data_path=data_path)
+    print("... getting reranking results")
+    ance_results = get_reranking_results(
+        data_path=data_path, 
+        str=str,
+        model_name=embedder_rerank
+    )
 
     corpus = datasets.Dataset.from_list(
         [{"id": k, "text": v["text"]} for k,v in corpus.items()])
@@ -177,24 +167,24 @@ def load_beir_uncached(dataset: str, split: str) -> Tuple[datasets.Dataset, data
     return corpus, queries, qrels, ance_results
 
 
-def load_beir(dataset: str, split: str) -> Tuple[datasets.Dataset, datasets.Dataset, Dict[str, Dict[str, int]]]:
+def load_beir(dataset: str, split: str, embedder_rerank: str) -> Tuple[datasets.Dataset, datasets.Dataset, Dict[str, Dict[str, int]]]:
     print("loading dataset", dataset)
     cache_path = datasets.config.HF_DATASETS_CACHE # something like /home/jxm3/.cache/huggingface/datasets
     corpus_path = os.path.join(cache_path, f'tti_beir_local_{dataset}_corpus_{split}')
     queries_path = os.path.join(cache_path, f'tti_beir_local_{dataset}_queries_{split}')
     qrels_path = os.path.join(cache_path, f'tti_beir_local_{dataset}_qrels_{split}.p')
-    # bm25_path = os.path.join(cache_path, f'tti_beir_local_{dataset}_bm25_results')
-    ance_path = os.path.join(cache_path, f'tti_beir_local_{dataset}_ance_results')
+    embedder_rerank_pathsafe_name = embedder_rerank.replace("/", "__")
+    rerank_path = os.path.join(cache_path, f'tti_beir_local_{dataset}_rerank_results_{embedder_rerank_pathsafe_name}')
 
-    if os.path.exists(corpus_path) and os.path.exists(queries_path) and os.path.exists(qrels_path) and os.path.exists(ance_path):
+    if os.path.exists(corpus_path) and os.path.exists(queries_path) and os.path.exists(qrels_path) and os.path.exists(rerank_path):
         logging.info(f"Loading {dataset} split %s corpus from path %s", split, corpus_path)
         corpus = datasets_fast_load_from_disk(corpus_path)
         logging.info(f"Loading {dataset} split %s queries from path %s", split, queries_path)
         queries = datasets_fast_load_from_disk(queries_path)
         logging.info(f"Loading {dataset} split %s qrels from path %s", split, qrels_path)
         qrels = pickle.load(open(qrels_path, 'rb'))
-        logging.info(f"Loading {dataset} split %s ance results from path %s", split, ance_path)
-        ance_results = pickle.load(open(ance_path, 'rb'))
+        logging.info(f"Loading {dataset} split %s ance results from path %s", split, rerank_path)
+        ance_results = pickle.load(open(rerank_path, 'rb'))
     else:
         corpus, queries, qrels, ance_results = load_beir_uncached(dataset=dataset, split=split)
         logging.info(f"Saving {dataset} split %s corpus to path %s", split, corpus_path)
@@ -202,7 +192,7 @@ def load_beir(dataset: str, split: str) -> Tuple[datasets.Dataset, datasets.Data
         logging.info(f"Saving {dataset} split %s queries to path %s", split, queries_path)
         queries.save_to_disk(queries_path)
         pickle.dump(qrels, open(qrels_path, 'wb'))
-        pickle.dump(ance_results, open(ance_path, 'wb'))
+        pickle.dump(ance_results, open(rerank_path, 'wb'))
 
     return corpus, queries, qrels, ance_results
 
@@ -213,26 +203,30 @@ class BeirDataset(torch.utils.data.Dataset):
     queries: datasets.Dataset
     query_embeddings: datasets.Dataset
     corpus_embeddings: datasets.Dataset
-    ance_results: Dict[str, Dict[str, int]]
+    rerank_results: Dict[str, Dict[str, int]]
     size: int
     column_names: List[str] = ["idx", "query_embedding", "document_embeddings", "negative_document_embeddings"]
     hard_negatives: Optional[Dict[str, Any]]
     def __init__(
             self,
             dataset: str,
-            embedder: str,
+            embedder_rerank: str,
             split: str = "test"
         ):
         self.name = dataset
-        self.corpus, self.queries, self.qrels, self.ance_results = load_beir(dataset=dataset, split=split)
+        self.corpus, self.queries, self.qrels, self.rerank_results = load_beir(
+            dataset=dataset, 
+            split=split,
+            embedder_rerank=embedder_rerank,
+        )
         print(f">> embedding dataset {dataset} split {split}")
         self.query_embeddings = embed_with_cache(
-            embedder, f"{dataset}_queries" + ("" if split == "train" else f"_{split}"), 
+            embedder_rerank, f"{dataset}_queries" + ("" if split == "train" else f"_{split}"), 
             self.queries,
             "text",
         )
         self.corpus_embeddings = embed_with_cache(
-            embedder, 
+            embedder_rerank, 
             f"{dataset}_corpus" + ("" if split == "train" else f"_{split}"), 
             self.corpus,
             "text",
