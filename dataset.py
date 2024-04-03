@@ -605,7 +605,7 @@ class NomicUnsupervisedDataset(torch.utils.data.Dataset):
             'query': ex["query"],
             'document': ex["document"],
             ######################################################################
-            'random_document': self.dataset[random_idx]["document"],
+            # 'random_document': self.dataset[random_idx]["document"],
         }
 
 

@@ -257,7 +257,7 @@ class TrainingArguments(transformers.TrainingArguments):
             os.environ["WANDB_MODE"] = "disabled"
         ############################################################################
         num_devices = max(1, torch.cuda.device_count())
-        num_cpus = min(256, len(os.sched_getaffinity(0)))
+        num_cpus = min(64, len(os.sched_getaffinity(0)))
         num_workers = int(num_cpus / num_devices)
         self.eval_steps = int(self.eval_steps / num_devices)
         self.save_steps = int(self.save_steps / num_devices)

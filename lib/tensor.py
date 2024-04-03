@@ -84,3 +84,56 @@ def maxsim(
     assert max_sim_i.max() <= k
 
     return max_sim_v, max_sim_i
+
+
+def forward_batched(
+        model: torch.nn.Module,
+        input_ids: torch.Tensor,
+        attention_mask: torch.Tensor,
+        dataset_input_ids: torch.Tensor,
+        dataset_attention_mask: torch.Tensor,
+        batch_size: int,
+) -> torch.Tensor:
+    if hasattr(model, "forward_first_stage"):
+        i = 0
+        dataset_embeddings = []
+        while i < len(input_ids):
+            dataset_embeddings.append(
+                model(
+                    input_ids=input_ids[i:i+batch_size],
+                    attention_mask=attention_mask[i:i+batch_size],
+                    dataset_input_ids=dataset_input_ids[i:i+batch_size],
+                    dataset_attention_mask=dataset_attention_mask[i:i+batch_size],
+                )
+            )
+            i += batch_size
+        dataset_embeddings = torch.cat(dataset_embeddings, dim=0)
+
+        j = 0
+        outputs = []
+        while j < len(input_ids):
+            outputs.append(
+                model.forward_second_stage(
+                    input_ids=input_ids[i:i+batch_size],
+                    attention_mask=attention_mask[i:i+batch_size],
+                    dataset_embeddings=dataset_embeddings
+                )
+            )
+            j += batch_size
+        outputs = torch.cat(outputs, dim=0)
+        return outputs
+
+    else:
+        i = 0
+        outputs = []
+        while i < len(input_ids):
+            outputs.append(
+                model(
+                    input_ids=input_ids[i:i+batch_size],
+                    attention_mask=attention_mask[i:i+batch_size],
+                    dataset_input_ids=dataset_input_ids[i:i+batch_size],
+                    dataset_attention_mask=dataset_attention_mask[i:i+batch_size],
+                )
+            )
+            i += batch_size
+        return torch.cat(outputs, dim=0)

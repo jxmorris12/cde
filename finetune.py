@@ -119,6 +119,7 @@ def main():
     ]
 
     if training_args.tiny_debug: beir_dataset_names = [ 'fiqa' ]
+    beir_dataset_names = []
 
     beir_dict = {
         d: BeirDataset(dataset=d, embedder=model_args.embedder_rerank) 

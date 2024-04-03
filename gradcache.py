@@ -5,6 +5,8 @@ from contextlib import nullcontext
 from itertools import repeat
 from typing import Any, Callable, List, Union
 
+import gc
+
 import torch
 from torch import Tensor, nn
 from torch.cuda.amp import GradScaler, autocast
@@ -28,6 +30,11 @@ class RandContext:
 
 
 logger = logging.getLogger(__name__)
+
+
+def _recycle_cpu_gpu_mem() -> None:
+    gc.collect()
+    torch.cuda.empty_cache()
 
 
 class GradCache:
@@ -406,6 +413,7 @@ class GradCache:
         # concatenate all sub-batch representations
         first_stage_embedding = torch.cat(first_stage_embedding, dim=0)
 
+
         ##
         ## Second stage no grad
         ##
@@ -428,12 +436,16 @@ class GradCache:
             # concatenate all sub-batch representations
             output_embeddings.append(torch.cat(model_reps, dim=0))
             second_stage_rnd_states.append(rnd_states)
+            # _recycle_cpu_gpu_mem()
 
-        cache, loss = self.build_cache(*output_embeddings, **loss_kwargs)
+        output_gradient_cache, loss = self.build_cache(*output_embeddings, **loss_kwargs)
         second_stage_gradients = [
-            c.split(chunk_size) for c, chunk_size in zip(cache, self.chunk_sizes)
+            c.split(chunk_size) for c, chunk_size in 
+            zip(output_gradient_cache, self.chunk_sizes)
         ]
-
+        ################################################
+        # 
+        # gc.collect()
         ###
         ### Compute gradients wrt second stage
         ###
@@ -462,10 +474,11 @@ class GradCache:
                 reps = self.get_reps(y)
                 surrogate = torch.dot(reps.flatten(), gradient.flatten())
                 self.backward_fn(surrogate)  # [added]
+                # _recycle_cpu_gpu_mem()
 
         ###
         ### Compute gradients wrt first stage
-        ###
+        ### 
         first_stage_gradients = first_stage_embedding.split(self.chunk_sizes[0])
         for x, state, gradient, sync_context in zip(
             first_stage_inputs, first_stage_rnd_states, first_stage_gradients, sync_contexts
@@ -478,4 +491,6 @@ class GradCache:
             reps = self.get_reps(y)
             surrogate = torch.dot(reps.flatten(), gradient.flatten())
             self.backward_fn(surrogate)
+        # _recycle_cpu_gpu_mem()
+        # gc.collect()
         return loss

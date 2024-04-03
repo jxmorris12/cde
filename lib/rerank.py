@@ -8,7 +8,7 @@ import datasets
 import torch
 import transformers
 
-from . import gather, get_rank, get_world_size, tqdm_if_main_worker 
+from . import gather, get_rank, get_world_size, tqdm_if_main_worker, forward_batched
 
 
 class RerankHelper:
@@ -25,14 +25,7 @@ class RerankHelper:
         self.max_reranking_queries = 500
         self.fake_dataset_info = fake_dataset_info
     
-    def _score(self, query_embedding: torch.Tensor, corpus_embeddings: torch.Tensor) -> float:
-        with torch.no_grad():
-            scores = self.model(
-                query_embedding=query_embedding, 
-                document_embeddings=corpus_embeddings
-            )
-        return scores.flatten().cpu().tolist()
-    
+    @torch.no_grad
     def rerank(self, 
                corpus: Dict[str, Dict[str, str]], 
                corpus_embeddings: datasets.Dataset,
@@ -108,19 +101,18 @@ class RerankHelper:
                 dataset_input_ids = document_inputs.input_ids
                 dataset_attention_mask = document_inputs.attention_mask
             
-            with torch.no_grad():
-                query_embedding = self.model(
-                    input_ids=query_inputs.input_ids,
-                    attention_mask=query_inputs.attention_mask,
-                    dataset_input_ids=dataset_input_ids,
-                    dataset_attention_mask=dataset_attention_mask,
-                ).flatten()
-                document_embeddings = self.model(
-                    input_ids=document_inputs.input_ids,
-                    attention_mask=document_inputs.attention_mask,
-                    dataset_input_ids=dataset_input_ids,
-                    dataset_attention_mask=dataset_attention_mask,
-                )
+            query_embedding = self._forward_batched(
+                input_ids=query_inputs.input_ids,
+                attention_mask=query_inputs.attention_mask,
+                dataset_input_ids=dataset_input_ids,
+                dataset_attention_mask=dataset_attention_mask,
+            ).flatten()
+            document_embeddings = self._forward_batched(
+                input_ids=document_inputs.input_ids,
+                attention_mask=document_inputs.attention_mask,
+                dataset_input_ids=dataset_input_ids,
+                dataset_attention_mask=dataset_attention_mask,
+            )
             
             biencoder_score = torch.nn.functional.cosine_similarity(
                 query_embedding, 
