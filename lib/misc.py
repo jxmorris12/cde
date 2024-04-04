@@ -381,7 +381,7 @@ class TensorRunningAverages:
         return metrics
 
 def load_embedder_and_tokenizer(name: str) -> Tuple:
-    if name.startswith("nomic"):
+    if name.startswith("nomic") or (name == "bert-base-uncased"):
         # Load NomicBert from contrastors repo
         import sys
         sys.path.append("/home/paperspace/contrastors-dev/src")

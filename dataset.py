@@ -1,7 +1,6 @@
 from typing import Any, Dict, List, Optional, Tuple
 
 import collections
-import copy
 import functools
 import gzip
 import json
@@ -456,7 +455,6 @@ class SyntheticWordsDataset(torch.utils.data.Dataset):
         return self.max_size or (len(self.word_list) * 64)
 
     def tokenize(self, tokenizer: transformers.PreTrainedTokenizer, max_length: int) -> None:
-        # reddit data comes pre-tokenized
         pass
 
     def reset_dataset_idx(self) -> int:
@@ -541,62 +539,6 @@ class SyntheticWordsDataset(torch.utils.data.Dataset):
             'document_attention_mask': (document_input_ids != self.pad_token_id).int(),
             ######################################################################
         }
-
-
-def load_reddit_train_and_val(
-        data_folder: str,
-        perc: float = 0.9,
-        supervised: bool = False
-    ) -> Tuple[datasets.Dataset, datasets.Dataset]:
-    data_folder_scratch = (
-        data_folder.replace(
-            "/home/jxm3/research/retrieval/tti3", 
-            "/scratch/jxm3/tti3"
-        )
-    )
-    if os.path.exists(data_folder_scratch):
-        print(f"Updating reddit data folder from {data_folder} to {data_folder_scratch}; hopefully will be faster")
-        data_folder = data_folder_scratch
-
-    question_folder = os.path.join(data_folder, "questions64")
-    if supervised:
-        train = RedditDatasetWithSupervisedQuestions(
-            data_folder=data_folder,
-            question_folder=question_folder,
-        )
-    else:
-        train = RedditDataset(data_folder=data_folder)
-    print("Initialized dataset:", train.__class__)
-    # Randomize subreddit idxs.
-    for k in  train.subdomain_idxs.keys():
-        random.Random(42).shuffle(train.subdomain_idxs[k])
-    # Copy train->val to save dataloading time before split. However need to
-    # clone these values individually so that they're not tied together.
-    eval = copy.copy(train)
-    train.current_dataset_idx: mp.Value = mp.Value('i', 0)
-    eval.current_dataset_idx: mp.Value = mp.Value('i', 0)
-    subreddit_names = list(train.subreddit_idxs.keys())
-    # shuffle with fixed seed so that order doesn't change every time
-    random.Random(42).shuffle(subreddit_names)
-    N = min(
-        1000,
-        round(1 - len(subreddit_names) * perc)
-    )
-    train_subreddits = set(subreddit_names[N:])
-    eval_subreddits = set(subreddit_names[:N])
-
-    print(f"Creating training and validation data with a {perc:.2f}/{1-perc:.2f} split ({len(train_subreddits)}/{len(eval_subreddits)})")
-    train.subreddit_idxs = { k: v for k,v in train.subreddit_idxs.items() if k in train_subreddits }
-    train.subreddit_keys = { k: v for k,v in train.subreddit_keys.items() if k in train_subreddits }
-    train.subdomain_idxs= { k: v for k,v in train.subdomain_idxs.items() if k in train_subreddits }
-    train.reset_dataset_idx()
-    eval.subreddit_idxs = { k: v for k,v in eval.subreddit_idxs.items() if k in eval_subreddits }
-    eval.subreddit_keys = { k: v for k,v in eval.subreddit_keys.items() if k in eval_subreddits }
-    eval.subdomain_idxs= { k: v for k,v in eval.subdomain_idxs.items() if k in eval_subreddits }
-    eval.reset_dataset_idx()
-
-    print("First train point:", train.first())
-    return train, eval
 
 
 def load_synthetic_words_dataset() -> Tuple[datasets.Dataset, datasets.Dataset]:

@@ -13,7 +13,7 @@ import wandb
 
 from collate import DocumentQueryCollatorWithPadding, TokenizerCollator
 from dataset import (
-    load_reddit_train_and_val, load_synthetic_words_dataset, 
+    load_synthetic_words_dataset, 
     BeirDataset, NomicSupervisedDataset, NomicUnsupervisedDataset
 )
 from lib import get_rank, load_embedder_and_tokenizer, ModelConfig
@@ -123,7 +123,7 @@ def main():
     ]
     if training_args.tiny_debug: 
         beir_dataset_names = [ 'quora' ]
-        trainign_args.max_eval_batches = 1
+        training_args.max_eval_batches = 1
 
     beir_dict = {
         d: BeirDataset(dataset=d, embedder_rerank=model_args.embedder_rerank) 
@@ -165,7 +165,7 @@ def main():
         dataset=train_dataset,
         sampling_strategy=data_args.sampling_strategy,
         batch_size=training_args.per_device_train_batch_size,
-        cluster_size=224,
+        cluster_size=data_args.train_cluster_size,
         shuffle=True,
         clustering_model=data_args.clustering_model,
         clustering_query_to_doc=data_args.clustering_query_to_doc,
@@ -176,7 +176,7 @@ def main():
         get_sampler,
         dataset=(eval_dataset or train_dataset),
         batch_size=training_args.per_device_eval_batch_size,
-        cluster_size=224,
+        cluster_size=data_args.eval_cluster_size,
         shuffle=False,
         clustering_model="gtr_base",
         clustering_query_to_doc=data_args.clustering_query_to_doc,
@@ -187,6 +187,7 @@ def main():
         "domain": eval_sampler_fn(sampling_strategy="domain"),
         "random": eval_sampler_fn(sampling_strategy="random"),
     }
+    model_args.corpus_size = training_args.per_device_train_batch_size
     model_config = ModelConfig(**vars(model_args))
     model_cls = get_model_class(model_args.architecture)
     model = model_cls(
@@ -232,7 +233,6 @@ def main():
         eval_samplers=eval_samplers,
         retrieval_datasets=retrieval_datasets,
     )
-    trainer.evaluate_retrieval_datasets() # TMP
     checkpoint = get_checkpoint(training_args)
     logging.info("train() loaded checkpoint %s", checkpoint)
     trainer.train(resume_from_checkpoint=checkpoint)

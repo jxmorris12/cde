@@ -203,7 +203,7 @@ class CustomTrainer(transformers.Trainer):
         self.optimizer.step() 
         self.model.zero_grad()
         # Uncomment next line to test eval straightaway.
-        self.control.should_evaluate = True  #########
+        # self.control.should_evaluate = True  #########
         ##############################################
         return loss.detach() / self.args.gradient_accumulation_steps
 

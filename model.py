@@ -138,7 +138,6 @@ class DatasetTransformer(transformers.PreTrainedModel):
             dataset_embedder: transformers.PreTrainedModel = None,  #  ignored 
         ):
         super().__init__(config=config)
-        self.tokenizer = transformers.AutoTokenizer.from_pretrained('bert-base-uncased')
 
         if config.limit_layers:
             print(f"Limiting layers to {config.limit_layers}")
@@ -155,23 +154,15 @@ class DatasetTransformer(transformers.PreTrainedModel):
         self.embedding_dim = self.embedder.config.hidden_size
         self.hidden_size = self.backbone.config.hidden_size
 
-        # We only want to apply positional embeddings to the
-        # *text* portion of the backbone network.
-        if False:
-            self.backbone.config.rotary_emb_fraction = 0.0
+        if self.backbone.config.model_type.startswith("nomic"):
+            # We only want to apply positional embeddings to the
+            # *text* portion of the backbone network.
+            self.backbone.config.rotary_start_pos = 0.0
             rotary_disabled = 0
             for module in self.backbone.modules():
                 if hasattr(module, "rotary_emb_dim"):
-                    rotary_disabled += 1
-                    module.rotary_emb_dim = 0
-            print(f"disabled {rotary_disabled} rotary modules")
-
-            # Some hackery/wizardry: re-enable positional embeddings. 
-            # We do this by updating the config to enable them
-            # and then re-initializing the embedding layer.
-            self.backbone.config.max_position_embeddings = 2048
-            self.backbone.config.rotary_emb_fraction = 0.0
-            self.backbone.embeddings = self.backbone.embeddings.__class__(self.backbone.config)
+                    module.rotary_start_pos = config.corpus_size
+            print(f"modified {rotary_disabled} rotary modules – set rotary_start_pos to {config.corpus_size}")
 
         # TODO: Argparse, ablate, and potentially remove the soft prompt portion
         # of this model.

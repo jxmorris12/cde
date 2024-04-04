@@ -96,7 +96,7 @@ class RandomSampler(Sampler):
 
 
 class FixedSubdomainSampler(RandomSampler):
-    """Samples randomly from pre-specified domain (subreddits, dataset) during training.
+    """Samples randomly from pre-specified domain during training.
     
     Must have fixed dictionary of subdomains `subdomain_idxs`.
     """

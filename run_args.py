@@ -81,7 +81,7 @@ class ModelArguments:
         }
     )
     contrastive_temp: float = field(
-        default=50,
+        default=20,
         metadata={
             "help": "temperature for contrastive learning",
         }
@@ -97,7 +97,7 @@ class DataArguments:
         default="nomic", 
         metadata={
             "help": "The name of the dataset to use:",
-            "choices": ["synthetic_words", "reddit_supervised", "reddit_unsupervised", "nomic", "nomic_unsupervised"]
+            "choices": ["synthetic_words", "nomic", "nomic_unsupervised"]
         }
     )
     sampling_strategy: str = field(
@@ -125,6 +125,18 @@ class DataArguments:
         default=0,
         metadata={
             "help": "Number of hard negatives for training",
+        }
+    )
+    train_cluster_size: int = field(
+        default=224,
+        metadata={
+            "help": "Cluster size for train data",
+        }
+    )
+    eval_cluster_size: int = field(
+        default=224,
+        metadata={
+            "help": "Cluster size for val data",
         }
     )
     def __post_init__(self):
@@ -269,7 +281,8 @@ class TrainingArguments(transformers.TrainingArguments):
             print(f"training with eval_steps = {self.eval_steps} / num_workers = {num_workers} / warmup_steps = {self.warmup_steps} / world_size {get_world_size()}")
         ############################################################################
         self.dataloader_num_workers = num_workers
-        self.dataloader_persistent_workers = (num_workers > 0)
+        # self.dataloader_persistent_workers = (num_workers > 0)
+        self.dataloader_persistent_workers = False
         self.dataloader_pin_memory = True
         today_date = datetime.date.today()
         formatted_date = today_date.strftime("%Y-%m-%d")
