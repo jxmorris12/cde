@@ -153,6 +153,7 @@ class DatasetTransformer(transformers.PreTrainedModel):
         self.backbone = dataset_backbone
         self.embedding_dim = self.embedder.config.hidden_size
         self.hidden_size = self.backbone.config.hidden_size
+        self.n_soft_prompt = 8
 
         if self.backbone.config.model_type.startswith("nomic"):
             # We only want to apply positional embeddings to the
@@ -166,11 +167,10 @@ class DatasetTransformer(transformers.PreTrainedModel):
 
         # TODO: Argparse, ablate, and potentially remove the soft prompt portion
         # of this model.
-        self.n_sequence = 8
         self.prompt_projection = torch.nn.Sequential(
             torch.nn.Linear(self.embedding_dim, self.hidden_size),
             torch.nn.ReLU(),
-            torch.nn.Linear(self.hidden_size, self.hidden_size * self.n_sequence)
+            torch.nn.Linear(self.hidden_size, self.hidden_size * self.n_soft_prompt)
         )
         self.output_projection = torch.nn.Sequential(
             torch.nn.Linear(self.hidden_size, self.hidden_size),
@@ -216,20 +216,12 @@ class DatasetTransformer(transformers.PreTrainedModel):
         assert _ == 1
         
         # backbone_max_seq_length = self.backbone.config.max_trained_positions
-        # assert batch_size + (2 * self.n_sequence + corpus_size) <= backbone_max_seq_length, "too many hard negatives for backbone model"
+        # assert batch_size + (2 * self.n_soft_prompt + corpus_size) <= backbone_max_seq_length, "too many hard negatives for backbone model"
 
         soft_prompt = torch.ones((1, self.embedding_dim), device=dataset_embeddings.device, dtype=torch.float32)
-        soft_prompt = self.prompt_projection(soft_prompt).reshape((1, self.n_sequence, self.hidden_size))
-        soft_prompt = torch.cat((soft_prompt, dataset_embeddings), dim=1)
-        soft_prompt = soft_prompt.expand((len(input_ids), -1, -1)) # -> (b, 4+b, d) # soft_prompt.repeat((len(input_ids), 1, 1))
-        if self.training and self.randomize_dataset_sequence_order:
-            randomized_order = torch.stack(
-                [
-                    torch.cat(
-                        (torch.arange(self.n_sequence), self.n_sequence + torch.randperm(corpus_size)), dim=0) 
-                        for _ in range(batch_size)])
-            randomized_order = randomized_order.to(soft_prompt.device)
-            soft_prompt.gather(1, randomized_order[..., None].expand_as(soft_prompt))     
+        soft_prompt = self.prompt_projection(soft_prompt).reshape((1, self.n_soft_prompt, self.hidden_size))
+        soft_prompt = torch.cat((dataset_embeddings, soft_prompt), dim=1)
+        soft_prompt = soft_prompt.expand((len(input_ids), -1, -1)) # -> (b, 4+b, d) # soft_prompt.repeat((len(input_ids), 1, 1))  
         inputs_embeds = self.backbone.embeddings(input_ids) # (b, s) -> (b, s, d)
         inputs_embeds = torch.cat((soft_prompt, inputs_embeds), dim=1) # (v, 4+b+s, d)
 
@@ -239,6 +231,7 @@ class DatasetTransformer(transformers.PreTrainedModel):
             device=soft_prompt.device,
         )
         attention_mask = torch.cat((backbone_attention_mask, attention_mask), dim=1)
+        print("? calling backbone with ", inputs_embeds.shape, "/", inputs_embeds.norm(p=2))
         output = self.backbone(
             inputs_embeds=inputs_embeds,
             attention_mask=attention_mask,
