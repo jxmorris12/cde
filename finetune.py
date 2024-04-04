@@ -98,29 +98,27 @@ def main():
     )
 
     beir_dataset_names = [
+         'arguana',
          'webis-touche2020',
          'quora',
-        #  'arguana',
          'nfcorpus',
          'scidocs', 
          'scifact',
-        #  'robust04',    # ??
          'trec-covid',
          'signal1m',
          'fiqa',
-         'msmarco',
-        #  'trec-news',   # ??
-         'bioasq',
     #############################################
-    # these ones are broken, I think:
+        #  'robust04',   
+        #  'trec-news',  
+    #############################################
+        #  'msmarco',
+        #  'bioasq',
         # 'fever',
         # 'dbpedia',
 
     ]
 
-    if training_args.tiny_debug: 
-        beir_dataset_names = [ 'fiqa' ]
-    # beir_dataset_names = [ 'quora' ]
+    if training_args.tiny_debug: beir_dataset_names = [ 'quora' ]
 
     beir_dict = {
         d: BeirDataset(dataset=d, embedder_rerank=model_args.embedder_rerank) 

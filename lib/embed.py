@@ -89,6 +89,7 @@ class DenseEncoder(torch.nn.Module):
             `List[np.ndarray]` or `List[tensor]`: List of embeddings for the given sentences
         """
         os.environ["TOKENIZERS_PARALLELISM"] = "1"
+        os.environ["RAYON_RS_NUM_CPUS"] = str(len(os.sched_getaffinity(0)))
         dataset = dataset.map(
             functools.partial(
                 self.tokenize_transform, 
@@ -141,9 +142,14 @@ class DenseEncoder(torch.nn.Module):
         return np.concatenate(encoded_embeds, axis=0)
 
 
-def embed_with_cache(model_name: str, cache_name: str, d: datasets.Dataset, 
-                     col: str, save_to_disk: bool = True,
-                     model=None, batch_size: int = 4096) -> datasets.Dataset:
+def embed_with_cache(
+        model_name: str, 
+        cache_name: str, 
+        d: datasets.Dataset,              
+        col: str, 
+        save_to_disk: bool = True,
+        model=None, batch_size: int = 4096
+    ) -> datasets.Dataset:
     embedder_cache_path = model_name.replace('/', '__')
     cache_folder = os.path.join(get_tti_cache_dir(), 'corpus_embeddings', embedder_cache_path)
     os.makedirs(cache_folder, exist_ok=True)

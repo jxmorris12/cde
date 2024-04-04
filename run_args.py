@@ -65,7 +65,7 @@ class ModelArguments:
     architecture: str = field(
         default="biencoder",
         metadata = {
-            "choices": ["biencoder", "query_independent_dt", "query_independent_dt_deeper", "two_head_mlp"],
+            "choices": ["biencoder", "query_independent_dt", "two_head_mlp"],
         }
     )
     limit_layers: Optional[int] = field(
@@ -81,7 +81,7 @@ class ModelArguments:
         }
     )
     contrastive_temp: float = field(
-        default=20,
+        default=50,
         metadata={
             "help": "temperature for contrastive learning",
         }
@@ -191,7 +191,7 @@ class TrainingArguments(transformers.TrainingArguments):
          metadata={"help": "Number of reranked examples during eval"}
     )
     save_strategy: str = "steps"
-    save_steps: int = 12_000
+    save_steps: int = 4_000
     save_total_limit: int = 1  # Maximum number of checkpoints to save.
 
     exp_name: str = field(

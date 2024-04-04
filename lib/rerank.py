@@ -10,6 +10,7 @@ import torch
 import transformers
 
 from lib.dist import gather, get_rank, get_world_size
+from lib.embed import embed_with_cache
 from lib.tensor import forward_batched
 from lib.misc import tqdm_if_main_worker
 
@@ -150,8 +151,7 @@ class RerankHelper:
         # TODO: check this logic
         true_top_k = len(documents_text)
         
-        num_queries = min(self.max_reranking_queries, len(queries))
-        max_length = int(math.ceil(true_top_k * num_queries / world_size) * 2)
+        max_length = int(math.ceil(true_top_k * num_eval_queries / world_size) * 2)
 
         # add dummy elements to make same shapes for gather.
         extra_ones_pair = (
@@ -189,22 +189,17 @@ class RerankHelper:
             doc_id = doc_id_to_key[query_id][doc_j]
             rerank_results_biencoder[query_id][doc_id] = score
         # TODO: Add assertions here.
-        
-        # if rank == 0: 
-        #     breakpoint()
-        # torch.distributed.barrier()
-        
         return rerank_results_biencoder
     
 
-def get_reranking_results(data_path: str, model_name: str) -> Dict:
+def get_reranking_results(data_path: str, split: str, model_name: str) -> Dict:
     """Reranks dataset at `data_path` using model with name `model_name`."""
     # Reranking adapted from here.
     # https://github.com/embeddings-benchmark/mteb/blob/0c67d969b8e34ccf94286c3e2758c7a8d0943e81/mteb/evaluation/evaluators/RetrievalEvaluator.py#L189
     from mteb import HFDataLoader, RetrievalEvaluator        
 
     print("Loading:", data_path)
-    corpus, queries, _qrels = HFDataLoader(data_folder=data_path, streaming=False, keep_in_memory=False).load(split="test")
+    corpus, queries, _qrels = HFDataLoader(data_folder=data_path, streaming=False, keep_in_memory=False).load(split=split)
     retriever = RetrievalEvaluator(
         None,
         score_function="dot",
@@ -214,64 +209,64 @@ def get_reranking_results(data_path: str, model_name: str) -> Dict:
         k_values=[1, 3, 5, 10, 100, 1000, 10_000],
         corpus_chunk_size=2**20,
     )
-    queries = {query['id']: query['text'] for query in queries}
-    corpus = {doc['id']: {'title': doc['title'] , 'text': doc['text']} for doc in corpus}
 
-    from lib.embed import embed_with_cache
     query_embeddings = embed_with_cache(
         model_name=model_name, 
-        cache_name='????pathdoesntexist', # TODO cleaner
+        cache_name='????pathdoesntexist', # TODO cleaner way to specify.
         d=queries, 
         col='text',
         save_to_disk=False,
         model=None,
-        batch_size = 4096,
-    )
-    sub_corpus_embeddings = embed_with_cache(
-        model_name=model_name, 
-        cache_name='????pathdoesntexist', # TODO cleaner
-        d=corpus, 
-        col='text',
-        save_to_disk=False,
-        model=None,
-        batch_size = 4096,
-    )
+        batch_size=4096,
+    )["embeds"]
     
-    # Compute similarites using either cosine-similarity or dot product
-    cos_scores = retriever.score_functions["cos_sim"](
-        query_embeddings, sub_corpus_embeddings
-    )
-    cos_scores[torch.isnan(cos_scores)] = -1
-
+    # queries = { query['id']: query['text'] for query in queries }
+    # corpus = { doc['id']: {'title': doc['title'] , 'text': doc['text']} for doc in corpus }
+    
     # Get top-k values
+    query_ids = list(queries["id"])
+    corpus_ids = corpus["id"]
+    results = {qid: {} for qid in query_ids}
+    corpus_chunk_size = 500_000
     top_k = retriever.top_k
     result_heaps = {
         qid: [] for qid in query_ids
     }  # Keep only the top-k docs for each query
-    cos_scores_top_k_values, cos_scores_top_k_idx = torch.topk(
-        cos_scores,
-        min(top_k + 1, len(cos_scores[1])),
-        dim=1,
-        largest=True,
-        sorted=False,
-    )
-    query_ids = list(queries.keys())
-    corpus_ids = sorted(
-        corpus,
-        key=lambda k: len(corpus[k].get("title", "") + corpus[k].get("text", "")),
-        reverse=True,
-    )
-    cos_scores_top_k_values = cos_scores_top_k_values.cpu().tolist()
-    cos_scores_top_k_idx = cos_scores_top_k_idx.cpu().tolist()
 
-    itr = range(0, len(corpus), retriever.corpus_chunk_size)
-    for _batch_num, corpus_start_idx in enumerate(itr):
+    for corpus_start_idx in range(0, len(corpus), corpus_chunk_size):
+        corpus_end_idx = min(corpus_start_idx + corpus_chunk_size, len(corpus))
+        sub_corpus_embeddings = embed_with_cache(
+            model_name=model_name, 
+            cache_name='????pathdoesntexist', # TODO cleaner
+            d=corpus.select(range(corpus_start_idx, corpus_end_idx)), 
+            col='text',
+            save_to_disk=False,
+            model=None,
+            batch_size=4096,
+        )["embeds"]
+        cos_scores = retriever.retriever.score_functions["cos_sim"](
+            query_embeddings, sub_corpus_embeddings
+        )
+        cos_scores[torch.isnan(cos_scores)] = -1
+        cos_scores_top_k_values, cos_scores_top_k_idx = torch.topk(
+            cos_scores,
+            min(top_k + 1, len(cos_scores[1])),
+            dim=1,
+            largest=True,
+            sorted=False,
+        )
+        cos_scores_top_k_values = cos_scores_top_k_values.cpu().tolist()
+        cos_scores_top_k_idx = cos_scores_top_k_idx.cpu().tolist()
+
         for query_itr in range(len(query_embeddings)):
             query_id = query_ids[query_itr]
             for sub_corpus_id, score in zip(
                 cos_scores_top_k_idx[query_itr], cos_scores_top_k_values[query_itr]
             ):
-                corpus_id = corpus_ids[corpus_start_idx + sub_corpus_id]
+                try:
+                    corpus_id = corpus_ids[corpus_start_idx + sub_corpus_id]
+                except IndexError:
+                    breakpoint()
                 if corpus_id != query_id:
                     if len(result_heaps[query_id]) < top_k:
                         # Push item on the heap
@@ -284,6 +279,6 @@ def get_reranking_results(data_path: str, model_name: str) -> Dict:
 
     for qid in result_heaps:
         for score, corpus_id in result_heaps[qid]:
-            retriever.results[qid][corpus_id] = score
+            results[qid][corpus_id] = score
 
-    return retriever.results
+    return results

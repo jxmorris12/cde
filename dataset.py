@@ -27,6 +27,7 @@ from lib import (
     embed_with_cache,
     get_tti_cache_dir,
     get_num_proc,
+    get_reranking_results,
     independent_crop,
     tokenize_dataset, 
 )
@@ -110,9 +111,10 @@ def load_beir_uncached(dataset: str, split: str, embedder_rerank: str) -> Tuple[
         queries (datasets.Dataset):  Corpus of queries
             keys -- query_id, text
         qrels
-        ance_results
+        rerank_results
     """
-    print("loading dataset uncached", dataset)
+    transformers.logging.set_verbosity_error()
+    print("[load_beir_uncached] loading dataset uncached", dataset)
     #### Download msmarco.zip dataset and unzip the dataset
     url = "https://public.ukp.informatik.tu-darmstadt.de/thakur/BEIR/datasets/{}.zip".format(dataset)
     out_dir = os.path.join(pathlib.Path(__file__).parent.absolute(), "datasets")
@@ -124,9 +126,9 @@ def load_beir_uncached(dataset: str, split: str, embedder_rerank: str) -> Tuple[
     corpus, queries, qrels = beir.datasets.data_loader.GenericDataLoader(data_path).load(split=split)
     # bm25_results = get_bm25_results(dataset=dataset, corpus=corpus, queries=queries)
     print("... getting reranking results")
-    ance_results = get_reranking_results(
+    rerank_results = get_reranking_results(
         data_path=data_path, 
-        str=str,
+        split=split,
         model_name=embedder_rerank
     )
 
@@ -137,7 +139,7 @@ def load_beir_uncached(dataset: str, split: str, embedder_rerank: str) -> Tuple[
     queries = datasets.Dataset.from_list([{ "id": k, "text": v} for k,v in queries.items()])
     # queries._fingerprint = md5_hash(f"msmarco_beir_{split}") 
 
-    return corpus, queries, qrels, ance_results
+    return corpus, queries, qrels, rerank_results
 
 
 def load_beir(dataset: str, split: str, embedder_rerank: str) -> Tuple[datasets.Dataset, datasets.Dataset, Dict[str, Dict[str, int]]]:
@@ -157,17 +159,19 @@ def load_beir(dataset: str, split: str, embedder_rerank: str) -> Tuple[datasets.
         logging.info(f"Loading {dataset} split %s qrels from path %s", split, qrels_path)
         qrels = pickle.load(open(qrels_path, 'rb'))
         logging.info(f"Loading {dataset} split %s ance results from path %s", split, rerank_path)
-        ance_results = pickle.load(open(rerank_path, 'rb'))
+        rerank_results = pickle.load(open(rerank_path, 'rb'))
     else:
-        corpus, queries, qrels, ance_results = load_beir_uncached(dataset=dataset, split=split)
+        corpus, queries, qrels, rerank_results = load_beir_uncached(
+            dataset=dataset, split=split, embedder_rerank=embedder_rerank,
+        )
         logging.info(f"Saving {dataset} split %s corpus to path %s", split, corpus_path)
         corpus.save_to_disk(corpus_path)
         logging.info(f"Saving {dataset} split %s queries to path %s", split, queries_path)
         queries.save_to_disk(queries_path)
         pickle.dump(qrels, open(qrels_path, 'wb'))
-        pickle.dump(ance_results, open(rerank_path, 'wb'))
+        pickle.dump(rerank_results, open(rerank_path, 'wb'))
 
-    return corpus, queries, qrels, ance_results
+    return corpus, queries, qrels, rerank_results
 
 
 class BeirDataset(torch.utils.data.Dataset):
