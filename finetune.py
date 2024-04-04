@@ -98,6 +98,7 @@ def main():
     )
 
     beir_dataset_names = [
+        # https://github.com/beir-cellar/beir/blob/f062f038c4bfd19a8ca942a9910b1e0d218759d4/examples/dataset/download_dataset.py#L13
          'arguana',
          'webis-touche2020',
          'quora',
@@ -107,15 +108,18 @@ def main():
          'trec-covid',
          'signal1m',
          'fiqa',
+         'trec-news',  
+         'msmarco',
     #############################################
+         'nq',
+        # 'cqadupstack',
+    #############################################
+        #  'bioasq', # huge (14m samples)
         #  'robust04',   
-        #  'trec-news',  
-    #############################################
-        #  'msmarco',
-        #  'bioasq',
-        # 'fever',
-        # 'dbpedia',
-
+        #  'fever', # JSON parse error
+        #  'dbpedia-entity',
+        #  'hotpotqa',
+        # 'climate-fever', # pyarrow.lib.ArrowIndexError: array slice would exceed array length
     ]
 
     if training_args.tiny_debug: beir_dataset_names = [ 'quora' ]

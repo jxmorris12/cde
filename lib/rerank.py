@@ -7,7 +7,11 @@ import math
 
 import datasets
 import torch
+import tqdm
 import transformers
+
+from mteb import HFDataLoader, RetrievalEvaluator        
+
 
 from lib.dist import gather, get_rank, get_world_size
 from lib.embed import embed_with_cache
@@ -196,9 +200,8 @@ def get_reranking_results(data_path: str, split: str, model_name: str) -> Dict:
     """Reranks dataset at `data_path` using model with name `model_name`."""
     # Reranking adapted from here.
     # https://github.com/embeddings-benchmark/mteb/blob/0c67d969b8e34ccf94286c3e2758c7a8d0943e81/mteb/evaluation/evaluators/RetrievalEvaluator.py#L189
-    from mteb import HFDataLoader, RetrievalEvaluator        
 
-    print("Loading:", data_path)
+    print("[get_reranking_results Loading:", data_path)
     corpus, queries, _qrels = HFDataLoader(data_folder=data_path, streaming=False, keep_in_memory=False).load(split=split)
     retriever = RetrievalEvaluator(
         None,
@@ -227,17 +230,17 @@ def get_reranking_results(data_path: str, split: str, model_name: str) -> Dict:
     query_ids = list(queries["id"])
     corpus_ids = corpus["id"]
     results = {qid: {} for qid in query_ids}
-    corpus_chunk_size = 500_000
+    corpus_chunk_size = 1_000_000
     top_k = retriever.top_k
     result_heaps = {
         qid: [] for qid in query_ids
     }  # Keep only the top-k docs for each query
 
-    for corpus_start_idx in range(0, len(corpus), corpus_chunk_size):
+    for corpus_start_idx in tqdm.trange(0, len(corpus), corpus_chunk_size, colour="#BF40BF", desc=f"evaluating {data_path}"):
         corpus_end_idx = min(corpus_start_idx + corpus_chunk_size, len(corpus))
         sub_corpus_embeddings = embed_with_cache(
             model_name=model_name, 
-            cache_name='????pathdoesntexist', # TODO cleaner
+            cache_name='????pathdoesntexist', # TODO cleaner way to ignore cache.
             d=corpus.select(range(corpus_start_idx, corpus_end_idx)), 
             col='text',
             save_to_disk=False,

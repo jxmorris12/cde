@@ -240,6 +240,7 @@ def independent_crop(
     s2 = input_ids[torch.tensor(list(s2_idxs))]
     return (s1, s2)
 
+
 def load_dataset_tables(
     files: Iterable[str], num_workers: int = 16
 ) -> Iterable[datasets.table.MemoryMappedTable]:
@@ -258,13 +259,16 @@ def load_dataset_tables(
         pool_kwargs = {"processes": num_workers}
     
     with pool_cls(**pool_kwargs) as pool:
-        result = list(
-            tqdm_if_main_worker(
-                pool.map(datasets.table.MemoryMappedTable.from_file, files),
+        if len(files) > 10:
+            files = tqdm_if_main_worker(
+                files,
                 desc=f"Loading {len(files)} files with {num_workers} workers",
                 total=len(files),
-                colour="#e0e0e0"
+                colour="#ffbd88"
             )
+        
+        result = list(
+            pool.map(datasets.table.MemoryMappedTable.from_file, files)
         )
     return result
 
