@@ -1,6 +1,7 @@
 from typing import Dict
 
 import collections
+import heapq
 import logging
 import math
 
@@ -194,3 +195,95 @@ class RerankHelper:
         # torch.distributed.barrier()
         
         return rerank_results_biencoder
+    
+
+def get_reranking_results(data_path: str, model_name: str) -> Dict:
+    """Reranks dataset at `data_path` using model with name `model_name`."""
+    # Reranking adapted from here.
+    # https://github.com/embeddings-benchmark/mteb/blob/0c67d969b8e34ccf94286c3e2758c7a8d0943e81/mteb/evaluation/evaluators/RetrievalEvaluator.py#L189
+    from mteb import HFDataLoader, RetrievalEvaluator        
+
+    print("Loading:", data_path)
+    corpus, queries, _qrels = HFDataLoader(data_folder=data_path, streaming=False, keep_in_memory=False).load(split="test")
+    retriever = RetrievalEvaluator(
+        None,
+        score_function="dot",
+        batch_size=2048,
+        # This way we'll keep the top 10,000 not just
+        #  the top 1,000 (by default) values.
+        k_values=[1, 3, 5, 10, 100, 1000, 10_000],
+        corpus_chunk_size=2**20,
+    )
+    queries = {query['id']: query['text'] for query in queries}
+    corpus = {doc['id']: {'title': doc['title'] , 'text': doc['text']} for doc in corpus}
+
+    from lib.embed import embed_with_cache
+    query_embeddings = embed_with_cache(
+        model_name=model_name, 
+        cache_name='????pathdoesntexist', # TODO cleaner
+        d=queries, 
+        col='text',
+        save_to_disk=False,
+        model=None,
+        batch_size = 4096,
+    )
+    sub_corpus_embeddings = embed_with_cache(
+        model_name=model_name, 
+        cache_name='????pathdoesntexist', # TODO cleaner
+        d=corpus, 
+        col='text',
+        save_to_disk=False,
+        model=None,
+        batch_size = 4096,
+    )
+    
+    # Compute similarites using either cosine-similarity or dot product
+    cos_scores = retriever.score_functions["cos_sim"](
+        query_embeddings, sub_corpus_embeddings
+    )
+    cos_scores[torch.isnan(cos_scores)] = -1
+
+    # Get top-k values
+    top_k = retriever.top_k
+    result_heaps = {
+        qid: [] for qid in query_ids
+    }  # Keep only the top-k docs for each query
+    cos_scores_top_k_values, cos_scores_top_k_idx = torch.topk(
+        cos_scores,
+        min(top_k + 1, len(cos_scores[1])),
+        dim=1,
+        largest=True,
+        sorted=False,
+    )
+    query_ids = list(queries.keys())
+    corpus_ids = sorted(
+        corpus,
+        key=lambda k: len(corpus[k].get("title", "") + corpus[k].get("text", "")),
+        reverse=True,
+    )
+    cos_scores_top_k_values = cos_scores_top_k_values.cpu().tolist()
+    cos_scores_top_k_idx = cos_scores_top_k_idx.cpu().tolist()
+
+    itr = range(0, len(corpus), retriever.corpus_chunk_size)
+    for _batch_num, corpus_start_idx in enumerate(itr):
+        for query_itr in range(len(query_embeddings)):
+            query_id = query_ids[query_itr]
+            for sub_corpus_id, score in zip(
+                cos_scores_top_k_idx[query_itr], cos_scores_top_k_values[query_itr]
+            ):
+                corpus_id = corpus_ids[corpus_start_idx + sub_corpus_id]
+                if corpus_id != query_id:
+                    if len(result_heaps[query_id]) < top_k:
+                        # Push item on the heap
+                        heapq.heappush(result_heaps[query_id], (score, corpus_id))
+                    else:
+                        # If item is larger than the smallest in the heap, push it on the heap then pop the smallest element
+                        heapq.heappushpop(
+                            result_heaps[query_id], (score, corpus_id)
+                        )
+
+    for qid in result_heaps:
+        for score, corpus_id in result_heaps[qid]:
+            retriever.results[qid][corpus_id] = score
+
+    return retriever.results

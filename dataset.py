@@ -101,33 +101,6 @@ def load_msmarco_hard_negatives() -> Dict[str, Dict[str, Any]]:
     return train_queries
 
 
-def get_reranking_results(data_path: str, model_name: str = "msmarco-roberta-base-ance-firstp") -> Dict:
-    # TODO: Merge with embed_with_cache (from lib).
-    # TODO: Support >1000 results per-query...
-    from sentence_transformers import SentenceTransformer
-    from mteb import HFDataLoader, RetrievalEvaluator        
-
-    model = SentenceTransformer(model_name)
-    model.max_seq_length = 128
-    pool = model.start_multi_process_pool()
-    def encode(queries, batch_size: int, **kwargs):
-        return model.encode_multi_process(queries, batch_size=batch_size, pool=pool)
-    model.encode = encode
-    print("Loading:", data_path)
-    corpus, queries, _qrels = HFDataLoader(data_folder=data_path, streaming=False, keep_in_memory=False).load(split="test")
-    retriever = RetrievalEvaluator(
-        model,
-        score_function="dot",
-        batch_size=2048,
-        corpus_chunk_size=2**18,
-    )
-    queries = {query['id']: query['text'] for query in queries}
-    corpus = {doc['id']: {'title': doc['title'] , 'text': doc['text']} for doc in corpus}
-    results = retriever(corpus, queries)
-    model.stop_multi_process_pool(pool)
-    return results
-
-
 def load_beir_uncached(dataset: str, split: str, embedder_rerank: str) -> Tuple[datasets.Dataset, datasets.Dataset, Dict[str, Dict[str, int]], Dict]:
     """Loads a BEIR test dataset through tools provided by BeIR.
 
