@@ -46,9 +46,7 @@ class RerankHelper:
     @torch.no_grad
     def rerank(self, 
                corpus: Dict[str, Dict[str, str]], 
-               corpus_embeddings: datasets.Dataset,
                queries: Dict[str, str],
-               query_embeddings: datasets.Dataset,
                results: Dict[str, Dict[str, float]],
                top_k: int) -> Dict[str, Dict[str, float]]:
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')

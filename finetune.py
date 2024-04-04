@@ -121,8 +121,9 @@ def main():
         #  'hotpotqa',
         # 'climate-fever', # pyarrow.lib.ArrowIndexError: array slice would exceed array length
     ]
-
-    if training_args.tiny_debug: beir_dataset_names = [ 'quora' ]
+    if training_args.tiny_debug: 
+        beir_dataset_names = [ 'quora' ]
+        trainign_args.max_eval_batches = 1
 
     beir_dict = {
         d: BeirDataset(dataset=d, embedder_rerank=model_args.embedder_rerank) 
@@ -135,20 +136,6 @@ def main():
     collator_cls = DocumentQueryCollatorWithPadding
     if data_args.dataset == 'synthetic_words':
         train_dataset, eval_dataset = load_synthetic_words_dataset()
-    elif data_args.dataset == 'reddit_supervised':
-        train_dataset, eval_dataset = load_reddit_train_and_val(
-            # data_folder="/home/jxm3/research/retrieval/tti3/data/mini",
-            # data_folder="/home/jxm3/research/retrieval/tti3/data/full",
-            data_folder="/home/jxm3/research/retrieval/tti3/data/full_t5",
-            perc=0.98, 
-            supervised=True,
-        )
-    elif data_args.dataset == 'reddit_unsupervised':
-        train_dataset, eval_dataset = load_reddit_train_and_val(
-            data_folder="/home/jxm3/research/retrieval/tti3/data/full",
-            perc=0.98, 
-            supervised=False,
-        )
     elif data_args.dataset == 'nomic_unsupervised':
         train_dataset = NomicUnsupervisedDataset(
             tokenizer=embedder_tokenizer,
@@ -245,6 +232,7 @@ def main():
         eval_samplers=eval_samplers,
         retrieval_datasets=retrieval_datasets,
     )
+    trainer.evaluate_retrieval_datasets() # TMP
     checkpoint = get_checkpoint(training_args)
     logging.info("train() loaded checkpoint %s", checkpoint)
     trainer.train(resume_from_checkpoint=checkpoint)

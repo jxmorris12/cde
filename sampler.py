@@ -11,7 +11,7 @@ import torch
 import datasets
 import torch
 
-from dataset import NomicSupervisedDataset, RedditDataset
+from dataset import NomicSupervisedDataset, NomicUnsupervisedDataset
 from lib import (
     cluster_dataset,
     cluster_subdomains,
@@ -24,7 +24,7 @@ from lib import (
 class Sampler(abc.ABC, torch.utils.data.Sampler):
     def __init__(
             self, 
-            dataset: Union[NomicSupervisedDataset, RedditDataset], 
+            dataset: Union[NomicSupervisedDataset, NomicUnsupervisedDataset], 
             batch_size: int, 
             shuffle: bool, 
             max_num_batches: Optional[int] = None,
@@ -100,13 +100,13 @@ class FixedSubdomainSampler(RandomSampler):
     
     Must have fixed dictionary of subdomains `subdomain_idxs`.
     """
-    dataset: Union[NomicSupervisedDataset, RedditDataset]
+    dataset: Union[NomicSupervisedDataset, NomicUnsupervisedDataset]
     batch_size: int
     max_num_batches: Optional[int]
     batch_assignments: Dict[int, Iterable[int]]
     def __init__(
             self, 
-            dataset: Union[NomicSupervisedDataset, RedditDataset], 
+            dataset: Union[NomicSupervisedDataset, NomicUnsupervisedDataset], 
             batch_size: int, 
             shuffle: bool, 
             num_samples: Optional[int] = None,
@@ -165,10 +165,10 @@ class FixedSubdomainSampler(RandomSampler):
 
 
 class AutoClusterSampler(FixedSubdomainSampler):
-    dataset: Union[NomicSupervisedDataset, RedditDataset]
+    dataset: Union[NomicSupervisedDataset, NomicUnsupervisedDataset]
     def __init__(
             self, 
-            dataset: Union[NomicSupervisedDataset, RedditDataset],
+            dataset: Union[NomicSupervisedDataset, NomicUnsupervisedDataset],
             query_to_doc: bool, 
             batch_size: int,
             cluster_size: int,
@@ -199,10 +199,10 @@ class AutoClusterSampler(FixedSubdomainSampler):
 
 
 class AutoClusterWithinDomainSampler(FixedSubdomainSampler):
-    dataset: Union[NomicSupervisedDataset, RedditDataset]
+    dataset: Union[NomicSupervisedDataset, NomicUnsupervisedDataset]
     def __init__(
             self, 
-            dataset: Union[NomicSupervisedDataset, RedditDataset],
+            dataset: Union[NomicSupervisedDataset, NomicUnsupervisedDataset],
             query_to_doc: bool, 
             batch_size: int,
             cluster_size: int,

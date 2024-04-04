@@ -203,7 +203,7 @@ class CustomTrainer(transformers.Trainer):
         self.optimizer.step() 
         self.model.zero_grad()
         # Uncomment next line to test eval straightaway.
-        # self.control.should_evaluate = True  #########
+        self.control.should_evaluate = True  #########
         ##############################################
         return loss.detach() / self.args.gradient_accumulation_steps
 
@@ -438,9 +438,7 @@ class CustomTrainer(transformers.Trainer):
         with torch.autocast(rerank_device, dtype=torch.bfloat16):
             rerank_results_model = reranker.rerank(
                 corpus=eval_dataset.corpus, 
-                corpus_embeddings=eval_dataset.corpus_embeddings,
                 queries=eval_dataset.queries, 
-                query_embeddings=eval_dataset.query_embeddings,
                 results=eval_dataset.rerank_results,
                 top_k=self.args.eval_rerank_topk
             )
@@ -552,7 +550,8 @@ class CustomTrainer(transformers.Trainer):
             all_metrics = (metrics | all_metrics)
         return all_metrics
 
-    def evaluate_retrieval_datasets(self, model: torch.nn.Module) -> Dict[str, float]:
+    def evaluate_retrieval_datasets(self) -> Dict[str, float]:
+        model = self.model
         all_metrics = {}
         for eval_dataset_name, eval_dataset in self.retrieval_datasets.items():
             metric_key_prefix = f"eval_{eval_dataset_name}"
@@ -592,5 +591,5 @@ class CustomTrainer(transformers.Trainer):
         # do my custom eval
         if should_evaluate:
             # TODO: implement multi-gpu retrieval evaluation.
-            self.evaluate_retrieval_datasets(model=model)
+            self.evaluate_retrieval_datasets()
 

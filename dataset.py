@@ -24,12 +24,10 @@ from lib import (
     datasets_fast_load_from_disk,
     download_url, 
     download_url_and_unzip, 
-    embed_with_cache,
     get_tti_cache_dir,
     get_num_proc,
+    get_rank,
     get_reranking_results,
-    independent_crop,
-    tokenize_dataset, 
 )
 
 
@@ -143,7 +141,8 @@ def load_beir_uncached(dataset: str, split: str, embedder_rerank: str) -> Tuple[
 
 
 def load_beir(dataset: str, split: str, embedder_rerank: str) -> Tuple[datasets.Dataset, datasets.Dataset, Dict[str, Dict[str, int]]]:
-    print("loading dataset", dataset)
+    if get_rank() == 0:
+        print("[load_beir] loading dataset", dataset)
     cache_path = datasets.config.HF_DATASETS_CACHE # something like /home/jxm3/.cache/huggingface/datasets
     corpus_path = os.path.join(cache_path, f'tti_beir_local_{dataset}_corpus_{split}')
     queries_path = os.path.join(cache_path, f'tti_beir_local_{dataset}_queries_{split}')
