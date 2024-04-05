@@ -211,7 +211,7 @@ class DatasetTransformer(transformers.PreTrainedModel):
         # print("forward_second_stage //", input_ids.shape, input_ids.shape, "//", dataset_embeddings.shape)
         dataset_embeddings = dataset_embeddings[None, :, :] # (b, d) -> (1, b, d)
         
-        batch_size = input_ids.shape[0]
+        _batch_size = input_ids.shape[0]
         _, corpus_size, _hidden_dim = dataset_embeddings.shape
         assert _ == 1
         
@@ -231,7 +231,7 @@ class DatasetTransformer(transformers.PreTrainedModel):
             device=soft_prompt.device,
         )
         attention_mask = torch.cat((backbone_attention_mask, attention_mask), dim=1)
-        print("? calling backbone with ", inputs_embeds.shape, "/", inputs_embeds.norm(p=2))
+        # print("? calling backbone with ", inputs_embeds.shape, "/", inputs_embeds.norm(p=2))
         output = self.backbone(
             inputs_embeds=inputs_embeds,
             attention_mask=attention_mask,
@@ -241,10 +241,6 @@ class DatasetTransformer(transformers.PreTrainedModel):
 
         # use only these tokens
         n_soft_prompt_tokens = soft_prompt.shape[1]
-
-        soft_prompt_vectors = output.last_hidden_state[:, :n_soft_prompt_tokens, :]
-        soft_prompt_mask = attention_mask[:, :n_soft_prompt_tokens]
-        soft_prompt_pooled = mean_pool(soft_prompt_vectors, soft_prompt_mask)
 
         output_vectors = output.last_hidden_state[:, n_soft_prompt_tokens:, :]
         output_attention_mask = attention_mask[:, n_soft_prompt_tokens:]
