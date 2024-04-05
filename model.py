@@ -211,7 +211,7 @@ class DatasetTransformer(transformers.PreTrainedModel):
         # print("forward_second_stage //", input_ids.shape, input_ids.shape, "//", dataset_embeddings.shape)
         dataset_embeddings = dataset_embeddings[None, :, :] # (b, d) -> (1, b, d)
         
-        _batch_size = input_ids.shape[0]
+        batch_size = input_ids.shape[0]
         _, corpus_size, _hidden_dim = dataset_embeddings.shape
         assert _ == 1
         
@@ -224,6 +224,19 @@ class DatasetTransformer(transformers.PreTrainedModel):
         soft_prompt = soft_prompt.expand((len(input_ids), -1, -1)) # -> (b, 4+b, d) # soft_prompt.repeat((len(input_ids), 1, 1))  
         inputs_embeds = self.backbone.embeddings(input_ids) # (b, s) -> (b, s, d)
         inputs_embeds = torch.cat((soft_prompt, inputs_embeds), dim=1) # (v, 4+b+s, d)
+
+        if self.training and self.randomize_dataset_sequence_order:
+            randomized_order = torch.stack(
+                [
+                    torch.cat(
+                        (torch.arange(self.n_soft_prompt), 
+                         self.n_soft_prompt + torch.randperm(corpus_size)), dim=0) 
+                        for _ in range(batch_size)])
+            randomized_order = randomized_order.to(soft_prompt.device)
+            soft_prompt.gather(1, randomized_order[..., None].expand_as(soft_prompt))     
+        inputs_embeds = self.backbone.embeddings(input_ids) # (b, s) -> (b, s, d)
+        inputs_embeds = torch.cat((soft_prompt, inputs_embeds), dim=1) # (v, 4+b+s, d)
+
 
         backbone_attention_mask = torch.ones(
             soft_prompt.shape[0:2],
