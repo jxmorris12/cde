@@ -10,7 +10,10 @@ def limit_layers(model: transformers.PreTrainedModel, n_layers: int) -> None:
     if hasattr(model, 'transformer'):
         model.transformer.layer = model.transformer.layer[:n_layers]
     elif hasattr(model, 'encoder'):
-        model.encoder.layer = model.encoder.layer[:n_layers]
+        if hasattr(model.encoder, 'layers'):
+            model.encoder.layers = model.encoder.layers[:n_layers]
+        else:
+            model.encoder.layer = model.encoder.layer[:n_layers]
     else:
         raise RuntimeError(f"unknown how to limit layers of model {type(model)}")
 
@@ -222,9 +225,6 @@ class DatasetTransformer(transformers.PreTrainedModel):
         soft_prompt = self.prompt_projection(soft_prompt).reshape((1, self.n_soft_prompt, self.hidden_size))
         soft_prompt = torch.cat((dataset_embeddings, soft_prompt), dim=1)
         soft_prompt = soft_prompt.expand((len(input_ids), -1, -1)) # -> (b, 4+b, d) # soft_prompt.repeat((len(input_ids), 1, 1))  
-        inputs_embeds = self.backbone.embeddings(input_ids) # (b, s) -> (b, s, d)
-        inputs_embeds = torch.cat((soft_prompt, inputs_embeds), dim=1) # (v, 4+b+s, d)
-
         if self.training and self.randomize_dataset_sequence_order:
             randomized_order = torch.stack(
                 [
@@ -237,14 +237,13 @@ class DatasetTransformer(transformers.PreTrainedModel):
         inputs_embeds = self.backbone.embeddings(input_ids) # (b, s) -> (b, s, d)
         inputs_embeds = torch.cat((soft_prompt, inputs_embeds), dim=1) # (v, 4+b+s, d)
 
-
         backbone_attention_mask = torch.ones(
             soft_prompt.shape[0:2],
             dtype=torch.long,
             device=soft_prompt.device,
         )
         attention_mask = torch.cat((backbone_attention_mask, attention_mask), dim=1)
-        # print("? calling backbone with ", inputs_embeds.shape, "/", inputs_embeds.norm(p=2))
+        print("? calling backbone with ", inputs_embeds.shape, "/", inputs_embeds.norm(p=2))
         output = self.backbone(
             inputs_embeds=inputs_embeds,
             attention_mask=attention_mask,
