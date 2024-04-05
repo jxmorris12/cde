@@ -243,7 +243,7 @@ class DatasetTransformer(transformers.PreTrainedModel):
             device=soft_prompt.device,
         )
         attention_mask = torch.cat((backbone_attention_mask, attention_mask), dim=1)
-        print("? calling backbone with ", inputs_embeds.shape, "/", inputs_embeds.norm(p=2))
+        # print("? calling backbone with ", inputs_embeds.shape, "/", inputs_embeds.norm(p=2))
         output = self.backbone(
             inputs_embeds=inputs_embeds,
             attention_mask=attention_mask,

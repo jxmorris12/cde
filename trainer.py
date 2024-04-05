@@ -200,8 +200,6 @@ class CustomTrainer(transformers.Trainer):
             loss = self.compute_loss(model, inputs)
         if self.args.n_gpu > 1:
             loss = loss.mean()
-        self.optimizer.step() 
-        self.model.zero_grad()
         # Uncomment next line to test eval straightaway.
         # self.control.should_evaluate = True  #########
         ##############################################
