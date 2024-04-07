@@ -69,7 +69,7 @@ class RerankHelper:
         for j, query_id in tqdm_if_main_worker(enumerate(query_keys), total=num_eval_queries, desc=f"[{self.name}]"):
             topk_docs = sorted(results[query_id].items(), key=lambda item: item[1], reverse=True)[:top_k]
 
-            # TODO: Enable assertion
+            # TODO: Enable assertion...
             # assert len(topk_docs) == topk_docs, f"fewer than {top_k} docs available in dataset {self.name}"
 
             for doc_j, (doc_id, _) in enumerate(topk_docs):
@@ -153,7 +153,7 @@ class RerankHelper:
         # TODO: check this logic
         true_top_k = len(documents_text)
         
-        max_length = int(math.ceil(true_top_k * num_eval_queries / world_size) * 2)
+        max_length = int(math.ceil(true_top_k * num_eval_queries / world_size)) * 2
 
         # add dummy elements to make same shapes for gather.
         extra_ones_pair = (

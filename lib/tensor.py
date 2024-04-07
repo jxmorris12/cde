@@ -118,8 +118,7 @@ def forward_batched(
                 )
             )
             j += batch_size
-        outputs = torch.cat(outputs, dim=0)
-        return outputs
+        return torch.cat(outputs, dim=0)
 
     else:
         i = 0

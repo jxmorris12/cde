@@ -236,7 +236,7 @@ def main():
     checkpoint = get_checkpoint(training_args)
     logging.info("train() loaded checkpoint %s", checkpoint)
     trainer.train(resume_from_checkpoint=checkpoint)
-    trainer.evaluate_retrieval_datasets(model=model)
+    trainer.evaluate_retrieval_datasets()
 
 
 if __name__ == '__main__':
