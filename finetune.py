@@ -156,7 +156,7 @@ def main():
         # eval_dataset = None
         # Need to tokenize and collate for this dataset
         collator_cls = TokenizerCollator
-    elif data_args.dataset == 'nomic':
+    elif data_args.dataset == 'nomic_supervised':
         train_dataset = NomicSupervisedDataset(
             tokenizer=embedder_tokenizer,
             num_hard_negatives=data_args.num_hard_negatives,

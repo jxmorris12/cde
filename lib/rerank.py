@@ -5,14 +5,13 @@ import heapq
 import logging
 import math
 
-import datasets
 import torch
 import tqdm
 import transformers
 
 from mteb import HFDataLoader, RetrievalEvaluator        
 
-
+from dataset import BeirDataset
 from lib.dist import gather, get_rank, get_world_size
 from lib.embed import embed_with_cache
 from lib.tensor import forward_batched
@@ -44,11 +43,10 @@ class RerankHelper:
         )
     
     @torch.no_grad
-    def rerank(self, 
-               corpus: Dict[str, Dict[str, str]], 
-               queries: Dict[str, str],
-               results: Dict[str, Dict[str, float]],
-               top_k: int) -> Dict[str, Dict[str, float]]:
+    def rerank(self, dataset: BeirDataset, top_k: int) -> Dict[str, Dict[str, float]]:
+        corpus: Dict[str, Dict[str, str]] = beir_dataset.corpus
+        queries: Dict[str, str] = dataset.queries
+        results: Dict[str, Dict[str, float]] = dataset.rerank_results
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         pair_ids = []
         rerank_scores_biencoder = []
@@ -90,14 +88,14 @@ class RerankHelper:
                 documents_text.append(corpus[corpus_idx_dict[doc_id]]["text"])
 
             query_inputs = self.tokenizer(
-                [query_text],
+                [dataset.prefix_query + query_text],
                 padding=True,
                 truncation=True,
                 max_length=self.max_seq_length,
                 return_tensors="pt",
             ).to(device)
             document_inputs = self.tokenizer(
-                documents_text,
+                [dataset.prefix_document + t for t in documents_text],
                 padding=True,
                 truncation=True,
                 max_length=self.max_seq_length,

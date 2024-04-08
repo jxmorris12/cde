@@ -444,10 +444,8 @@ class CustomTrainer(transformers.Trainer):
         rerank_device = ("cuda" if torch.cuda.is_available() else "cpu")
         with torch.autocast(rerank_device, dtype=torch.bfloat16):
             rerank_results_model = reranker.rerank(
-                corpus=eval_dataset.corpus, 
-                queries=eval_dataset.queries, 
-                results=eval_dataset.rerank_results,
-                top_k=self.args.eval_rerank_topk
+                dataset=eval_dataset,
+                top_k=self.args.eval_rerank_topk,
             )
 
         #### Evaluate your retrieval using NDCG@k, MAP@K ...

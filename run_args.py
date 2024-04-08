@@ -92,12 +92,11 @@ class DataArguments:
     """
     Arguments pertaining to what data we are going to input our model for training and eval.
     """
-
-    dataset: Optional[str] = field(
-        default="nomic", 
+    dataset: str = field(
+        default="nomic_supervised", 
         metadata={
             "help": "The name of the dataset to use:",
-            "choices": ["synthetic_words", "nomic", "nomic_unsupervised"]
+            "choices": ["synthetic_words", "nomic_supervised", "nomic_unsupervised"]
         }
     )
     sampling_strategy: str = field(
@@ -139,10 +138,10 @@ class DataArguments:
             "help": "Cluster size for val data",
         }
     )
-    transductive_corpus_size: int = field(
-        default=224,
+    use_prefix: bool = field(
+        default=False,
         metadata={
-            "help": "Corpus input size for transductive encoder",
+            "help": "Whether to add domain-specific prefixes to data"
         }
     )
     def __post_init__(self):
@@ -190,6 +189,12 @@ class TrainingArguments(transformers.TrainingArguments):
     )
     per_device_eval_batch_size: int = field(
         default=64, metadata={"help": "Batch size per GPU/TPU core/CPU for evaluation."}
+    )
+    transductive_corpus_size: int = field(
+        default=224,
+        metadata={
+            "help": "Corpus input size for transductive encoder",
+        }
     )
     evaluation_strategy: str = "steps"
     logging_steps: int = field(

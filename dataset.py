@@ -177,8 +177,6 @@ class BeirDataset(torch.utils.data.Dataset):
     name: str
     corpus: datasets.Dataset
     queries: datasets.Dataset
-    query_embeddings: datasets.Dataset
-    corpus_embeddings: datasets.Dataset
     rerank_results: Dict[str, Dict[str, int]]
     size: int
     column_names: List[str] = ["idx", "query_embedding", "document_embeddings", "negative_document_embeddings"]
@@ -187,15 +185,25 @@ class BeirDataset(torch.utils.data.Dataset):
             self,
             dataset: str,
             embedder_rerank: str,
+            use_prefix: bool = False,
             split: str = "test"
         ):
         self.name = dataset
+        self.use_prefix = use_prefix
         self.corpus, self.queries, self.qrels, self.rerank_results = load_beir(
             dataset=dataset, 
             split=split,
             embedder_rerank=embedder_rerank,
         )
         self.size = len(self.queries)
+    
+    @property
+    def prefix_query(self) -> str:
+        return "search_query: " if self.use_prefix else ""
+    
+    @property
+    def prefix_document(self) -> str:
+        return "search_document: " if self.use_prefix else ""
     
     def __len__(self) -> int:
         return self.size
