@@ -127,7 +127,11 @@ def main():
         training_args.max_eval_batches = 1
 
     beir_dict = {
-        d: BeirDataset(dataset=d, embedder_rerank=model_args.embedder_rerank) 
+        d: BeirDataset(
+            dataset=d, 
+            embedder_rerank=model_args.embedder_rerank,
+            use_prefix=data_args.use_prefix,
+        ) 
         for d in sorted(beir_dataset_names)
     }
     retrieval_datasets = {
@@ -141,11 +145,13 @@ def main():
         train_dataset = NomicUnsupervisedDataset(
             tokenizer=embedder_tokenizer,
             max_seq_length=model_args.max_seq_length,
+            use_prefix=data_args.use_prefix,
         )
         eval_dataset = NomicSupervisedDataset(
             tokenizer=embedder_tokenizer,
             num_hard_negatives=0,
             max_seq_length=model_args.max_seq_length,
+            use_prefix=data_args.use_prefix,
         )
         # eval_dataset = None
         # Need to tokenize and collate for this dataset
@@ -155,6 +161,7 @@ def main():
             tokenizer=embedder_tokenizer,
             num_hard_negatives=data_args.num_hard_negatives,
             max_seq_length=model_args.max_seq_length,
+            use_prefix=data_args.use_prefix,
         )
         # Need to tokenize and collate for this dataset
         collator_cls = TokenizerCollator

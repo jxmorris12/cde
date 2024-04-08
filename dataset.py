@@ -8,6 +8,7 @@ import logging
 import os
 import pathlib
 import random
+import yaml
 
 import beir.datasets.data_loader
 import datasets
@@ -201,9 +202,11 @@ class BeirDataset(torch.utils.data.Dataset):
 
 
 class NomicSupervisedDataset:
-    num_hard_negatives: int
     tokenizer: transformers.AutoTokenizer
-    def __init__(self, tokenizer: transformers.AutoTokenizer, max_seq_length: int, num_hard_negatives: int = 0):
+    max_seq_length: int
+    num_hard_negatives: int
+    use_prefix: bool
+    def __init__(self, tokenizer: transformers.AutoTokenizer, max_seq_length: int, num_hard_negatives: int = 0, use_prefix: bool = False):
         self.dataset = datasets.load_dataset(
             "nomic-ai/nomic_embed_supervised",
             keep_in_memory=False,
@@ -213,6 +216,25 @@ class NomicSupervisedDataset:
         self.tokenizer = tokenizer
         self.max_seq_length = max_seq_length
         self.num_hard_negatives = num_hard_negatives
+
+        current_file_directory = os.path.dirname(os.path.abspath(__file__))
+        yaml_path = os.path.join(current_file_directory, "config", "nomic_supervised.yaml")
+        config_yaml = yaml.safe_load(open(yaml_path, "r"))
+        self.config = { row["name"]: row for row in config_yaml["datasets"] }
+        self.use_prefix = use_prefix
+    
+    def _remap_dataset_name(self, dataset: str) -> str:
+        if dataset == "msmarco_distillation_simlm_rescored_reranked_min15":
+            dataset = "msmarco"
+        return dataset
+
+    def get_query_prefix(self, dataset: str) -> str:
+        dataset = self._remap_dataset_name(dataset)
+        return self.config[dataset]["query_prefix"]
+    
+    def get_document_prefix(self, dataset: str) -> str:
+        dataset = self._remap_dataset_name(dataset)
+        return self.config[dataset]["document_prefix"]
 
     def __hash__(self) -> int:
         return hash(self.__reduce__())
@@ -263,14 +285,25 @@ class NomicSupervisedDataset:
     
     def __getitem__(self, query_id: int) -> Dict[str, torch.Tensor]: 
         ex = self.dataset[query_id]
+        print("Ex:", ex)
         
+        if self.use_prefix:
+            query_prefix = self.get_query_prefix(ex["dataset"])
+            document_prefix = self.get_document_prefix(ex["dataset"])
+            query_prefix = f"{query_prefix}: "
+            document_prefix = f"{document_prefix}: "
+        else:
+            query_prefix = ""
+            document_prefix = ""
+        query = query_prefix + ex["query"]
+        document = document_prefix + ex["document"]
 
         random_idx = random.choice(range(len(self.dataset)))
         return {
             'idx': query_id,
             ######################################################################
-            "query": ex["query"],
-            "document": ex["document"],
+            "query": query,
+            "document": document,
             ######################################################################
             "random_document": self.dataset[random_idx]["document"],
             ######################################################################
@@ -299,15 +332,14 @@ def get_subdomain_idxs_cached(dataset: datasets.Dataset):
 class NomicUnsupervisedDataset(torch.utils.data.Dataset):
     dataset: datasets.Dataset
     tokenizer: transformers.AutoTokenizer
-    def __init__(self, tokenizer: transformers.AutoTokenizer, max_seq_length: int):
+    max_seq_length: int
+    use_prefix: bool
+    def __init__(self, tokenizer: transformers.AutoTokenizer, max_seq_length: int, use_prefix: bool = False):
         print("[NomicUnsupervisedDataset] loading dataset")
         self.dataset = (
             datasets.load_dataset(
                 "nomic-ai/nomic_embed_unsupervised", 
-                # keep_in_memory=False,
-                # num_proc=32,
             )["train"]
-            # datasets_fast_load_from_disk(NOMIC_UNSUPERVISED_DS_PATH)["train"]
         )
         print("[NomicUnsupervisedDataset] loading subdomain idxs")
         self.subdomain_idxs = get_subdomain_idxs_cached(
@@ -316,6 +348,18 @@ class NomicUnsupervisedDataset(torch.utils.data.Dataset):
         assert len(self.dataset) == 238_998_494
         self.tokenizer = tokenizer
         self.max_seq_length = max_seq_length
+
+        current_file_directory = os.path.dirname(os.path.abspath(__file__))
+        yaml_path = os.path.join(current_file_directory, "config", "nomic_unsupervised.yaml")
+        config_yaml = yaml.safe_load(open(yaml_path, "r"))
+        self.config = { row["name"]: row for row in config_yaml["datasets"] }
+        self.use_prefix = use_prefix
+    
+    def get_query_prefix(self, dataset: str) -> str:
+        return self.config[dataset]["query_prefix"]
+    
+    def get_document_prefix(self, dataset: str) -> str:
+        return self.config[dataset]["document_prefix"]
     
     def __hash__(self) -> int:
         return hash(self.__reduce__())
@@ -351,13 +395,24 @@ class NomicUnsupervisedDataset(torch.utils.data.Dataset):
     
     def __getitem__(self, query_id: int) -> Dict[str, torch.Tensor]: 
         ex = self.dataset[query_id]
+        if self.use_prefix:
+            query_prefix = self.get_query_prefix(ex["dataset"])
+            document_prefix = self.get_document_prefix(ex["dataset"])
 
-        random_idx = random.choice(range(len(self.dataset)))
+            query_prefix = f"{query_prefix}: "
+            document_prefix = f"{document_prefix}: "
+        else:
+            query_prefix = ""
+            document_prefix = ""
+        query = query_prefix + ex["query"]
+        document = document_prefix + ex["document"]
+
+        # random_idx = random.choice(range(len(self.dataset)))
         return {
             'idx': query_id,
             ######################################################################
-            'query': ex["query"],
-            'document': ex["document"],
+            'query': query,
+            'document': document,
             ######################################################################
             # 'random_document': self.dataset[random_idx]["document"],
         }
