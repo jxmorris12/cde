@@ -293,7 +293,6 @@ class NomicSupervisedDataset:
     
     def __getitem__(self, query_id: int) -> Dict[str, torch.Tensor]: 
         ex = self.dataset[query_id]
-        print("Ex:", ex)
         
         if self.use_prefix:
             query_prefix = self.get_query_prefix(ex["dataset"])
@@ -305,7 +304,6 @@ class NomicSupervisedDataset:
             document_prefix = ""
         query = query_prefix + ex["query"]
         document = document_prefix + ex["document"]
-
         random_idx = random.choice(range(len(self.dataset)))
         return {
             'idx': query_id,
@@ -380,7 +378,6 @@ class NomicUnsupervisedDataset(torch.utils.data.Dataset):
             self.max_seq_length,
             self.tokenizer.name_or_path,
         )
-    
     @property
     def _fingerprint(self) -> str:
         return self.dataset._fingerprint
@@ -414,7 +411,6 @@ class NomicUnsupervisedDataset(torch.utils.data.Dataset):
             document_prefix = ""
         query = query_prefix + ex["query"]
         document = document_prefix + ex["document"]
-
         # random_idx = random.choice(range(len(self.dataset)))
         return {
             'idx': query_id,

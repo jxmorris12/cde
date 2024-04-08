@@ -45,7 +45,7 @@ class DenseEncoder(torch.nn.Module):
     def __init__(self, model_name_or_path: str, max_seq_length = 128):
         super().__init__()
         self.encoder = transformers.AutoModel.from_pretrained(
-            model_name_or_path)
+            model_name_or_path, torch_dtype=torch.float16)
         if hasattr(self.encoder, "encoder"):
             print("[DE] taking encoder from encoder-decoder")
             self.encoder = self.encoder.encoder
@@ -96,7 +96,7 @@ class DenseEncoder(torch.nn.Module):
                 col=col, 
                 max_length=self.max_length
             ),
-            batch_size=10_000,
+            batch_size=100_000,
             batched=True,
             num_proc=None,
             keep_in_memory=False,
@@ -124,8 +124,6 @@ class DenseEncoder(torch.nn.Module):
         )
         for batch_dict in pbar:
             batch_dict = move_to_cuda(batch_dict)
-
-            # TODO: Support float16 inference.
             outputs = self.encoder(**batch_dict)
             if hasattr(outputs, 'pooler_output'):
                 embeds = outputs.pooler_output
