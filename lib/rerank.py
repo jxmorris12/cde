@@ -11,7 +11,6 @@ import transformers
 
 from mteb import HFDataLoader, RetrievalEvaluator        
 
-from dataset import BeirDataset
 from lib.dist import gather, get_rank, get_world_size
 from lib.embed import embed_with_cache
 from lib.tensor import forward_batched
@@ -43,7 +42,7 @@ class RerankHelper:
         )
     
     @torch.no_grad
-    def rerank(self, dataset: BeirDataset, top_k: int) -> Dict[str, Dict[str, float]]:
+    def rerank(self, dataset, top_k: int) -> Dict[str, Dict[str, float]]:
         corpus: Dict[str, Dict[str, str]] = beir_dataset.corpus
         queries: Dict[str, str] = dataset.queries
         results: Dict[str, Dict[str, float]] = dataset.rerank_results

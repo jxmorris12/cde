@@ -1,5 +1,7 @@
 from typing import Tuple
 
+import gc
+
 import faiss
 import torch
 
@@ -28,6 +30,8 @@ def paired_kmeans_faiss(
     dim = paired_vectors[0].numel()
     # TODO: How to make kmeans use more gpu mem?
     print(f"[paired_kmeans_faiss] initializing Kmeans object (gpu={torch.cuda.is_available()})")
+    gc.collect()
+    torch.cuda.empty_cache()
     kmeans = faiss.Kmeans(
         dim, k,
         niter=max_iters, 
@@ -35,7 +39,7 @@ def paired_kmeans_faiss(
         gpu=torch.cuda.is_available(), 
         verbose=True,
         spherical=True,
-        decode_block_size=2**14,
+        decode_block_size=2**12,
         seed=seed,
     )
     # otherwise the kmeans implementation sub-samples the training set

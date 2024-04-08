@@ -5,7 +5,6 @@ import pytest
 import transformers
 
 from dataset import (
-    BeirDataset,
     NomicSupervisedDataset, 
     NomicUnsupervisedDataset
 )
@@ -38,25 +37,10 @@ def test_one_row_nomic_supervised():
         use_prefix=True,
     )
     ex = ds[0]
-    breakpoint()
-    assert ex["query"].startswith("clustering:")
-    assert ex["document"].startswith("clustering:")
+    assert ex["query"].startswith("search_query: ")
+    assert ex["document"].startswith("search_document: ")
     ds.use_prefix = False
     ex_noprefix = ds[0]
-    assert not ex_noprefix["query"].startswith("clustering:")
-    assert not ex_noprefix["document"].startswith("clustering:")
+    assert not ex_noprefix["query"].startswith("search_query:")
+    assert not ex_noprefix["document"].startswith("search_document:")
 
-
-def test_one_row_beir():
-    ds = BeirDataset(
-        tokenizer=tokenizer,
-        max_seq_length=32,
-        use_prefix=True,
-    )
-    ex = ds[0]
-    assert ex["query"].startswith("clustering:")
-    assert ex["document"].startswith("clustering:")
-    ds.use_prefix = False
-    ex_noprefix = ds[0]
-    assert not ex_noprefix["query"].startswith("clustering:")
-    assert not ex_noprefix["document"].startswith("clustering:")
