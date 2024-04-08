@@ -306,6 +306,15 @@ class CustomTrainer(transformers.Trainer):
             dataset_inputs["attention_mask"] = random_document_inputs["attention_mask"]
         else:
             pass
+    
+        # Sample fewer inputs if batch size is too large
+        transductive_corpus_size = self.args.transductive_corpus_size
+        assert transductive_corpus_size <= batch_size, "cannot provide more transductive inputs than in batch"
+        if transductive_corpus_size < batch_size:
+            C_perm = torch.randperm(batch_size, device=query_inputs["input_ids"].device)
+            C_perm = C_perm[:transductive_corpus_size]
+            dataset_inputs["input_ids"] = dataset_inputs["input_ids"][C_perm]
+            dataset_inputs["attention_mask"] = dataset_inputs["attention_mask"][C_perm]
         
         # Randomly reorder dataset input ids.
         R1 = torch.randperm(dataset_inputs["input_ids"].shape[0])

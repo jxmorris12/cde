@@ -139,6 +139,12 @@ class DataArguments:
             "help": "Cluster size for val data",
         }
     )
+    transductive_corpus_size: int = field(
+        default=224,
+        metadata={
+            "help": "Corpus input size for transductive encoder",
+        }
+    )
     def __post_init__(self):
         pass
 

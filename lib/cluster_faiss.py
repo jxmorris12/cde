@@ -8,8 +8,8 @@ def paired_kmeans_faiss(
     q: torch.Tensor,
     X: torch.Tensor, 
     k: int,
-    max_iters: int = 30, 
-    n_redo: int = 2,
+    max_iters: int = 100, 
+    n_redo: int = 3,
     seed: int = 42
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     # https://github.com/facebookresearch/faiss/blob/dafdff110489db7587b169a0afee8470f220d295/faiss/python/extra_wrappers.py#L437
@@ -35,12 +35,12 @@ def paired_kmeans_faiss(
         gpu=torch.cuda.is_available(), 
         verbose=True,
         spherical=True,
-        decode_block_size=2**16,
+        decode_block_size=2**14,
         seed=seed,
     )
     # otherwise the kmeans implementation sub-samples the training set
     # to <= 256 points per centroid
-    kmeans.max_points_per_centroid = 512
+    # kmeans.max_points_per_centroid = 512
     print("[paired_kmeans_faiss] calling kmeans.train()")
     kmeans.train(paired_vectors)
 

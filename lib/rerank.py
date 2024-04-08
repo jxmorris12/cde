@@ -34,7 +34,7 @@ class RerankHelper:
         # Subsample queries from large sets so that we can evaluate
         # in a reasonable amount of time. Also remember this will be
         # distributed across GPUs. So it's not that bad.
-        self.max_reranking_queries = 32 # 256
+        self.max_reranking_queries = 128
     
     def _forward_batched(self, **kwargs) -> torch.Tensor:
         return forward_batched(

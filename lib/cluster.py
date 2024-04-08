@@ -90,7 +90,7 @@ def embed_for_clustering(
             dataset_fingerprint + "_queries", 
             dataset,
             "query",
-            save_to_disk=False,
+            save_to_disk=False, # TMP
             model=model,
         )
         print("[embed_with_cache] halving query embeddings")
@@ -372,9 +372,9 @@ def cluster_subdomains_uncached(
     offset = 0
     final_assignments = collections.defaultdict(list)
     
-    # subdomains_smallest_first = sorted(subdomains.items(), key=lambda x: len(x[1]))
-    subdomains_largest_first = sorted(subdomains.items(), key=lambda x: -len(x[1]))
-    for j, (_, data_idxs) in enumerate(subdomains_largest_first):
+    subdomains_smallest_first = sorted(subdomains.items(), key=lambda x: len(x[1]))
+    # subdomains_largest_first = sorted(subdomains.items(), key=lambda x: -len(x[1]))
+    for j, (_, data_idxs) in enumerate(subdomains_smallest_first):
         perc = (j + 1) / len(subdomains) * 100
         print(f"({j + 1} / {len(subdomains)} -- {perc:.1f}%) selecting {len(data_idxs)} indices for clustering")
         mini_dataset = dataset.dataset.select(data_idxs, keep_in_memory=True)

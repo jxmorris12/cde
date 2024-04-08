@@ -76,12 +76,12 @@ def main():
     # torch._dynamo.config.force_parameter_static_shapes = False
     torch._dynamo.config.cache_size_limit = 10_000
 
-    datasets.logging.set_verbosity_info()
     os.environ["WANDB__SERVICE_WAIT"] = "30"
 
     parser = transformers.HfArgumentParser((ModelArguments, DataArguments, TrainingArguments))
     model_args, data_args, training_args = parser.parse_args_into_dataclasses()
     transformers.set_seed(training_args.seed)
+    datasets.logging.set_verbosity_error()
     logging.basicConfig(
         format='%(asctime)s - %(message)s',
         datefmt='%Y-%m-%d %H:%M:%S',
@@ -122,6 +122,7 @@ def main():
         # 'climate-fever', # pyarrow.lib.ArrowIndexError: array slice would exceed array length
     ]
     if training_args.tiny_debug: 
+        datasets.logging.set_verbosity_info()
         beir_dataset_names = [ 'quora' ]
         training_args.max_eval_batches = 1
 
