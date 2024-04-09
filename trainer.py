@@ -80,7 +80,7 @@ class CustomTrainer(transformers.Trainer):
             print(f"[rank {get_rank()}] initializing GradCache with chunk_size={self.args.max_batch_size_fits_in_memory}.")
             self.gc = GradCache(
                 model=self.model,
-                max_batch_size=self.args.max_batch_size_fits_in_memory,
+                chunk_sizes=self.args.max_batch_size_fits_in_memory,
                 loss_fn=functools.partial(self._contrastive_loss, return_scores=False), 
                 bf16=self.args.bf16,
             )
@@ -223,7 +223,6 @@ class CustomTrainer(transformers.Trainer):
         # 
         scores *= self.model.temp
 
-        print("CONTRASTIVE LOSS SHAPES:", scores.shape, one_hot_labels.shape)
         assert scores.shape == one_hot_labels.shape
         labels = one_hot_labels / one_hot_labels.sum(dim=1, keepdim=True)
 
@@ -381,7 +380,6 @@ class CustomTrainer(transformers.Trainer):
             backward_fn = (
                 self.accelerator.backward if self.model.training else empty_backward
             )
-            print("calling gc", query_inputs["input_ids"].shape, "//", query_inputs["dataset_input_ids"].shape, "//", document_inputs["input_ids"].shape)
             loss = self.gc(
                 query_inputs, 
                 document_inputs, 

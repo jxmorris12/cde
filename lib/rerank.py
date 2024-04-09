@@ -43,7 +43,7 @@ class RerankHelper:
     
     @torch.no_grad
     def rerank(self, dataset, top_k: int) -> Dict[str, Dict[str, float]]:
-        corpus: Dict[str, Dict[str, str]] = beir_dataset.corpus
+        corpus: Dict[str, Dict[str, str]] = dataset.corpus
         queries: Dict[str, str] = dataset.queries
         results: Dict[str, Dict[str, float]] = dataset.rerank_results
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
