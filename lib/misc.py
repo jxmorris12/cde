@@ -19,6 +19,7 @@ import tqdm
 import transformers
 
 from .dist import get_num_proc, get_rank
+from lib.nomic_bert import NomicBertModel
 
 
 def get_tti_cache_dir() -> str:
@@ -382,10 +383,6 @@ class TensorRunningAverages:
 
 def load_embedder_and_tokenizer(name: str) -> Tuple:
     if name.startswith("nomic") or (name == "bert-base-uncased"):
-        # Load NomicBert from contrastors repo
-        import sys
-        sys.path.append("/home/paperspace/contrastors-dev/src")
-        from contrastors.models.encoder import NomicBertModel
         model = NomicBertModel.from_pretrained(
             name, add_pooling_layer=False
         )

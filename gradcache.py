@@ -496,7 +496,7 @@ class GradCache:
             if len(second_stage_input_chunks) > min_tqdm_inputs:
                 second_stage_input_chunks_tqdm = tqdm_if_main_worker(
                     second_stage_input_chunks,
-                    desc="computing second stage outputs",
+                    desc="computing second stage gradients",
                     leave=False,
                     colour="#807182",
                 )
@@ -528,8 +528,9 @@ class GradCache:
         if len(first_stage_input_chunks) > min_tqdm_inputs:
             first_stage_input_chunks_tqdm = tqdm_if_main_worker(
                 first_stage_input_chunks,
-                desc="computing first stage outputs",
+                desc="computing first stage gradients",
                 colour="#C7D3BF",
+                leave=False
             )
         for x, state, gradient, sync_context in zip(
             first_stage_input_chunks, first_stage_rnd_states, first_stage_gradients, sync_contexts
