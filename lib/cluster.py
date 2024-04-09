@@ -90,8 +90,8 @@ def embed_for_clustering(
             dataset_fingerprint + "_queries", 
             dataset,
             "query",
-            save_to_disk=False, # TMP
-            model=model,
+            save_to_disk=False,
+            batch_size=8192,
         )
         print("[embed_with_cache] halving query embeddings")
         query_embeddings = query_embeddings["embeds"].half()
@@ -106,7 +106,7 @@ def embed_for_clustering(
             dataset,
             "document",
             save_to_disk=False,
-            model=model,
+            batch_size=8192,
         )
         corpus_embeddings = corpus_embeddings["embeds"].half()
         print("[embed_with_cache] got corpus embeddings, remapping")
@@ -311,7 +311,7 @@ def cluster_dataset(
         # print("[cluster_dataset] opened cached cluster ... ", clustering_hash)
         return result
     else:
-        MAX_DATASET_LEN = 10_000_000
+        MAX_DATASET_LEN = 100_000_000
         if len(dataset) < MAX_DATASET_LEN:
             result = cluster_dataset_uncached(
                 dataset=dataset,

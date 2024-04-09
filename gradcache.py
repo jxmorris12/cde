@@ -7,8 +7,10 @@ from typing import Any, Callable, List, Union
 
 import torch
 from torch import Tensor, nn
-from torch.cuda.amp import GradScaler, autocast
+from torch.cuda.amp import autocast
 from torch.utils.checkpoint import get_device_states, set_device_states
+
+from lib.misc import tqdm_if_main_worker
 
 
 class RandContext:
@@ -378,9 +380,32 @@ class GradCache:
         :param loss_kwargs: Additional keyword arguments to the loss function.
         :return: The current's loss.
         """
-        model_inputs = [
+        min_tqdm_inputs = 8
+        # TODO: Pass these keys to constructor as
+        # `first_stage_data_keys` and `second_stage_data_keys` or
+        # something like that.
+        first_stage_model_inputs = [
+            { 
+                "dataset_input_ids": x["dataset_input_ids"], 
+                "dataset_attention_mask": x["dataset_attention_mask"]
+            }
+            for x in model_inputs
+        ]
+        first_stage_model_inputs = [
             self.split_inputs(x, chunk_size)
-            for x, chunk_size in zip(model_inputs, self.chunk_sizes)
+            for x, chunk_size in zip(first_stage_model_inputs, self.chunk_sizes)
+        ]
+
+        second_stage_model_inputs = [
+            { 
+                "input_ids": x["input_ids"], 
+                "attention_mask": x["attention_mask"]
+            }
+            for x in model_inputs
+        ]
+        second_stage_model_inputs = [
+            self.split_inputs(x, chunk_size)
+            for x, chunk_size in zip(second_stage_model_inputs, self.chunk_sizes)
         ] # List of dicts where sub-batch size in each dict is at most chunk size
 
         ##
@@ -389,9 +414,19 @@ class GradCache:
         first_stage_embedding = []
         first_stage_rnd_states = []
         first_stage_model = self.model_objs[0] # TODO: Generalize this
-        first_stage_input_chunks = model_inputs[0]
+        first_stage_input_chunks = first_stage_model_inputs[0]
+
+        first_stage_input_chunks_tqdm = first_stage_input_chunks
+        if len(first_stage_input_chunks) > min_tqdm_inputs:
+            first_stage_input_chunks_tqdm = tqdm_if_main_worker(
+                first_stage_input_chunks_tqdm,
+                desc="computing first stage outputs",
+                leave=False,
+                colour="#F7B1AB"
+            )
+
         with torch.no_grad():
-            for x in first_stage_input_chunks:
+            for x in first_stage_input_chunks_tqdm:
                 first_stage_rnd_states.append(RandContext(*self.get_input_tensors(x)))
                 with autocast() if self.bf16 else nullcontext():
                     y = first_stage_model.forward_first_stage(
@@ -407,11 +442,18 @@ class GradCache:
         # concatenate all sub-batch representations
         output_embeddings = []
         second_stage_rnd_states = []
-        for model, second_stage_input_chunks in zip(self.model_objs, model_inputs):
+        for model, second_stage_input_chunks in zip(self.model_objs, second_stage_model_inputs):
+            second_stage_input_chunks_tqdm = second_stage_input_chunks
+            if len(second_stage_input_chunks) > min_tqdm_inputs:
+                second_stage_input_chunks_tqdm = tqdm_if_main_worker(
+                    second_stage_input_chunks,
+                    desc="computing second stage outputs",
+                    leave=False,
+                )
             model_reps = []
             rnd_states = []
             with torch.no_grad():
-                for x in second_stage_input_chunks:
+                for x in second_stage_input_chunks_tqdm:
                     rnd_states.append(RandContext(*self.get_input_tensors(x)))
                     with autocast() if self.bf16 else nullcontext():
                         y = model.forward_second_stage(
@@ -423,11 +465,10 @@ class GradCache:
             # concatenate all sub-batch representations
             output_embeddings.append(torch.cat(model_reps, dim=0))
             second_stage_rnd_states.append(rnd_states)
-
         output_gradient_cache, loss = self.build_cache(backward_fn, *output_embeddings, **loss_kwargs)
         if not run_backward:
             # We also support a mode now where we don't actually compute gradients, we just
-            # compute loss in this multi-stage process, which is used for fair evaluation.
+            # compute loss in this multi-stage process, which is used for consistent evaluation.
             return loss
 
         second_stage_gradients = [
@@ -435,8 +476,6 @@ class GradCache:
             zip(output_gradient_cache, self.chunk_sizes)
         ]
         ################################################
-        # 
-        # gc.collect()
         ###
         ### Compute gradients wrt second stage
         ###
@@ -444,22 +483,30 @@ class GradCache:
             model, nn.parallel.DistributedDataParallel)
         if no_sync_except_last and model_is_ddp:
             sync_contexts = [
-                model.no_sync for _ in range(len(model_inputs) - 1)
+                model.no_sync for _ in range(len(second_stage_model_inputs) - 1)
             ] + [nullcontext]
         else:
-            sync_contexts = [nullcontext for _ in range(len(model_inputs))]
+            sync_contexts = [nullcontext for _ in range(len(second_stage_model_inputs))]
 
         first_stage_embedding = first_stage_embedding.detach().requires_grad_()
-        for model, x, random_states, cached_gradients in zip(
-            self.model_objs, model_inputs, second_stage_rnd_states, second_stage_gradients
+        for model, second_stage_input_chunks, random_states, cached_gradients in zip(
+            self.model_objs, second_stage_model_inputs, second_stage_rnd_states, second_stage_gradients
         ):
-            for z, state, gradient, sync_context in zip(
-                x, random_states, cached_gradients, sync_contexts
+            second_stage_input_chunks_tqdm = second_stage_input_chunks
+            if len(second_stage_input_chunks) > min_tqdm_inputs:
+                second_stage_input_chunks_tqdm = tqdm_if_main_worker(
+                    second_stage_input_chunks,
+                    desc="computing second stage outputs",
+                    leave=False,
+                    colour="#807182",
+                )
+            for x, state, gradient, sync_context in zip(
+                second_stage_input_chunks_tqdm, random_states, cached_gradients, sync_contexts
             ):
                 with state, sync_context(), (autocast() if self.bf16 else nullcontext()):
                     y = model.forward_second_stage(
-                        input_ids=z["input_ids"],
-                        attention_mask=z["attention_mask"],
+                        input_ids=x["input_ids"],
+                        attention_mask=x["attention_mask"],
                         dataset_embeddings=first_stage_embedding,
                     )
                 reps = self.get_reps(y)
@@ -469,7 +516,21 @@ class GradCache:
         ###
         ### Compute gradients wrt first stage
         ### 
+        if no_sync_except_last and model_is_ddp:
+            sync_contexts = [
+                model.no_sync for _ in range(len(first_stage_input_chunks) - 1)
+            ] + [nullcontext]
+        else:
+            sync_contexts = [nullcontext for _ in range(len(first_stage_input_chunks))]
+        
         first_stage_gradients = first_stage_embedding.split(self.chunk_sizes[0])
+        first_stage_input_chunks_tqdm = first_stage_input_chunks
+        if len(first_stage_input_chunks) > min_tqdm_inputs:
+            first_stage_input_chunks_tqdm = tqdm_if_main_worker(
+                first_stage_input_chunks,
+                desc="computing first stage outputs",
+                colour="#C7D3BF",
+            )
         for x, state, gradient, sync_context in zip(
             first_stage_input_chunks, first_stage_rnd_states, first_stage_gradients, sync_contexts
         ):

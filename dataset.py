@@ -31,9 +31,6 @@ from lib import (
 )
 
 
-os.environ['TOKENIZERS_PARALLELISM'] = '0'
-
-
 def load_msmarco_hard_negatives_uncached() -> Dict[str, Dict[str, Any]]:
     """Loads hard negative passage for MSMARCO.
 
@@ -234,6 +231,24 @@ class NomicSupervisedDataset:
     def _remap_dataset_name(self, dataset: str) -> str:
         if dataset == "msmarco_distillation_simlm_rescored_reranked_min15":
             dataset = "msmarco"
+        elif dataset == "medi_supernli_sampled":
+            dataset = "medi_supernli"
+        elif dataset == "medi_sts_wiki_rephrasal":
+            dataset = "medi_wiki"
+        elif dataset == "medi_sts_stackexchange_dupe":
+            dataset = "medi_stackexchange"
+        elif dataset == "medi_sts_flickr_sampled":
+            dataset = "medi_flickr"
+        elif dataset == "fever_hn_mine":
+            dataset = "fever"
+        elif dataset == "reddit_triples":
+            dataset = "reddit"
+        elif dataset == "hotpotqa_hn_mine_shuffled":
+            dataset = "hotpot"
+        elif dataset == "nq_cocondensor_hn_mine_reranked_min15":
+            dataset = "nq_triples"
+        elif dataset == "nli_simcse_50negs_fixed":
+            dataset = "nli_triplets"
         return dataset
 
     def get_query_prefix(self, dataset: str) -> str:

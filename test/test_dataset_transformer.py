@@ -17,7 +17,7 @@ def test_dataset_transformer_invariance_synthetic():
     model, _ = load_embedder_and_tokenizer("nomic-ai/nomic-bert-2048")
     embedder, _ = load_embedder_and_tokenizer("nomic-ai/nomic-bert-2048")
     backbone, _ = load_embedder_and_tokenizer("nomic-ai/nomic-bert-2048")
-    model_config.corpus_size = 2
+    model_config.transductive_corpus_size = 2
     model_config.limit_layers = 1
     dt = DatasetTransformer(
         config=model_config,
@@ -74,7 +74,7 @@ def test_dataset_transformer_invariance_real():
     embedder, _ = load_embedder_and_tokenizer(mn)
     backbone, _ = load_embedder_and_tokenizer(mn)
     tokenizer = transformers.AutoTokenizer.from_pretrained(mn)
-    model_config.corpus_size = 4
+    model_config.transductive_corpus_size = 4
     dt = DatasetTransformer(
         config=model_config,
         embedder=model,

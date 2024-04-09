@@ -195,7 +195,7 @@ def main():
         "domain": eval_sampler_fn(sampling_strategy="domain"),
         "random": eval_sampler_fn(sampling_strategy="random"),
     }
-    model_args.corpus_size = training_args.per_device_train_batch_size
+    model_args.transductive_corpus_size = training_args.transductive_corpus_size
     model_config = ModelConfig(**vars(model_args))
     model_cls = get_model_class(model_args.architecture)
     model = model_cls(

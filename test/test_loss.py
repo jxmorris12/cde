@@ -64,6 +64,8 @@ def test_loss_gradcache():
     tiny_config.limit_layers = None
     tiny_config.contrastive_temp = 20.0
     tiny_config.disable_dropout = True
+    transductive_corpus_size = 4
+    tiny_config.transductive_corpus_size = transductive_corpus_size
     model = DatasetTransformer(
          config=tiny_config,
          embedder=tiny_model,
@@ -84,7 +86,71 @@ def test_loss_gradcache():
         model=model,
         chunk_sizes=2,
         loss_fn=functools.partial(contrastive_loss, model),
+    )
+    dataloader = torch.utils.data.DataLoader(
+        dataset,
+        batch_size=8,
+        collate_fn=data_collator,
+        num_workers=0,
+        pin_memory=True,
+    )
+    dataloader_iter = iter(dataloader)
+    inputs = next(dataloader_iter)
+    query_inputs = inputs_for_key(inputs, key="query")
+    document_inputs = inputs_for_key(inputs, key="document")
+    ##########################################################################################
+    C = transductive_corpus_size
+    query_inputs["dataset_input_ids"] = document_inputs["input_ids"][:C]
+    query_inputs["dataset_attention_mask"] = document_inputs["attention_mask"][:C]
+    document_inputs["dataset_input_ids"] = document_inputs["input_ids"][:C]
+    document_inputs["dataset_attention_mask"] = document_inputs["attention_mask"][:C]
+
+    document_unique_ids = document_inputs["input_ids"].sum(dim=1)
+    one_hot_labels = (
+        document_unique_ids[:, None] == document_unique_ids[None, :])
+
+    loss = gc(
+        query_inputs, 
+        document_inputs, 
+        one_hot_labels=one_hot_labels,
+        no_sync_except_last=False,
         backward_fn=(lambda t: t.backward()),
+        run_backward=True,
+    )
+    assert loss > 0.0
+
+
+def test_loss_gradcache__transductive():
+    tiny_model_name = 'distilbert-base-uncased'
+    tiny_model = transformers.AutoModel.from_pretrained(
+        tiny_model_name)
+    tiny_tokenizer = transformers.AutoTokenizer.from_pretrained(
+        tiny_model_name
+    )
+    tiny_config = tiny_model.config
+    tiny_config.limit_layers = None
+    tiny_config.contrastive_temp = 20.0
+    tiny_config.disable_dropout = True
+    model = DatasetTransformer(
+         config=tiny_config,
+         embedder=tiny_model,
+         dataset_backbone=tiny_model,
+    )
+    dataset = NomicSupervisedDataset(
+        tokenizer=tiny_tokenizer,
+        num_hard_negatives=0,
+        max_seq_length=16,
+    )
+    data_collator = TokenizerCollator(
+        tokenizer=tiny_tokenizer,
+        padding='longest',
+        return_tensors='pt',
+        max_length=16,
+    )
+    gc = GradCache(
+        model=model,
+        chunk_sizes=2,
+        loss_fn=functools.partial(contrastive_loss, model),
     )
     dataloader = torch.utils.data.DataLoader(
         dataset,
@@ -111,6 +177,8 @@ def test_loss_gradcache():
         query_inputs, 
         document_inputs, 
         one_hot_labels=one_hot_labels,
-        no_sync_except_last=False
+        no_sync_except_last=False,
+        backward_fn=(lambda t: t.backward()),
+        run_backward=True,
     )
     assert loss > 0.0

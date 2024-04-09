@@ -8,12 +8,12 @@ import numpy as np
 import torch
 import transformers
 
-from .misc import (
+from lib.misc import (
     datasets_fast_load_from_disk, 
     get_tti_cache_dir,
     tqdm_if_main_worker,
 )
-from .tensor import (
+from lib.tensor import (
     mean_pool,
 )
 
@@ -44,31 +44,20 @@ def move_to_cuda(sample):
 class DenseEncoder(torch.nn.Module):
     def __init__(self, model_name_or_path: str, max_seq_length = 128):
         super().__init__()
-        self.encoder = transformers.AutoModel.from_pretrained(
-            model_name_or_path, torch_dtype=torch.float16)
-        if hasattr(self.encoder, "encoder"):
-            print("[DE] taking encoder from encoder-decoder")
-            self.encoder = self.encoder.encoder
+        self.encoder = None
+        self.model_name_or_path = model_name_or_path
         self.tokenizer = transformers.AutoTokenizer.from_pretrained(
             model_name_or_path)
         self.gpu_count = torch.cuda.device_count()
 
-        self.encoder.eval()
-
-        if self.gpu_count > 0:
-            self.encoder.cuda()
-
-        if self.gpu_count > 1:
-            self.encoder = torch.nn.DataParallel(self.encoder)
-            print(f"[DE] Wrapped DenseEncoder in {self.gpu_count} GPUs")
-        
         self.max_length = max_seq_length
+        self._model_is_on_device = False
 
     def tokenize_transform(
             self,
             examples: Dict[str, List],
             col: str,
-            max_length: int): #-> BatchEncoding:
+            max_length: int):
         texts = examples[col]
         batch_dict = self.tokenizer(
             texts,
@@ -77,6 +66,21 @@ class DenseEncoder(torch.nn.Module):
             truncation=True
         )
         return batch_dict
+
+    def _put_model_on_device(self) -> None:
+        self.encoder = transformers.AutoModel.from_pretrained(
+            self.model_name_or_path, torch_dtype=torch.float16)
+        self.encoder.eval()
+        if hasattr(self.encoder, "encoder"):
+            print("[DE] taking encoder from encoder-decoder")
+            self.encoder = self.encoder.encoder
+        if self.gpu_count > 0:
+            self.encoder.cuda()
+
+        if self.gpu_count > 1:
+            self.encoder = torch.nn.DataParallel(self.encoder)
+            print(f"[DE] Wrapped DenseEncoder in {self.gpu_count} GPUs")
+        self._model_is_on_device = True
 
     @torch.no_grad()
     def encode(self, dataset: datasets.Dataset, col: str, batch_size: int) -> np.ndarray:
@@ -88,21 +92,44 @@ class DenseEncoder(torch.nn.Module):
         Returns:
             `List[np.ndarray]` or `List[tensor]`: List of embeddings for the given sentences
         """
-        os.environ["TOKENIZERS_PARALLELISM"] = "1"
-        os.environ["RAYON_RS_NUM_CPUS"] = str(len(os.sched_getaffinity(0)))
-        dataset = dataset.map(
-            functools.partial(
-                self.tokenize_transform, 
-                col=col, 
-                max_length=self.max_length
-            ),
-            batch_size=100_000,
-            batched=True,
-            num_proc=None,
-            keep_in_memory=False,
-            remove_columns=[col],
-            desc=f"Tokenizing {col}"
-        )
+
+        use_threads = False
+        num_cpus = len(os.sched_getaffinity(0))
+        if use_threads:
+            os.environ["RAYON_NUM_THREADS"] = str(num_cpus)
+            os.environ["RAYON_RS_NUM_THREADS"] = str(num_cpus)
+            os.environ["TOKENIZERS_PARALLELISM"] = "1"
+            dataset = dataset.map(
+                functools.partial(
+                    self.tokenize_transform, 
+                    col=col, 
+                    max_length=self.max_length
+                ),
+                batch_size=100_000,
+                batched=True,
+                keep_in_memory=False,
+                remove_columns=[col],
+                desc=f"Tokenizing {col}"
+            )
+        else:
+            os.environ["TOKENIZERS_PARALLELISM"] = "0"
+            print(f"[embed_with_cache] tokenizing with {num_cpus} processes")
+            dataset = dataset.map(
+                functools.partial(
+                    self.tokenize_transform, 
+                    col=col, 
+                    max_length=self.max_length
+                ),
+                batch_size=10_000,
+                batched=True,
+                num_proc=num_cpus,
+                keep_in_memory=False,
+                remove_columns=[col],
+                desc=f"Tokenizing {col}"
+            )
+
+        if not self._model_is_on_device:
+            self._put_model_on_device()
 
         data_collator = transformers.DataCollatorWithPadding(self.tokenizer, pad_to_multiple_of=8)
         num_workers = max(1, self.gpu_count)
@@ -146,7 +173,7 @@ def embed_with_cache(
         d: datasets.Dataset,              
         col: str, 
         save_to_disk: bool = True,
-        model=None, batch_size: int = 4096
+        batch_size: int = 4096
     ) -> datasets.Dataset:
     embedder_cache_path = model_name.replace('/', '__')
     cache_folder = os.path.join(get_tti_cache_dir(), 'corpus_embeddings', embedder_cache_path)
@@ -164,9 +191,7 @@ def embed_with_cache(
     d_subset = d.remove_columns(all_other_colums)
 
     print(f"[embed_with_cache] encoding {len(d)} with batch size {batch_size}")
-    if model is None:
-        model = DenseEncoder(model_name, max_seq_length=128)
-
+    model = DenseEncoder(model_name, max_seq_length=128)
     embeddings = model.encode(d_subset, col, batch_size=batch_size)
 
     print(f"[embed_with_cache] creating datasets")

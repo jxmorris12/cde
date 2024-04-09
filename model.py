@@ -165,8 +165,8 @@ class DatasetTransformer(transformers.PreTrainedModel):
             rotary_disabled = 0
             for module in self.backbone.modules():
                 if hasattr(module, "rotary_emb_dim"):
-                    module.rotary_start_pos = config.corpus_size
-            print(f"modified {rotary_disabled} rotary modules – set rotary_start_pos to {config.corpus_size}")
+                    module.rotary_start_pos = config.transductive_corpus_size
+            print(f"modified {rotary_disabled} rotary modules – set rotary_start_pos to {config.transductive_corpus_size}")
 
         # TODO: Argparse, ablate, and potentially remove the soft prompt portion
         # of this model.

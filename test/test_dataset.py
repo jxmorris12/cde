@@ -1,9 +1,12 @@
 import sys
 sys.path.append('/home/paperspace/tti3')
 
+import random
 import re
 
 import pytest
+import random
+import tqdm
 import transformers
 
 from dataset import (
@@ -37,9 +40,11 @@ def test_one_row_nomic_unsupervised(tokenizer):
         max_seq_length=16,
         use_prefix=True,
     )
-    pattern = r'^[a-zA-Z_]+: .+$'
-    for i in range(64):
-        ex = ds[i]
+    random.seed(42)
+    pattern = r'^[a-zA-Z_]+: '
+    for _ in tqdm.trange(65536*2):
+        j = random.randint(0, len(ds) - 1)
+        ex = ds[j]
         assert re.match(pattern, ex["query"])
         assert re.match(pattern, ex["document"])
 
@@ -66,9 +71,11 @@ def test_multirow_nomic_supervised(tokenizer):
         max_seq_length=64,
         use_prefix=True,
     )
-    pattern = r'^[a-zA-Z_]+: .+$'
-    for i in range(128):
-        ex = ds[i]
+    random.seed(42)
+    pattern = r'^[a-zA-Z_]+: '
+    for _ in tqdm.trange(65536*2):
+        j = random.randint(0, len(ds) - 1)
+        ex = ds[j]
         assert re.match(pattern, ex["query"])
         assert re.match(pattern, ex["document"])
 

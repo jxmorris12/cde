@@ -90,7 +90,7 @@ def main():
     retrieval_datasets = {
         **{f"BeIR/{k}": v for k,v in beir_dict.items()}
     }
-    model_args.corpus_size = training_args.per_device_train_batch_size
+    model_args.transductive_corpus_size = training_args.transductive_corpus_size
     model_config = ModelConfig(**vars(model_args))
     model_cls = get_model_class(model_args.architecture)
     model = model_cls(
