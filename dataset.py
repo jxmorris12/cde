@@ -362,6 +362,7 @@ class NomicUnsupervisedDataset(torch.utils.data.Dataset):
         self.dataset = (
             datasets.load_dataset(
                 "nomic-ai/nomic_embed_unsupervised", 
+                num_proc=64,
             )["train"]
         )
         print("[NomicUnsupervisedDataset] loading subdomain idxs")

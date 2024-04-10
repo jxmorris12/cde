@@ -1,5 +1,6 @@
 import sys
 sys.path.append('/home/paperspace/tti3')
+sys.path.append('/home/sasha/tti3')
 
 from typing import Dict
 

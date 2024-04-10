@@ -323,8 +323,8 @@ class BiEncoder(transformers.PreTrainedModel):
             self, 
             input_ids: torch.Tensor,
             attention_mask: torch.Tensor,
-            dataset_input_ids: torch.Tensor,
-            dataset_attention_mask: torch.Tensor,
+            dataset_input_ids: Optional[torch.Tensor] = None,
+            dataset_attention_mask: Optional[torch.Tensor] = None,
         ) -> torch.Tensor:
         """
         query_embedding (float torch.Tensor) - shape (batch_size, embedding_dim)

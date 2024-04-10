@@ -2,6 +2,7 @@ accelerate
 beir
 bm25_pt
 datasets
+mteb
 optimum
 transformers
 wandb

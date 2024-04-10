@@ -9,8 +9,6 @@ import torch
 import tqdm
 import transformers
 
-from mteb import HFDataLoader, RetrievalEvaluator        
-
 from lib.dist import gather, get_rank, get_world_size
 from lib.embed import embed_with_cache
 from lib.tensor import forward_batched
@@ -195,6 +193,7 @@ def get_reranking_results(data_path: str, split: str, model_name: str) -> Dict:
     """Reranks dataset at `data_path` using model with name `model_name`."""
     # Reranking adapted from here.
     # https://github.com/embeddings-benchmark/mteb/blob/0c67d969b8e34ccf94286c3e2758c7a8d0943e81/mteb/evaluation/evaluators/RetrievalEvaluator.py#L189
+    from mteb import HFDataLoader, RetrievalEvaluator
 
     print("[get_reranking_results Loading:", data_path)
     corpus, queries, _qrels = HFDataLoader(data_folder=data_path, streaming=False, keep_in_memory=False).load(split=split)

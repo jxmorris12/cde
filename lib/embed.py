@@ -93,7 +93,7 @@ class DenseEncoder(torch.nn.Module):
             `List[np.ndarray]` or `List[tensor]`: List of embeddings for the given sentences
         """
 
-        use_threads = False
+        use_threads = True
         num_cpus = len(os.sched_getaffinity(0))
         if use_threads:
             os.environ["RAYON_NUM_THREADS"] = str(num_cpus)
@@ -122,7 +122,7 @@ class DenseEncoder(torch.nn.Module):
                 ),
                 batch_size=10_000,
                 batched=True,
-                num_proc=num_cpus,
+                num_proc=min(64, num_cpus),
                 keep_in_memory=False,
                 remove_columns=[col],
                 desc=f"Tokenizing {col}"
