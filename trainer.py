@@ -1,6 +1,7 @@
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import functools
+import gc
 import math
 import os
 import time
@@ -221,6 +222,7 @@ class CustomTrainer(transformers.Trainer):
                 self, 
                 e1: torch.Tensor, e2: torch.Tensor, 
                 one_hot_labels: torch.Tensor,
+                duplicate_labels: torch.Tensor,
                 return_scores: bool = True
             ) -> Tuple[torch.Tensor, torch.Tensor]:
         e1 = e1 / e1.norm(p=2, dim=1, keepdim=True) # Query
@@ -234,12 +236,12 @@ class CustomTrainer(transformers.Trainer):
         # better optimization (Thakur et al., 2021)."
         # 
         scores *= self.model.temp
-
         assert scores.shape == one_hot_labels.shape
         labels = one_hot_labels / one_hot_labels.sum(dim=1, keepdim=True)
 
+        logits = scores - (duplicate_labels.float() * 10**10)
         loss = torch.nn.functional.cross_entropy(
-            scores, labels, label_smoothing=0.0
+            logits, labels, label_smoothing=0.0
         )
         if (loss.isnan()):
             raise RuntimeError("Loss is nan!")
@@ -352,24 +354,27 @@ class CustomTrainer(transformers.Trainer):
 
         # Create labels based on document IDs.
         document_unique_ids = document_inputs["input_ids"].sum(dim=1)
+        idx = inputs["idx"]
+        one_hot_labels = (idx[:, None] == idx[None, :]).float()
         if self.args.automatically_deduplicate_documents:
-            one_hot_labels = (
+            smart_labels = (
                 document_unique_ids[:, None] == document_unique_ids[None, :])
         else:
-            idx = inputs["idx"]
-            one_hot_labels = (idx[:, None] == idx[None, :]).float()
+            smart_labels = one_hot_labels.clone()
         
         # Aggregate labels for duplicate queries.
         query_unique_ids = query_inputs["input_ids"].sum(dim=1)
         if self.args.automatically_deduplicate_queries:
-            one_hot_labels = (
-                (query_unique_ids[:, None] == query_unique_ids[None, :]).float() @ one_hot_labels.float())
-            one_hot_labels = one_hot_labels.bool()
+            smart_labels = (
+                (query_unique_ids[:, None] == query_unique_ids[None, :]).float() @ smart_labels.float())
+            smart_labels = smart_labels.bool()
 
         num_unique_documents = document_unique_ids.unique().numel()
         num_collisions_documents = len(document_unique_ids) - num_unique_documents
         num_unique_queries = query_unique_ids.unique().numel()
-        num_collisions_queries = len(one_hot_labels) - num_unique_queries
+        num_collisions_queries = len(smart_labels) - num_unique_queries
+
+        duplicate_labels = (smart_labels.long() - one_hot_labels.long())
 
         # Dataset input stats
         ds_input_document_unique_tokens = document_inputs["dataset_input_ids"].unique().numel()
@@ -395,15 +400,14 @@ class CustomTrainer(transformers.Trainer):
             loss = self.gc(
                 query_inputs, 
                 document_inputs, 
-                one_hot_labels=one_hot_labels,
                 no_sync_except_last=(get_world_size() > 1),
                 backward_fn=backward_fn,
                 run_backward=self.model.training,
+                ################################
+                one_hot_labels=one_hot_labels,
+                duplicate_labels=duplicate_labels,
             )
             
-            # print("[1] gradnorm(embedder):", calculate_gradient_norm(self.model.embedder))
-            # print("[2] gradnorm(backbone):", calculate_gradient_norm(self.model.backbone))
-            # print("[3] gradnorm(*):", calculate_gradient_norm(self.model))
             return loss
         else:
             e1 = model(**query_inputs)
@@ -421,7 +425,8 @@ class CustomTrainer(transformers.Trainer):
 
             loss, _scores = self._contrastive_loss(
                 e1, e2, 
-                one_hot_labels=one_hot_labels
+                one_hot_labels=one_hot_labels,
+                duplicate_labels=duplicate_labels,
             )
             return loss
     
@@ -613,4 +618,4 @@ class CustomTrainer(transformers.Trainer):
         if should_evaluate:
             # TODO: implement multi-gpu retrieval evaluation.
             self.evaluate_retrieval_datasets()
-
+            gc.collect()

@@ -51,8 +51,11 @@ class Sampler(abc.ABC, torch.utils.data.Sampler):
         return (
             self.dataset._fingerprint, 
             self.batch_size, 
-            self.max_num_batches, 
-            self.seed
+            self.max_num_batches,
+            self.total_size,
+            self.shuffle,
+            self.seed,
+            seld.epoch
         )
     
     def _get_indices(self) -> Iterable[int]:

@@ -217,8 +217,8 @@ def main():
         wandb.init(
             entity="jack-morris",
             project="tti-nomic-4",
-            name=wandb_run_id, # + "-RESUME",
-            resume=True,
+            name=wandb_run_id,
+            #resume=True,
     )
         wandb.config.update(
             {

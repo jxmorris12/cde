@@ -280,7 +280,7 @@ class TrainingArguments(transformers.TrainingArguments):
             os.environ["WANDB_MODE"] = "disabled"
         ############################################################################
         num_devices = max(1, torch.cuda.device_count())
-        num_cpus = min(32, len(os.sched_getaffinity(0)))
+        num_cpus = min(16, num_devices * 2, len(os.sched_getaffinity(0)))
         num_workers = int(num_cpus / num_devices)
         if self.tiny_debug:
             print("[tiny_debug] Setting num workers to 0")
@@ -292,8 +292,8 @@ class TrainingArguments(transformers.TrainingArguments):
             print(f"training with eval_steps = {self.eval_steps} / num_workers = {num_workers} / warmup_steps = {self.warmup_steps} / world_size {get_world_size()}")
         ############################################################################
         self.dataloader_num_workers = num_workers
-        # self.dataloader_persistent_workers = (num_workers > 0)
-        self.dataloader_persistent_workers = False
+        self.dataloader_persistent_workers = (num_workers > 0)
+        # self.dataloader_persistent_workers = False
         self.dataloader_pin_memory = True
         today_date = datetime.date.today()
         formatted_date = today_date.strftime("%Y-%m-%d")
