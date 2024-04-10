@@ -428,8 +428,6 @@ class GradCache:
         ##
         ## First stage no grad
         ##
-        first_stage_embedding = []
-        first_stage_rnd_states = []
         first_stage_model = self.model_objs[0] # TODO: Generalize this
         first_stage_input_chunks = first_stage_model_inputs[0]
 
@@ -442,6 +440,8 @@ class GradCache:
                 colour="#F7B1AB"
             )
 
+        first_stage_rnd_states = []
+        first_stage_embedding = []
         with torch.no_grad():
             for x in first_stage_input_chunks_tqdm:
                 first_stage_rnd_states.append(RandContext(*self.get_input_tensors(x)))

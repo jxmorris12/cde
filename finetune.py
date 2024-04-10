@@ -218,6 +218,7 @@ def main():
             entity="jack-morris",
             project="tti-nomic-4",
             name=wandb_run_id, # + "-RESUME",
+            resume=True,
     )
         wandb.config.update(
             {
