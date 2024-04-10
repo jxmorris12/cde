@@ -18,6 +18,14 @@ from dataset import BeirDataset
 from lib import get_rank, get_world_size, inputs_for_key, RerankHelper, TensorRunningAverages
 from sampler import Sampler
 
+def calculate_gradient_norm(model: torch.nn.Module):
+    total_norm = 0.0
+    for param in model.parameters():
+        if param.grad is not None:
+            param_norm = param.grad.data.norm(2)  # Calculate the 2-norm of the gradients
+            total_norm += param_norm.item() ** 2
+    total_norm = total_norm ** (1. / 2)  # Take the square root to get the total norm
+    return total_norm
 
 class CustomTrainer(transformers.Trainer):
     retrieval_datasets: Dict[str, datasets.Dataset]
@@ -392,6 +400,10 @@ class CustomTrainer(transformers.Trainer):
                 backward_fn=backward_fn,
                 run_backward=self.model.training,
             )
+            
+            # print("[1] gradnorm(embedder):", calculate_gradient_norm(self.model.embedder))
+            # print("[2] gradnorm(backbone):", calculate_gradient_norm(self.model.backbone))
+            # print("[3] gradnorm(*):", calculate_gradient_norm(self.model))
             return loss
         else:
             e1 = model(**query_inputs)

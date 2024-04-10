@@ -12,6 +12,7 @@ from torch.utils.checkpoint import get_device_states, set_device_states
 
 from lib.misc import tqdm_if_main_worker
 
+min_tqdm_inputs = 8
 
 class RandContext:
     def __init__(self, *tensors):
@@ -249,6 +250,14 @@ class GradCache:
         :param no_sync_except_last: If True, under distributed setup, only trigger gradient reduction across processes
         for the last sub-batch's forward-backward pass.
         """
+        if len(model_inputs) > min_tqdm_inputs:
+            model_inputs = tqdm_if_main_worker(
+                model_inputs,
+                desc="computing first stage gradients",
+                colour="#C7D3BF",
+                leave=False
+            )
+            
         if isinstance(
             model, nn.parallel.DistributedDataParallel
         ):  
@@ -380,7 +389,6 @@ class GradCache:
         :param loss_kwargs: Additional keyword arguments to the loss function.
         :return: The current's loss.
         """
-        min_tqdm_inputs = 8
         # TODO: Pass these keys to constructor as
         # `first_stage_data_keys` and `second_stage_data_keys` or
         # something like that.
@@ -523,7 +531,7 @@ class GradCache:
         else:
             sync_contexts = [nullcontext for _ in range(len(first_stage_input_chunks))]
         
-        first_stage_gradients = first_stage_embedding.split(self.chunk_sizes[0])
+        first_stage_gradients = first_stage_embedding.grad.split(self.chunk_sizes[0])
         first_stage_input_chunks_tqdm = first_stage_input_chunks
         if len(first_stage_input_chunks) > min_tqdm_inputs:
             first_stage_input_chunks_tqdm = tqdm_if_main_worker(
