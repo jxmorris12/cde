@@ -2,4 +2,12 @@
 
 ### Install
 
-`pip install -r requirements.txt`
+install pytorch w/ cuda, install requirements:
+```bash
+uv pip install -r requirements.txt
+```
+
+then install FlashAttention:
+```bash
+uv pip install --no-cache-dir flash-attn --no-build-isolation git+https://github.com/HazyResearch/flash-attention.git#subdirectory=csrc/rotary git+https://github.com/HazyResearch/flash-attention.git#subdirectory=csrc/layer_norm git+https://github.com/HazyResearch/flash-attention.git#subdirectory=csrc/fused_dense_lib git+https://github.com/HazyResearch/flash-attention.git#subdirectory=csrc/xentropy
+```

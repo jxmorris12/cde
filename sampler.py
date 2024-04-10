@@ -128,7 +128,6 @@ class FixedSubdomainSampler(RandomSampler):
         assert sum(map(len, self.batch_assignments.values())) == len(dataset)
     
     def _get_indices(self) -> List[int]:
-        # print(f"[sampler] running get_indices on rank {get_rank()}")
         g = torch.Generator()
         g.manual_seed(self.seed + self.epoch)
         batch_lists = list(self.batch_assignments.values())

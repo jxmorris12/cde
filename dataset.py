@@ -27,9 +27,11 @@ from lib import (
     get_tti_cache_dir,
     get_num_proc,
     get_rank,
-    get_reranking_results,
+    get_reranking_results
 )
 
+
+os.environ['TOKENIZERS_PARALLELISM'] = '1'
 
 def load_msmarco_hard_negatives_uncached() -> Dict[str, Dict[str, Any]]:
     """Loads hard negative passage for MSMARCO.

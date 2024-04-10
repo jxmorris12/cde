@@ -140,11 +140,15 @@ class CustomTrainer(transformers.Trainer):
         elif not (self.args.local_rank <= 0):
              return None
         batch = next(iter(dataloader))
-        keys = ["query_input_ids", "document_input_ids"] # , "dataset_input_ids"]
+        if batch is None:
+            return None
+    
+        keys = ["query_input_ids", "document_input_ids"]
         tokenizers = [ self.embedder_tokenizer,  self.embedder_tokenizer, self.dataset_tokenizer]
         data = [
                 tokenizer.batch_decode(batch[key][:n], skip_special_tokens=True)
                 for (tokenizer, key) in zip(tokenizers, keys)
+
         ]
         names = [k.replace("_input_ids", "") for k in keys]
         # transpose the list of lists
@@ -178,10 +182,10 @@ class CustomTrainer(transformers.Trainer):
                 "examples/eval": eval_table,
             })
         
-        # Run eval at beginning of training
+        # Option to run eval at beginning of training
         run_eval_on_start_of_training = False
         if run_eval_on_start_of_training:
-            self.evaluate_retrieval_datasets(model=self.model)
+            self.evaluate_retrieval_datasets()
 
         super()._inner_training_loop(*args, **kwargs)
         

@@ -32,7 +32,7 @@ class RerankHelper:
         # Subsample queries from large sets so that we can evaluate
         # in a reasonable amount of time. Also remember this will be
         # distributed across GPUs. So it's not that bad.
-        self.max_reranking_queries = 128
+        self.max_reranking_queries = 64
     
     def _forward_batched(self, **kwargs) -> torch.Tensor:
         return forward_batched(
@@ -214,7 +214,6 @@ def get_reranking_results(data_path: str, split: str, model_name: str) -> Dict:
         d=queries, 
         col='text',
         save_to_disk=False,
-        model=None,
         batch_size=4096,
     )["embeds"]
     
@@ -239,7 +238,6 @@ def get_reranking_results(data_path: str, split: str, model_name: str) -> Dict:
             d=corpus.select(range(corpus_start_idx, corpus_end_idx)), 
             col='text',
             save_to_disk=False,
-            model=None,
             batch_size=4096,
         )["embeds"]
         cos_scores = retriever.retriever.score_functions["cos_sim"](

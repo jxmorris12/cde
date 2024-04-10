@@ -109,7 +109,7 @@ class DenseEncoder(torch.nn.Module):
                 batched=True,
                 keep_in_memory=False,
                 remove_columns=[col],
-                desc=f"Tokenizing {col}"
+                desc=f"Tokenizing [{col}]"
             )
         else:
             os.environ["TOKENIZERS_PARALLELISM"] = "0"

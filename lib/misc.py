@@ -31,14 +31,12 @@ def get_tti_cache_dir() -> str:
     return os.path.join(script_directory, "data")
 
 
-
 def get_cache_location_from_kwargs(**kwargs):
     cache_location = os.path.join(
         get_tti_cache_dir(), "cluster"
     )
     os.makedirs(cache_location, exist_ok=True)
     return os.path.join(cache_location, md5_hash_kwargs(**kwargs))
-
 
 
 def process_qrels_uncached(corpus: datasets.Dataset, qrels: datasets.Dataset) -> Tuple[Dict[str, List[float]], Dict[str, List[str]]]:

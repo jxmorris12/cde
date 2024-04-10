@@ -253,7 +253,7 @@ class TrainingArguments(transformers.TrainingArguments):
         },
     )
     max_eval_batches: int = field(
-        default=32,
+        default=16,
         metadata={
             "help": "Max batches to use for eval (to reduce noise)"
         }
