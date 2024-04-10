@@ -278,7 +278,7 @@ class GradCache:
                 backward_fn(surrogate)  # [added]
     
     def cache_step_one_stage(
-        self, *model_inputs, no_sync_except_last: bool = False, backward_fn: Callable, **loss_kwargs
+        self, *model_inputs, no_sync_except_last: bool = False, backward_fn: Callable, run_backward: bool, **loss_kwargs
     ) -> Tensor:
         """
         Run a cached step to compute gradient over the inputs.
@@ -288,20 +288,29 @@ class GradCache:
         :param loss_kwargs: Additional keyword arguments to the loss function.
         :return: The current's loss.
         """
-        all_reps = []
-        all_rnd_states = []
-
+        model_inputs = [
+            { 
+                "input_ids": x["input_ids"], 
+                "attention_mask": x["attention_mask"]
+            }
+            for x in model_inputs
+        ]
         model_inputs = [
             self.split_inputs(x, chunk_size)
             for x, chunk_size in zip(model_inputs, self.chunk_sizes)
         ]
 
+        all_reps = []
+        all_rnd_states = []
         for model, x in zip(self.models, model_inputs):
             model_reps, rnd_states = self.forward_no_grad(model, x)
             all_reps.append(model_reps)
             all_rnd_states.append(rnd_states)
 
         cache, loss = self.build_cache(backward_fn, *all_reps, **loss_kwargs)
+        if not run_backward:
+            return loss
+        
         cache = [c.split(chunk_size) for c, chunk_size in zip(cache, self.chunk_sizes)]
 
         for model, x, model_cache, rnd_states in zip(
