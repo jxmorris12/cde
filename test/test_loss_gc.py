@@ -74,8 +74,7 @@ def test_loss_gradcache():
         max_length=16,
     )
     gc = GradCache(
-        model=model,
-        chunk_sizes=2,
+        chunk_sizes=[2, 2],
         loss_fn=functools.partial(contrastive_loss, model),
     )
     dataloader = torch.utils.data.DataLoader(
@@ -103,6 +102,7 @@ def test_loss_gradcache():
     gc_loss = gc(
         query_inputs, 
         document_inputs, 
+        model=model,
         one_hot_labels=one_hot_labels,
         no_sync_except_last=False,
         backward_fn=(lambda t: t.backward()),
@@ -151,8 +151,7 @@ def test_loss_gradcache__transductive():
         max_length=16,
     )
     gc = GradCache(
-        model=model,
-        chunk_sizes=2,
+        chunk_sizes=[2, 2],
         loss_fn=functools.partial(contrastive_loss, model),
     )
     dataloader = torch.utils.data.DataLoader(
@@ -179,6 +178,7 @@ def test_loss_gradcache__transductive():
     gc_loss = gc(
         query_inputs, 
         document_inputs, 
+        model=model,
         one_hot_labels=one_hot_labels,
         no_sync_except_last=False,
         backward_fn=(lambda t: t.backward()),
@@ -226,8 +226,7 @@ def test_gradient_gradcache__biencoder():
         max_length=16,
     )
     gc = GradCache(
-        model=model,
-        chunk_sizes=2,
+        chunk_sizes=[2, 2],
         loss_fn=functools.partial(contrastive_loss, model),
     )
     dataloader = torch.utils.data.DataLoader(
@@ -254,6 +253,7 @@ def test_gradient_gradcache__biencoder():
     gc_loss = gc(
         query_inputs, 
         document_inputs, 
+        model=model,
         one_hot_labels=one_hot_labels,
         no_sync_except_last=False,
         backward_fn=(lambda t: t.backward()),
@@ -305,8 +305,7 @@ def test_gradient_gradcache__transductive():
         max_length=16,
     )
     gc = GradCache(
-        model=model,
-        chunk_sizes=2,
+        chunk_sizes=[2, 2],
         loss_fn=functools.partial(contrastive_loss, model),
     )
     dataloader = torch.utils.data.DataLoader(
@@ -333,6 +332,7 @@ def test_gradient_gradcache__transductive():
     gc_loss = gc(
         query_inputs, 
         document_inputs, 
+        model=model,
         one_hot_labels=one_hot_labels,
         no_sync_except_last=False,
         backward_fn=(lambda t: t.backward()),

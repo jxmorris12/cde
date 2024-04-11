@@ -1,15 +1,19 @@
-import logging
+from typing import Any, Callable, List, Optional, Union, Tuple
 import typing
+
+import functools
+import logging
 from collections import UserDict
 from contextlib import nullcontext
 from itertools import repeat
-from typing import Any, Callable, List, Union
 
+import accelerate
 import torch
 from torch import Tensor, nn
 from torch.cuda.amp import autocast
 from torch.utils.checkpoint import get_device_states, set_device_states
 
+from lib.dist import get_rank, get_world_size
 from lib.misc import tqdm_if_main_worker
 
 min_tqdm_inputs = 8
@@ -42,11 +46,11 @@ class GradCache:
 
     def __init__(
         self,
-        model: nn.Module,
         chunk_sizes: Union[int, List[int]],
         loss_fn: Callable[..., Tensor],
         split_input_fn: Callable[[Any, int], Any] = None,
         get_rep_fn: Callable[..., Tensor] = None,
+        accelerator: Optional[accelerate.Accelerator] = None,
         bf16: bool = False,
     ):
         """
@@ -62,28 +66,23 @@ class GradCache:
         not provided, the generic output is assumed to be the representation tensor.
         :param bf16: If True, run mixed precision training
         """
-        self.model = model
-        self.models = [model.forward, model.forward]
-        self.model_objs = [model, model]
-
-        if isinstance(chunk_sizes, int):
-            self.chunk_sizes = [chunk_sizes for _ in range(len(self.models))]
-        else:
-            self.chunk_sizes = chunk_sizes
+        self.accelerator = accelerator
+        self.chunk_sizes = chunk_sizes
 
         self.split_input_fn = split_input_fn
         self.get_rep_fn = get_rep_fn
         self.loss_fn = loss_fn
         self.bf16 = bf16
         self._get_input_tensors_strict = False
-        self.model_has_two_stages = hasattr(self.model, "forward_first_stage")
 
     def __call__(self, *args, **kwargs):
         """
         Call the cache_step function.
         :return: Current step loss.
         """
-        if self.model_has_two_stages:
+        model_has_two_stages = hasattr(kwargs["model"], "forward_first_stage")
+
+        if model_has_two_stages:
             return self.cache_step_two_stage(*args, **kwargs)
         else:
             return self.cache_step_one_stage(*args, **kwargs)
@@ -257,37 +256,26 @@ class GradCache:
                 colour="#C7D3BF",
                 leave=False
             )
-            
-        if isinstance(
-            model, nn.parallel.DistributedDataParallel
-        ):  
-            if no_sync_except_last:
-                sync_contexts = [
-                    model.no_sync for _ in range(len(model_inputs) - 1)
-                ] + [nullcontext]
-            else:
-                sync_contexts = [nullcontext for _ in range(len(model_inputs))]
+        
+        # https://huggingface.co/docs/accelerate/en/concept_guides/gradient_synchronization
+        if (get_world_size() > 0) and no_sync_except_last:
+            sync_contexts = [
+                functools.partial(self.accelerator.no_sync, model) for _ in range(len(model_inputs) - 1)
+            ] + [functools.partial(self.accelerator.trigger_sync_in_backward, model)]
+        else:
+            sync_contexts = [nullcontext for _ in range(len(model_inputs))]
 
-            for x, state, gradient, sync_context in zip(
-                model_inputs, random_states, cached_gradients, sync_contexts
-            ):
-                with state, sync_context():
-                    y = self.model_call(model, x)
-                    reps = self.get_reps(y)
-                    surrogate = torch.dot(reps.flatten(), gradient.flatten())
-                    backward_fn(surrogate)  # [modified]
-        else:  # [use base model (i.e. transformer)]
-            for x, state, gradient in zip(
-                model_inputs, random_states, cached_gradients
-            ):
-                with state:
-                    y = self.model_call(model, x)
+        for x, state, gradient, sync_context in zip(
+            model_inputs, random_states, cached_gradients, sync_contexts
+        ):
+            with state, sync_context():
+                y = self.model_call(model, x)
                 reps = self.get_reps(y)
                 surrogate = torch.dot(reps.flatten(), gradient.flatten())
-                backward_fn(surrogate)  # [added]
+                backward_fn(surrogate)  # [modified]
     
     def cache_step_one_stage(
-        self, *model_inputs, no_sync_except_last: bool = False, backward_fn: Callable, run_backward: bool, **loss_kwargs
+        self, *model_inputs, model: nn.Module, no_sync_except_last: bool = False, backward_fn: Callable, run_backward: bool, **loss_kwargs
     ) -> Tensor:
         """
         Run a cached step to compute gradient over the inputs.
@@ -311,8 +299,8 @@ class GradCache:
 
         all_reps = []
         all_rnd_states = []
-        for model, x in zip(self.models, model_inputs):
-            model_reps, rnd_states = self.forward_no_grad(model, x)
+        for _model, x in zip([model, model], model_inputs):
+            model_reps, rnd_states = self.forward_no_grad(_model, x)
             all_reps.append(model_reps)
             all_rnd_states.append(rnd_states)
 
@@ -322,11 +310,11 @@ class GradCache:
         
         cache = [c.split(chunk_size) for c, chunk_size in zip(cache, self.chunk_sizes)]
 
-        for model, x, model_cache, rnd_states in zip(
-            self.models, model_inputs, cache, all_rnd_states
+        for _model, x, model_cache, rnd_states in zip(
+            [model, model], model_inputs, cache, all_rnd_states
         ):
             self.forward_backward_one_stage(
-                model,
+                _model,
                 backward_fn,
                 x,
                 model_cache,
@@ -355,12 +343,10 @@ class GradCache:
         :param no_sync_except_last: If True, under distributed setup, only trigger gradient reduction across processes
         for the last sub-batch's forward-backward pass.
         """
-        model_is_ddp = isinstance(
-            model, nn.parallel.DistributedDataParallel)
-        if no_sync_except_last and model_is_ddp:
+        if (get_world_size() > 0) and no_sync_except_last:
             sync_contexts = [
-                model.no_sync for _ in range(len(model_inputs) - 1)
-            ] + [nullcontext]
+                functools.partial(self.accelerator.no_sync, model) for _ in range(len(model_inputs) - 1)
+            ] + [functools.partial(self.accelerator.trigger_sync_in_backward, model)]
         else:
             sync_contexts = [nullcontext for _ in range(len(model_inputs))]
         if len(model_inputs) > min_tqdm_inputs:
@@ -386,7 +372,7 @@ class GradCache:
             backward_fn(surrogate)  # [added]
 
     def cache_step_two_stage(
-        self, *model_inputs, no_sync_except_last: bool = False, backward_fn: Callable, run_backward: bool, **loss_kwargs
+        self, *model_inputs, model: nn.Module, no_sync_except_last: bool = False, backward_fn: Callable, run_backward: bool, **loss_kwargs
     ) -> Tensor:
         """
         Run a cached step to compute gradient over the inputs.
@@ -410,7 +396,6 @@ class GradCache:
             self.split_inputs(x, chunk_size)
             for x, chunk_size in zip(first_stage_model_inputs, self.chunk_sizes)
         ]
-
         second_stage_model_inputs = [
             { 
                 "input_ids": x["input_ids"], 
@@ -426,7 +411,7 @@ class GradCache:
         ##
         ## First stage no grad
         ##
-        first_stage_model = self.model_objs[0] # TODO: Generalize this
+        first_stage_model = model # TODO: Generalize this
         first_stage_input_chunks = first_stage_model_inputs[0]
 
         first_stage_input_chunks_tqdm = first_stage_input_chunks
@@ -457,7 +442,7 @@ class GradCache:
         # concatenate all sub-batch representations
         output_embeddings = []
         second_stage_rnd_states = []
-        for model, second_stage_input_chunks in zip(self.model_objs, second_stage_model_inputs):
+        for _model, second_stage_input_chunks in zip([model, model], second_stage_model_inputs):
             second_stage_input_chunks_tqdm = second_stage_input_chunks
             if len(second_stage_input_chunks) > min_tqdm_inputs:
                 second_stage_input_chunks_tqdm = tqdm_if_main_worker(
@@ -471,7 +456,7 @@ class GradCache:
                 for x in second_stage_input_chunks_tqdm:
                     rnd_states.append(RandContext(*self.get_input_tensors(x)))
                     with autocast() if self.bf16 else nullcontext():
-                        y = model.forward_second_stage(
+                        y = _model.forward_second_stage(
                             input_ids=x["input_ids"],
                             attention_mask=x["attention_mask"],
                             dataset_embeddings=first_stage_embedding,
@@ -500,11 +485,11 @@ class GradCache:
         ### Compute gradients wrt second stage
         ###
         first_stage_embedding = first_stage_embedding.detach().requires_grad_()
-        for model, second_stage_input_chunks, random_states, cached_gradients in zip(
-            self.model_objs, second_stage_model_inputs, second_stage_rnd_states, second_stage_gradients
+        for _model, second_stage_input_chunks, random_states, cached_gradients in zip(
+            [model, model], second_stage_model_inputs, second_stage_rnd_states, second_stage_gradients
         ):
             self.forward_backward_two_stage(
-                model=model,
+                model=_model,
                 backward_fn=backward_fn,
                 model_inputs=second_stage_input_chunks,
                 dataset_embeddings=first_stage_embedding,
@@ -518,8 +503,8 @@ class GradCache:
         model_is_ddp = isinstance(model, nn.parallel.DistributedDataParallel)
         if no_sync_except_last and model_is_ddp:
             sync_contexts = [
-                model.no_sync for _ in range(len(first_stage_input_chunks) - 1)
-            ] + [nullcontext]
+                functools.partial(self.accelerator.no_sync, model) for _ in range(len(model_inputs) - 1)
+            ] + [functools.partial(self.accelerator.trigger_sync_in_backward, model)]
         else:
             sync_contexts = [nullcontext for _ in range(len(first_stage_input_chunks))]
         
