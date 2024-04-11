@@ -87,10 +87,11 @@ class CustomTrainer(transformers.Trainer):
         super().create_optimizer(*args, **kwargs)
 
         if self.use_gc:
-            print(f"[rank {get_rank()}] initializing GradCache with chunk_size={self.args.max_batch_size_fits_in_memory}.")
+            gc_bs = self.args.max_batch_size_fits_in_memory
+            print(f"[rank {get_rank()}] initializing GradCache with chunk_size={gc_bs}.")
             self.gc = GradCache(
-                model=self.model,
-                chunk_sizes=self.args.max_batch_size_fits_in_memory,
+                accelerator=self.accelerator,
+                chunk_sizes=[gc_bs, gc_bs],
                 loss_fn=functools.partial(self._contrastive_loss, return_scores=False), 
                 bf16=self.args.bf16,
             )
@@ -407,6 +408,7 @@ class CustomTrainer(transformers.Trainer):
             loss = self.gc(
                 query_inputs, 
                 document_inputs, 
+                model=model,
                 no_sync_except_last=(get_world_size() > 1),
                 backward_fn=backward_fn,
                 run_backward=self.model.training,
