@@ -240,7 +240,7 @@ class GradCache:
         cached_gradients: List[Tensor],
         random_states: List[RandContext],
         no_sync_except_last: bool = False,
-    ):
+    ) -> None:
         """
         Run the second forward and the backward pass to compute gradient for a model.
         :param model: Encoder model.
@@ -341,10 +341,11 @@ class GradCache:
         model: nn.Module,
         backward_fn: Callable,
         model_inputs,
+        dataset_embeddings: torch.Tensor,
         cached_gradients: List[Tensor],
         random_states: List[RandContext],
         no_sync_except_last: bool = False,
-    ):
+    ) -> None:
         """
         Run the second forward and the backward pass to compute gradient for a model.
         :param model: Encoder model.
@@ -354,38 +355,35 @@ class GradCache:
         :param no_sync_except_last: If True, under distributed setup, only trigger gradient reduction across processes
         for the last sub-batch's forward-backward pass.
         """
-        if isinstance(
-            model, nn.parallel.DistributedDataParallel
-        ):  
-
-            if no_sync_except_last:
-                sync_contexts = [
-                    model.no_sync for _ in range(len(model_inputs) - 1)
-                ] + [nullcontext]
-            else:
-                sync_contexts = [nullcontext for _ in range(len(model_inputs))]
-
-            # [modified]
-            for x, state, gradient, sync_context in zip(
-                model_inputs, random_states, cached_gradients, sync_contexts
-            ):
-                with sync_context():
-                    with state:
-                        y = self.model_call(model, x)
-                    reps = self.get_reps(y)
-                    surrogate = torch.dot(reps.flatten(), gradient.flatten())
-                    backward_fn(surrogate)  # [modified]
-        else:  # [use base model (i.e. transformer)]
-
-            for x, state, gradient in zip(
-                model_inputs, random_states, cached_gradients
-            ):
-                with nullcontext():
-                    with state:
-                        y = self.model_call(model, x)
-                    reps = self.get_reps(y)
-                    surrogate = torch.dot(reps.flatten(), gradient.flatten())
-                    backward_fn(surrogate)  # [added]
+        model_is_ddp = isinstance(
+            model, nn.parallel.DistributedDataParallel)
+        if no_sync_except_last and model_is_ddp:
+            sync_contexts = [
+                model.no_sync for _ in range(len(model_inputs) - 1)
+            ] + [nullcontext]
+        else:
+            sync_contexts = [nullcontext for _ in range(len(model_inputs))]
+        if len(model_inputs) > min_tqdm_inputs:
+            model_inputs_tqdm = tqdm_if_main_worker(
+                model_inputs,
+                desc="computing second stage gradients",
+                leave=False,
+                colour="#807182",
+            )
+        else:
+            model_inputs_tqdm = model_inputs
+        for x, state, gradient, sync_context in zip(
+            model_inputs_tqdm, random_states, cached_gradients, sync_contexts
+        ):
+            with state, sync_context(), (autocast() if self.bf16 else nullcontext()):
+                y = model.forward_second_stage(
+                    input_ids=x["input_ids"],
+                    attention_mask=x["attention_mask"],
+                    dataset_embeddings=dataset_embeddings,
+                )
+            reps = self.get_reps(y)
+            surrogate = torch.dot(reps.flatten(), gradient.flatten())
+            backward_fn(surrogate)  # [added]
 
     def cache_step_two_stage(
         self, *model_inputs, no_sync_except_last: bool = False, backward_fn: Callable, run_backward: bool, **loss_kwargs
@@ -482,6 +480,11 @@ class GradCache:
             # concatenate all sub-batch representations
             output_embeddings.append(torch.cat(model_reps, dim=0))
             second_stage_rnd_states.append(rnd_states)
+        
+        ################################################
+        ###
+        ### Using output representations, compute loss :)
+        ###
         output_gradient_cache, loss = self.build_cache(backward_fn, *output_embeddings, **loss_kwargs)
         if not run_backward:
             # We also support a mode now where we don't actually compute gradients, we just
@@ -496,43 +499,23 @@ class GradCache:
         ###
         ### Compute gradients wrt second stage
         ###
-        model_is_ddp = isinstance(
-            model, nn.parallel.DistributedDataParallel)
-        if no_sync_except_last and model_is_ddp:
-            sync_contexts = [
-                model.no_sync for _ in range(len(second_stage_model_inputs) - 1)
-            ] + [nullcontext]
-        else:
-            sync_contexts = [nullcontext for _ in range(len(second_stage_model_inputs))]
-
         first_stage_embedding = first_stage_embedding.detach().requires_grad_()
         for model, second_stage_input_chunks, random_states, cached_gradients in zip(
             self.model_objs, second_stage_model_inputs, second_stage_rnd_states, second_stage_gradients
         ):
-            second_stage_input_chunks_tqdm = second_stage_input_chunks
-            if len(second_stage_input_chunks) > min_tqdm_inputs:
-                second_stage_input_chunks_tqdm = tqdm_if_main_worker(
-                    second_stage_input_chunks,
-                    desc="computing second stage gradients",
-                    leave=False,
-                    colour="#807182",
-                )
-            for x, state, gradient, sync_context in zip(
-                second_stage_input_chunks_tqdm, random_states, cached_gradients, sync_contexts
-            ):
-                with state, sync_context(), (autocast() if self.bf16 else nullcontext()):
-                    y = model.forward_second_stage(
-                        input_ids=x["input_ids"],
-                        attention_mask=x["attention_mask"],
-                        dataset_embeddings=first_stage_embedding,
-                    )
-                reps = self.get_reps(y)
-                surrogate = torch.dot(reps.flatten(), gradient.flatten())
-                backward_fn(surrogate)  # [added]
-
+            self.forward_backward_two_stage(
+                model=model,
+                backward_fn=backward_fn,
+                model_inputs=second_stage_input_chunks,
+                dataset_embeddings=first_stage_embedding,
+                cached_gradients=cached_gradients,
+                random_states=random_states,
+                no_sync_except_last=no_sync_except_last
+            )
         ###
         ### Compute gradients wrt first stage
         ### 
+        model_is_ddp = isinstance(model, nn.parallel.DistributedDataParallel)
         if no_sync_except_last and model_is_ddp:
             sync_contexts = [
                 model.no_sync for _ in range(len(first_stage_input_chunks) - 1)

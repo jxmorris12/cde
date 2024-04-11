@@ -180,21 +180,21 @@ def main():
     )
     data_args_eval = copy.copy(data_args)
     data_args_eval.sampling_strategy = "domain" # always set this for eval
-    eval_sampler_fn = functools.partial(
-        get_sampler,
-        dataset=(eval_dataset or train_dataset),
-        batch_size=training_args.per_device_eval_batch_size,
-        cluster_size=data_args.eval_cluster_size,
-        shuffle=False,
-        clustering_model="gtr_base",
-        clustering_query_to_doc=data_args.clustering_query_to_doc,
-        num_samples=(training_args.per_device_eval_batch_size * training_args.max_eval_batches),
-    )
-    eval_samplers = {
-        "cluster_within_domain": eval_sampler_fn(sampling_strategy="cluster_within_domain"),
-        "domain": eval_sampler_fn(sampling_strategy="domain"),
-        "random": eval_sampler_fn(sampling_strategy="random"),
-    }
+    # eval_sampler_fn = functools.partial(
+    #     get_sampler,
+    #     dataset=(eval_dataset or train_dataset),
+    #     batch_size=training_args.per_device_eval_batch_size,
+    #     cluster_size=data_args.eval_cluster_size,
+    #     shuffle=False,
+    #     clustering_model="gtr_base",
+    #     clustering_query_to_doc=data_args.clustering_query_to_doc,
+    #     num_samples=(training_args.per_device_eval_batch_size * training_args.max_eval_batches),
+    # )
+    # eval_samplers = {
+    #     "cluster_within_domain": eval_sampler_fn(sampling_strategy="cluster_within_domain"),
+    #     "domain": eval_sampler_fn(sampling_strategy="domain"),
+    #     "random": eval_sampler_fn(sampling_strategy="random"),
+    # }
     model_args.transductive_corpus_size = training_args.transductive_corpus_size
     model_config = ModelConfig(**vars(model_args))
     model_cls = get_model_class(model_args.architecture)
