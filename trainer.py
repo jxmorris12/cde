@@ -12,12 +12,12 @@ from transformers.trainer_utils import speed_metrics
 import transformers
 import wandb
 
-
 from beir.retrieval.evaluation import EvaluateRetrieval
 from gradcache import GradCache
 from dataset import BeirDataset
-from lib import get_rank, get_world_size, inputs_for_key, RerankHelper, TensorRunningAverages
+from lib import gather, get_rank, get_world_size, inputs_for_key, RerankHelper, TensorRunningAverages
 from sampler import Sampler
+
 
 def calculate_gradient_norm(model: torch.nn.Module):
     total_norm = 0.0
@@ -27,6 +27,7 @@ def calculate_gradient_norm(model: torch.nn.Module):
             total_norm += param_norm.item() ** 2
     total_norm = total_norm ** (1. / 2)  # Take the square root to get the total norm
     return total_norm
+
 
 class CustomTrainer(transformers.Trainer):
     retrieval_datasets: Dict[str, datasets.Dataset]
@@ -132,7 +133,6 @@ class CustomTrainer(transformers.Trainer):
             drop_last=self.args.dataloader_drop_last,
             num_workers=self.args.dataloader_num_workers,
             pin_memory=self.args.dataloader_pin_memory,
-            # prefetch_factor=1,
         )
         def advance_and_return(x):
             eval_dataloader.dataset.reset_dataset_idx()
@@ -170,7 +170,6 @@ class CustomTrainer(transformers.Trainer):
             (self.args.local_rank <= 0) and 
             (int(os.environ.get("LOCAL_RANK", 0)) <= 0)
         )
-
     
     def _inner_training_loop(self, *args, **kwargs):
         """Override pre-training loop to do a couple of things. This happens after model is loaded from checkpoint."""
@@ -225,6 +224,9 @@ class CustomTrainer(transformers.Trainer):
                 duplicate_labels: torch.Tensor,
                 return_scores: bool = True
             ) -> Tuple[torch.Tensor, torch.Tensor]:
+        e1 = gather(e1)
+        e2 = gather(e2)
+
         e1 = e1 / e1.norm(p=2, dim=1, keepdim=True) # Query
         e2 = e2 / e2.norm(p=2, dim=1, keepdim=True) # Document
         scores = e1 @ e2.T
@@ -236,7 +238,7 @@ class CustomTrainer(transformers.Trainer):
         # better optimization (Thakur et al., 2021)."
         # 
         scores *= self.model.temp
-        assert scores.shape == one_hot_labels.shape
+        assert scores.shape == one_hot_labels.shape, f"got different shapes {scores.shape} and {one_hot_labels.shape}"
         labels = one_hot_labels / one_hot_labels.sum(dim=1, keepdim=True)
 
         logits = scores - (duplicate_labels.float() * 10**10)
@@ -334,6 +336,8 @@ class CustomTrainer(transformers.Trainer):
         R1 = torch.randperm(dataset_inputs["input_ids"].shape[0])
         R2 = torch.randperm(dataset_inputs["input_ids"].shape[0])
 
+        # TODO: Gather dataset input IDs for transduction?
+
         # Store on query 
         query_inputs["dataset_input_ids"] = dataset_inputs["input_ids"][R1]
         query_inputs["dataset_attention_mask"] = dataset_inputs["attention_mask"][R1]
@@ -351,10 +355,13 @@ class CustomTrainer(transformers.Trainer):
         return_outputs: bool = False,
     ) -> Union[Tuple[torch.Tensor, Dict[str, torch.Tensor]], torch.Tensor]:
         query_inputs, document_inputs, negative_document_inputs = self._split_inputs(inputs=inputs)
+        
+        # Uncomment next line to log stuff on every GPU.
+        # print(f"[rank {get_rank()}] query 0 =", self.embedder_tokenizer.decode(document_inputs["input_ids"][0], skip_special_tokens=True))
 
         # Create labels based on document IDs.
-        document_unique_ids = document_inputs["input_ids"].sum(dim=1)
-        idx = inputs["idx"]
+        document_unique_ids = gather(document_inputs["input_ids"].sum(dim=1))
+        idx = gather(inputs["idx"])
         one_hot_labels = (idx[:, None] == idx[None, :]).float()
         if self.args.automatically_deduplicate_documents:
             smart_labels = (
@@ -363,7 +370,7 @@ class CustomTrainer(transformers.Trainer):
             smart_labels = one_hot_labels.clone()
         
         # Aggregate labels for duplicate queries.
-        query_unique_ids = query_inputs["input_ids"].sum(dim=1)
+        query_unique_ids = gather(query_inputs["input_ids"].sum(dim=1))
         if self.args.automatically_deduplicate_queries:
             smart_labels = (
                 (query_unique_ids[:, None] == query_unique_ids[None, :]).float() @ smart_labels.float())

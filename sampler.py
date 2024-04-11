@@ -8,6 +8,7 @@ import math
 import random
 
 import datasets
+import numpy as np
 import torch
 
 from dataset import NomicSupervisedDataset, NomicUnsupervisedDataset
@@ -57,7 +58,8 @@ class Sampler(abc.ABC, torch.utils.data.Sampler):
             self.total_size,
             self.shuffle,
             self.seed,
-            self.epoch
+            self.epoch,
+            get_world_size(),
         )
     
     def _get_indices(self) -> Iterable[int]:
@@ -129,43 +131,38 @@ class FixedSubdomainSampler(RandomSampler):
         g.manual_seed(self.seed)
         if shuffle:
             for k in tqdm_if_main_worker(self.batch_assignments.keys(), desc="Shuffling clusters", colour="red"):
-                random.Random(self.seed).shuffle(self.batch_assignments[k])
+                np.random.default_rng(self.seed).shuffle(self.batch_assignments[k])
         assert sum(map(len, self.batch_assignments.values())) == len(dataset)
     
     def _get_indices(self) -> List[int]:
-        g = torch.Generator()
-        g.manual_seed(self.seed + self.epoch)
         batch_lists = list(self.batch_assignments.values())
-        random.Random(self.seed + self.epoch).shuffle(batch_lists)
+        np_gen = np.random.default_rng(seed=(self.seed + self.epoch))
+        np_gen.shuffle(batch_lists)
         # 1. Concatenate all datasets from all batches (which should be pre-shuffled once)
         all_assignments = torch.tensor(
             [v for L in tqdm_if_main_worker(batch_lists, desc="Sampler tensorizing clusters") for v in L])
-        effective_length = len(self.dataset) - (len(self.dataset) % self.batch_size)
+        
+        effective_batch_size = self.batch_size * get_world_size()
+        effective_length = len(self.dataset) - (len(self.dataset) % effective_batch_size)
         # 2. Trim off the end (effectively drop_last=True)
         all_assignments = all_assignments[:effective_length]
-        num_batches = int(effective_length // self.batch_size)
+        num_batches = int(effective_length // effective_batch_size)
         # 3. Reshape into batches
         all_assignments = all_assignments.reshape(
-            (num_batches, self.batch_size)
+            (num_batches, effective_batch_size)
         )
         # 4. Randomly reorder batches
+        g = torch.Generator()
+        g.manual_seed(self.seed + self.epoch)
         batch_perm = torch.randperm(num_batches, generator=g)
         # 5. Flatten and return
         print(f"[sampler] finished running get_indices on rank {get_rank()}")
         all_indices = []
         for batch_tensor in tqdm_if_main_worker(all_assignments[batch_perm], colour="green", desc="Sampler shuffling per-batch"): 
             batch_list = batch_tensor.tolist()
-            random.shuffle(batch_list)
+            np_gen.shuffle(batch_list)
             all_indices.extend(batch_list)
         return all_indices
-
-    def __iter__(self):  
-        piece_size = int(math.ceil(self.total_size / self.world_size))
-        piece_start = piece_size * self.rank
-        idxs = self._get_indices()
-        logging.debug("rank", self.rank, "taking idxs", len(idxs), "from", piece_start, "to", piece_start+piece_size)
-        for i in idxs[piece_start:piece_start+piece_size]:
-            yield i
 
 
 class AutoClusterSampler(FixedSubdomainSampler):
