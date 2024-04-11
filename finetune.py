@@ -216,7 +216,7 @@ def main():
         print("starting wandb run with name", wandb_run_id)
         wandb.init(
             entity="jack-morris",
-            project="tti-nomic-4",
+            project="tti-nomic-5",
             name=wandb_run_id,
             #resume=True,
     )
@@ -235,11 +235,13 @@ def main():
         model=model,
         args=training_args,
         train_dataset=train_dataset,
-        eval_dataset=eval_dataset,
+        #eval_dataset=eval_dataset,
+        eval_dataset=None,
         dataset_tokenizer=dataset_tokenizer,
         embedder_tokenizer=embedder_tokenizer,
         train_sampler=train_sampler,
-        eval_samplers=eval_samplers,
+        eval_samplers={},
+        #eval_samplers=eval_samplers,
         retrieval_datasets=retrieval_datasets,
     )
     checkpoint = get_checkpoint(training_args)

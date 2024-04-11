@@ -246,7 +246,7 @@ class CustomTrainer(transformers.Trainer):
         if (loss.isnan()):
             raise RuntimeError("Loss is nan!")
         
-        pred_labels = one_hot_labels[torch.arange(len(one_hot_labels)), scores.argmax(dim=1)]
+        pred_labels = one_hot_labels[torch.arange(len(one_hot_labels)), logits.argmax(dim=1)]
         acc = pred_labels.float().mean()
 
         metrics = {
