@@ -244,7 +244,7 @@ class CustomTrainer(transformers.Trainer):
         logits = scores - (duplicate_labels.float() * 10**10)
         loss = torch.nn.functional.cross_entropy(
             logits, labels, label_smoothing=0.0
-        )
+        ) * get_world_size()
         if (loss.isnan()):
             raise RuntimeError("Loss is nan!")
         
