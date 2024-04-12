@@ -71,7 +71,7 @@ class TwoEmbeddersWithMLP(transformers.PreTrainedModel):
             torch.nn.Linear(self.hidden_size * 2, self.hidden_size),
         )
 
-        self.temp = config.contrastive_temp
+        self.temp = config.logit_scale
         if config.disable_dropout:
             disable_dropout(self)
     
@@ -185,7 +185,7 @@ class DatasetTransformer(transformers.PreTrainedModel):
             torch.nn.ReLU(),
             torch.nn.Linear(self.hidden_size, self.hidden_size)
         )
-        self.temp = config.contrastive_temp
+        self.temp = config.logit_scale
         if config.disable_dropout:
             disable_dropout(self)
         
@@ -312,7 +312,7 @@ class BiEncoder(transformers.PreTrainedModel):
             torch.nn.GELU(),
             torch.nn.Linear(self.hidden_size, self.hidden_size),
         )
-        self.temp = config.contrastive_temp
+        self.temp = config.logit_scale
 
         if config.disable_dropout:
             disable_dropout(self)

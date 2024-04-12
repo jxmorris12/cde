@@ -53,7 +53,7 @@ def test_loss_gradcache():
     )
     tiny_config = tiny_model.config
     tiny_config.limit_layers = None
-    tiny_config.contrastive_temp = 20.0
+    tiny_config.logit_scale = 20.0
     tiny_config.disable_dropout = True
     transductive_corpus_size = 4
     tiny_config.transductive_corpus_size = transductive_corpus_size
@@ -132,7 +132,7 @@ def test_loss_gradcache__transductive():
     )
     tiny_config = tiny_model.config
     tiny_config.limit_layers = None
-    tiny_config.contrastive_temp = 20.0
+    tiny_config.logit_scale = 20.0
     tiny_config.disable_dropout = True
     model = DatasetTransformer(
          config=tiny_config,
@@ -207,7 +207,7 @@ def test_gradient_gradcache__biencoder():
     )
     tiny_config = tiny_model.config
     tiny_config.limit_layers = None
-    tiny_config.contrastive_temp = 20.0
+    tiny_config.logit_scale = 20.0
     tiny_config.disable_dropout = True
     model = BiEncoder(
          config=tiny_config,
@@ -286,7 +286,7 @@ def test_gradient_gradcache__transductive():
     )
     tiny_config = tiny_model.config
     tiny_config.limit_layers = None
-    tiny_config.contrastive_temp = 20.0
+    tiny_config.logit_scale = 20.0
     tiny_config.disable_dropout = True
     model = DatasetTransformer(
          config=tiny_config,
