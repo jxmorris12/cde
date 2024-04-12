@@ -31,7 +31,7 @@ from lib import (
 )
 
 
-os.environ['TOKENIZERS_PARALLELISM'] = '1'
+os.environ['TOKENIZERS_PARALLELISM'] = '0'
 
 def load_msmarco_hard_negatives_uncached() -> Dict[str, Dict[str, Any]]:
     """Loads hard negative passage for MSMARCO.
@@ -361,9 +361,7 @@ class NomicUnsupervisedDataset(torch.utils.data.Dataset):
         print("[NomicUnsupervisedDataset] loading dataset")
         self.dataset = (
             datasets.load_dataset(
-                "nomic-ai/nomic_embed_unsupervised", 
-                #num_proc=64,
-                #keep_in_memory=True,
+                "nomic-ai/nomic_embed_unsupervised",
             )["train"]
         )
         print("[NomicUnsupervisedDataset] loading subdomain idxs")

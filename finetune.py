@@ -169,7 +169,8 @@ def main():
         raise ValueError(f'Unsupported dataset {data_args.dataset}')
     
     print("[*] loading sampler")
-    train_sampler = get_sampler(
+    train_sampler_fn = functools.partial(
+        get_sampler,
         dataset=train_dataset,
         sampling_strategy=data_args.sampling_strategy,
         batch_size=training_args.per_device_train_batch_size,
@@ -180,21 +181,21 @@ def main():
     )
     data_args_eval = copy.copy(data_args)
     data_args_eval.sampling_strategy = "domain" # always set this for eval
-    # eval_sampler_fn = functools.partial(
-    #     get_sampler,
-    #     dataset=(eval_dataset or train_dataset),
-    #     batch_size=training_args.per_device_eval_batch_size,
-    #     cluster_size=data_args.eval_cluster_size,
-    #     shuffle=False,
-    #     clustering_model="gtr_base",
-    #     clustering_query_to_doc=data_args.clustering_query_to_doc,
-    #     num_samples=(training_args.per_device_eval_batch_size * training_args.max_eval_batches),
-    # )
-    # eval_samplers = {
-    #     "cluster_within_domain": eval_sampler_fn(sampling_strategy="cluster_within_domain"),
-    #     "domain": eval_sampler_fn(sampling_strategy="domain"),
-    #     "random": eval_sampler_fn(sampling_strategy="random"),
-    # }
+    eval_sampler_fn = functools.partial(
+        get_sampler,
+        dataset=(eval_dataset or train_dataset),
+        batch_size=training_args.per_device_eval_batch_size,
+        cluster_size=data_args.eval_cluster_size,
+        shuffle=False,
+        clustering_model="gtr_base",
+        clustering_query_to_doc=data_args.clustering_query_to_doc,
+        num_samples=(training_args.per_device_eval_batch_size * training_args.max_eval_batches),
+    )
+    eval_sampler_fns = {
+        "cluster_within_domain": functools.partial(eval_sampler_fn, sampling_strategy="cluster_within_domain"),
+        "domain": functools.partial(eval_sampler_fn, sampling_strategy="domain"),
+        "random": functools.partial(eval_sampler_fn, sampling_strategy="random"),
+    }
     model_args.transductive_corpus_size = training_args.transductive_corpus_size
     model_config = ModelConfig(**vars(model_args))
     model_cls = get_model_class(model_args.architecture)
@@ -235,13 +236,11 @@ def main():
         model=model,
         args=training_args,
         train_dataset=train_dataset,
-        #eval_dataset=eval_dataset,
-        eval_dataset=None,
+        eval_dataset=eval_dataset,
         dataset_tokenizer=dataset_tokenizer,
         embedder_tokenizer=embedder_tokenizer,
-        train_sampler=train_sampler,
-        eval_samplers={},
-        #eval_samplers=eval_samplers,
+        train_sampler_fn=train_sampler_fn,
+        eval_sampler_fns=eval_sampler_fns,
         retrieval_datasets=retrieval_datasets,
     )
     checkpoint = get_checkpoint(training_args)

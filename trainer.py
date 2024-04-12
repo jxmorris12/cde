@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import functools
 import gc
@@ -33,22 +33,22 @@ class CustomTrainer(transformers.Trainer):
     retrieval_datasets: Dict[str, datasets.Dataset]
     embedder_tokenizer: transformers.PreTrainedTokenizer
     dataset_tokenizer:  transformers.PreTrainedTokenizer
-    train_sampler: Sampler
-    eval_samplers: Dict[str, Sampler]
+    _train_sampler_fn: Callable[[], Sampler]
+    _eval_sampler_fns: Callable[[], Dict[str, Sampler]]
 
     def __init__(self, *args,
                  embedder_tokenizer: transformers.PreTrainedTokenizer,
                  dataset_tokenizer:  transformers.PreTrainedTokenizer,
                  retrieval_datasets: Dict[str, datasets.Dataset],
-                 train_sampler: Sampler,
-                 eval_samplers: Dict[str, Sampler],
+                 train_sampler_fn: Callable[[], Sampler],
+                 eval_sampler_fns: Callable[[], Dict[str, Sampler]],
                   **kwargs
                 ):
         super().__init__(*args, **kwargs)
         self.max_seq_length = self.model.config.max_seq_length
         self.retrieval_datasets = retrieval_datasets
-        self._train_sampler = train_sampler
-        self._eval_samplers = eval_samplers
+        self._train_sampler_fn = train_sampler_fn
+        self._eval_sampler_fns = eval_sampler_fns
         self._signature_columns = [
             "idx",
             "query", "document",
@@ -68,10 +68,10 @@ class CustomTrainer(transformers.Trainer):
         self._extra_logs = TensorRunningAverages()
     
     def _get_train_sampler(self) -> torch.utils.data.Sampler:
-        return self._train_sampler
+        return self._train_sampler_fn()
     
     def _get_eval_sampler(self, eval_dataset: datasets.Dataset) -> torch.utils.data.Sampler:
-        return next(iter(self._eval_samplers.values()))
+        return next(iter(self._eval_sampler_fns.values()))()
     
     def _log_extra(self, key: str, val: torch.Tensor):
         self._extra_logs.update(key, val)
@@ -99,7 +99,8 @@ class CustomTrainer(transformers.Trainer):
             self.gc = None
         
     def get_train_dataloader(self) -> torch.utils.data.DataLoader:
-        self._train_sampler.set_epoch(self.state.epoch or 0)
+        sampler = self._get_train_sampler()
+        sampler.set_epoch(self.state.epoch or 0)
         train_dataloader = torch.utils.data.DataLoader(
             self.train_dataset,
             collate_fn=self.data_collator,
@@ -108,7 +109,7 @@ class CustomTrainer(transformers.Trainer):
             drop_last=self.args.dataloader_drop_last,
             num_workers=self.args.dataloader_num_workers,
             pin_memory=self.args.dataloader_pin_memory,
-            sampler=self._train_sampler
+            sampler=sampler
         )
         self.train_dataloader = train_dataloader
         return train_dataloader
@@ -574,7 +575,8 @@ class CustomTrainer(transformers.Trainer):
 
         # aggregate metrics over multiple samplers
         all_metrics = {}
-        for sampler_name, sampler in self._eval_samplers.items():
+        eval_samplers = { name: fn() for name, fn in self._eval_sampler_fns.items() }
+        for sampler_name, sampler in eval_samplers.items():
             eval_with_sampler_key = "_".join([metric_key_prefix, sampler_name])
             eval_dataloader = self.get_eval_dataloader(eval_dataset, sampler=sampler)
             metrics = self._run_eval_dataloader(
