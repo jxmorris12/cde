@@ -324,21 +324,29 @@ class CustomTrainer(transformers.Trainer):
             dataset_inputs["attention_mask"] = random_document_inputs["attention_mask"]
         else:
             pass
+        
+        if get_world_size() > 1:
+            # Aggregate all transductive inputs from all GPUs
+            dataset_inputs["input_ids"] = gather(dataset_inputs["input_ids"])
+            dataset_inputs["attention_mask"] = gather(dataset_inputs["attention_mask"])
     
         # Sample fewer inputs if batch size is too large
+        effective_batch_size = len(dataset_inputs["input_ids"])
         transductive_corpus_size = self.args.transductive_corpus_size
-        assert transductive_corpus_size <= batch_size, "cannot provide more transductive inputs than in batch"
-        if transductive_corpus_size < batch_size:
-            C_perm = torch.randperm(batch_size, device=query_inputs["input_ids"].device)
+        assert transductive_corpus_size <= effective_batch_size, "cannot provide more transductive inputs than in batch"
+        if transductive_corpus_size < effective_batch_size:
+            C_perm = torch.randperm(effective_batch_size, device=query_inputs["input_ids"].device)
             C_perm = C_perm[:transductive_corpus_size]
+            # Take the random indices from worker 0
+            if get_world_size() > 1:
+                torch.distributed.broadcast(C_perm, src=0)
+
             dataset_inputs["input_ids"] = dataset_inputs["input_ids"][C_perm]
             dataset_inputs["attention_mask"] = dataset_inputs["attention_mask"][C_perm]
-        
-        # Randomly reorder dataset input ids.
-        R1 = torch.randperm(dataset_inputs["input_ids"].shape[0])
-        R2 = torch.randperm(dataset_inputs["input_ids"].shape[0])
 
-        # TODO: Gather dataset input IDs for transduction?
+        # Randomly reorder dataset input ids.
+        R1 = torch.randperm(transductive_corpus_size)
+        R2 = torch.randperm(transductive_corpus_size)
 
         # Store on query 
         query_inputs["dataset_input_ids"] = dataset_inputs["input_ids"][R1]

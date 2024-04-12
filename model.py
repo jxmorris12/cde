@@ -196,7 +196,7 @@ class DatasetTransformer(transformers.PreTrainedModel):
             dataset_input_ids: torch.Tensor,
             dataset_attention_mask: torch.Tensor,
     ) -> torch.Tensor:
-        # print("forward_first_stage //", dataset_input_ids.shape, dataset_attention_mask.shape)
+        assert dataset_input_ids is not None, "got None for dataset_input_ids"
         outputs = (
             self.embedder(
                 input_ids=dataset_input_ids,
