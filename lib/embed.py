@@ -148,15 +148,15 @@ class DenseEncoder(torch.nn.Module):
             )
         )
         data_collator = transformers.DataCollatorWithPadding(self.tokenizer, pad_to_multiple_of=8)
-        num_workers = max(1, self.gpu_count)
+        num_workers = max(1, self.gpu_count) * 2
         data_loader = torch.utils.data.DataLoader(
             dataset,
-            batch_size=batch_size * num_workers,
+            batch_size=(batch_size * max(1, self.gpu_count)),
             shuffle=False,
             drop_last=False,
             num_workers=num_workers, 
             collate_fn=data_collator,
-            persistent_workers=False,
+            persistent_workers=True,
             pin_memory=True
         )
         self._put_model_on_device()
