@@ -1,0 +1,98 @@
+from typing import Optional, List
+
+import logging
+import shlex
+
+import torch
+import transformers
+import wandb
+
+from collate import TokenizerCollator
+from dataset import (
+    BeirDataset
+)
+from lib import load_embedder_and_tokenizer, ModelConfig
+from model import get_model_class
+from run_args import ModelArguments, DataArguments, TrainingArguments
+from trainer import CustomTrainer
+
+
+# Helps with debugging.
+def load_trainer_from_checkpoint_and_args(
+        model_folder: str, 
+        args_str: str, 
+        beir_dataset_names: Optional[List[str]] = None
+    ):
+    torch.compiler.reset()
+    torch._dynamo.config.optimize_ddp = False
+    torch._dynamo.config.cache_size_limit = 10_000
+
+    parser = transformers.HfArgumentParser((ModelArguments, DataArguments, TrainingArguments))
+    model_args, data_args, training_args = (
+        parser.parse_args_into_dataclasses(
+            shlex.split(args_str))
+    )
+    training_args.use_wandb = 0
+    transformers.set_seed(training_args.seed)
+    logging.basicConfig(
+        format='%(asctime)s - %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S',
+        level=logging.WARNING
+    )
+    embedder, embedder_tokenizer = load_embedder_and_tokenizer(
+        model_args.embedder,
+    )
+    dataset_embedder, dataset_tokenizer = load_embedder_and_tokenizer(
+        model_args.dataset_embedder,
+    )
+    dataset_backbone, dataset_tokenizer = load_embedder_and_tokenizer(
+        model_args.dataset_embedder,
+    )
+
+    beir_dataset_names = beir_dataset_names or []
+    if training_args.tiny_debug: 
+        beir_dataset_names = [ 'quora' ]
+        training_args.max_eval_batches = 1
+
+    beir_dict = {
+        d: BeirDataset(dataset=d, embedder_rerank=model_args.embedder_rerank) 
+        for d in sorted(beir_dataset_names)
+    }
+    retrieval_datasets = {
+        **{f"BeIR/{k}": v for k,v in beir_dict.items()}
+    }
+    model_args.transductive_corpus_size = training_args.transductive_corpus_size
+    model_config = ModelConfig(**vars(model_args))
+    model_cls = get_model_class(model_args.architecture)
+    model = model_cls(
+        config=model_config,
+        embedder=embedder,
+        dataset_embedder=dataset_embedder,
+        dataset_backbone=dataset_backbone,
+    )
+
+    collator = TokenizerCollator(
+        tokenizer=embedder_tokenizer,
+        padding='longest',
+        return_tensors='pt',
+        max_length=model_args.max_seq_length,
+    )
+
+    wandb.init(mode="disabled")
+    trainer = CustomTrainer(
+        data_collator=collator,
+        model=model,
+        args=training_args,
+        train_dataset=None,
+        eval_dataset=None,
+        dataset_tokenizer=dataset_tokenizer,
+        embedder_tokenizer=embedder_tokenizer,
+        train_sampler_fn=None,
+        eval_sampler_fns={},
+        retrieval_datasets=retrieval_datasets,
+    )
+    checkpoint_path = transformers.trainer_utils.get_last_checkpoint(
+        model_folder)
+    trainer._load_from_checkpoint(checkpoint_path)
+    return trainer
+    

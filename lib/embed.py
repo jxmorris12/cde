@@ -1,4 +1,4 @@
-from typing import Dict, List, Mapping
+from typing import Dict, List, Mapping, Optional, Union
 
 import functools
 import os
@@ -42,48 +42,83 @@ def move_to_cuda(sample):
 
 
 class DenseEncoder(torch.nn.Module):
-    def __init__(self, model_name_or_path: str, max_seq_length = 128):
+    def __init__(
+            self, 
+            model_name_or_path: str = "", 
+            max_seq_length = 128, 
+            encoder: Optional[torch.nn.Module] = None,
+            query_prefix: str = "",
+            document_prefix: str = "",
+        ):
         super().__init__()
-        self.encoder = None
+        self.encoder = encoder
         self.model_name_or_path = model_name_or_path
         self.tokenizer = transformers.AutoTokenizer.from_pretrained(
             model_name_or_path)
         self.gpu_count = torch.cuda.device_count()
 
-        self.max_length = max_seq_length
         self._model_is_on_device = False
+        self.max_length = max_seq_length
+        self.query_prefix = query_prefix
+        self.document_prefix = document_prefix
 
     def tokenize_transform(
             self,
             examples: Dict[str, List],
             col: str,
-            max_length: int):
+            max_length: int
+        ) -> Dict[str, torch.Tensor]:
         texts = examples[col]
         batch_dict = self.tokenizer(
             texts,
             max_length=max_length,
             padding=True,
-            truncation=True
+            truncation=True,
+            # return_tensors="pt",
         )
         return batch_dict
 
     def _put_model_on_device(self) -> None:
-        self.encoder = transformers.AutoModel.from_pretrained(
-            self.model_name_or_path, torch_dtype=torch.float16)
-        self.encoder.eval()
+        if self._model_is_on_device:
+            return
+        if self.encoder is None:
+            print("[DE] initializing from", self.model_name_or_path)
+            self.encoder = transformers.AutoModel.from_pretrained(
+                self.model_name_or_path, torch_dtype=torch.float16)
+            self.encoder.eval()
         if hasattr(self.encoder, "encoder"):
-            print("[DE] taking encoder from encoder-decoder")
+            print("[DE] taking encoder from an encoder-decoder model")
             self.encoder = self.encoder.encoder
         if self.gpu_count > 0:
             self.encoder.cuda()
 
         if self.gpu_count > 1:
-            self.encoder = torch.nn.DataParallel(self.encoder)
             print(f"[DE] Wrapped DenseEncoder in {self.gpu_count} GPUs")
+            self.encoder = torch.nn.DataParallel(self.encoder)
         self._model_is_on_device = True
+    
+    def encode_corpus(self, corpus: List[Dict[str, str]], *args, **kwargs) -> np.ndarray:
+        if isinstance(corpus[0], dict):
+            passages = ['{} {}'.format(doc.get('title', ''), doc['text']).strip() for doc in corpus]
+        else:
+            passages = corpus
+        return self.encode(dataset=passages, *args, **kwargs)
 
+    def encode_queries(self, query_list, **kwargs) -> np.ndarray:
+        return self.encode(
+            dataset=query_list, **kwargs, prefix=self.query_prefix
+        )
+    
     @torch.no_grad()
-    def encode(self, dataset: datasets.Dataset, col: str, batch_size: int) -> np.ndarray:
+    def encode(
+            self, 
+            dataset: Union[list[str], datasets.Dataset], 
+            col: str = "text", 
+            batch_size: int = 256, 
+            prefix: str = "", 
+            show_progress_bar: bool = True,
+            convert_to_tensor: bool = False,
+        ) -> Union[torch.Tensor, np.ndarray]:
         """ Returns a list of embeddings for the given sentences.
         Args:
             sentences (`List[str]`): List of sentences to encode
@@ -92,45 +127,26 @@ class DenseEncoder(torch.nn.Module):
         Returns:
             `List[np.ndarray]` or `List[tensor]`: List of embeddings for the given sentences
         """
+        if isinstance(dataset, list):
+            if isinstance(dataset[0], str):
+                dataset = datasets.Dataset.from_dict({ col: dataset })
+            elif isinstance(dataset[0], dict):
+                dataset = datasets.Dataset.from_list(dataset)
+            else:
+                raise RuntimeError("unknown dataset format to encode")
+        if len(prefix):
+            def add_prefix(ex: Dict[str, str]):
+                ex[col] = (prefix + ex[col])
+                return ex
+            dataset = dataset.map(add_prefix, desc=f"Prepending prefix {prefix}")
 
-        use_threads = True
-        num_cpus = len(os.sched_getaffinity(0))
-        if use_threads:
-            os.environ["RAYON_NUM_THREADS"] = str(num_cpus)
-            os.environ["RAYON_RS_NUM_THREADS"] = str(num_cpus)
-            os.environ["TOKENIZERS_PARALLELISM"] = "1"
-            dataset = dataset.map(
-                functools.partial(
-                    self.tokenize_transform, 
-                    col=col, 
-                    max_length=self.max_length
-                ),
-                batch_size=100_000,
-                batched=True,
-                keep_in_memory=False,
-                remove_columns=[col],
-                desc=f"Tokenizing [{col}]"
+        dataset.set_transform(
+            functools.partial(
+                self.tokenize_transform, 
+                col=col, 
+                max_length=self.max_length
             )
-        else:
-            os.environ["TOKENIZERS_PARALLELISM"] = "0"
-            print(f"[embed_with_cache] tokenizing with {num_cpus} processes")
-            dataset = dataset.map(
-                functools.partial(
-                    self.tokenize_transform, 
-                    col=col, 
-                    max_length=self.max_length
-                ),
-                batch_size=10_000,
-                batched=True,
-                num_proc=min(64, num_cpus),
-                keep_in_memory=False,
-                remove_columns=[col],
-                desc=f"Tokenizing {col}"
-            )
-
-        if not self._model_is_on_device:
-            self._put_model_on_device()
-
+        )
         data_collator = transformers.DataCollatorWithPadding(self.tokenizer, pad_to_multiple_of=8)
         num_workers = max(1, self.gpu_count)
         data_loader = torch.utils.data.DataLoader(
@@ -140,31 +156,43 @@ class DenseEncoder(torch.nn.Module):
             drop_last=False,
             num_workers=num_workers, 
             collate_fn=data_collator,
-            persistent_workers=True,
+            persistent_workers=False,
             pin_memory=True
         )
+        self._put_model_on_device()
 
         encoded_embeds = []
         pbar = tqdm_if_main_worker(
             data_loader, desc=f"Encoding {col}", 
-            disable=(dataset.num_rows < 128)
+            disable=((dataset.num_rows < 128) or (not show_progress_bar))
         )
+        embed_device = ("cuda" if self.gpu_count else "cpu")
         for batch_dict in pbar:
             batch_dict = move_to_cuda(batch_dict)
-            outputs = self.encoder(**batch_dict)
+            with torch.autocast(embed_device, dtype=torch.bfloat16):
+                outputs = self.encoder(**batch_dict)
             if hasattr(outputs, 'pooler_output'):
                 embeds = outputs.pooler_output
-            else:
+            elif hasattr(outputs, 'last_hidden_state'):
                 embeds = mean_pool(
                     hidden_states=outputs.last_hidden_state,
                     attention_mask=batch_dict['attention_mask']
                 )
+            else:
+                # already pooled
+                embeds = outputs
             embeds = torch.nn.functional.normalize(embeds, p=2, dim=-1)
-            encoded_embeds.append(embeds.cpu().numpy())
+            encoded_embeds.append(embeds)
 
         num_cleaned_cache_files = dataset.cleanup_cache_files()
-        print(f"cleaned {num_cleaned_cache_files} files")
-        return np.concatenate(encoded_embeds, axis=0)
+        if num_cleaned_cache_files: 
+            print(f"cleaned {num_cleaned_cache_files} files")
+        if convert_to_tensor:
+            return torch.cat(encoded_embeds, dim=0)
+        else:
+            encoded_embeds = [embeds.cpu().numpy() for embeds in encoded_embeds]
+            output_array = np.concatenate(encoded_embeds, axis=0)
+            return output_array
 
 
 def embed_with_cache(

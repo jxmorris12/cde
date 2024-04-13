@@ -220,7 +220,6 @@ class DatasetTransformer(transformers.PreTrainedModel):
         
         # backbone_max_seq_length = self.backbone.config.max_trained_positions
         # assert batch_size + (2 * self.n_soft_prompt + corpus_size) <= backbone_max_seq_length, "too many hard negatives for backbone model"
-
         soft_prompt = torch.ones((1, self.embedding_dim), device=dataset_embeddings.device, dtype=torch.float32)
         soft_prompt = self.prompt_projection(soft_prompt).reshape((1, self.n_soft_prompt, self.hidden_size))
         soft_prompt = torch.cat((dataset_embeddings, soft_prompt), dim=1)
@@ -325,6 +324,7 @@ class BiEncoder(transformers.PreTrainedModel):
             attention_mask: torch.Tensor,
             dataset_input_ids: Optional[torch.Tensor] = None,
             dataset_attention_mask: Optional[torch.Tensor] = None,
+            token_type_ids = None,
         ) -> torch.Tensor:
         """
         query_embedding (float torch.Tensor) - shape (batch_size, embedding_dim)
@@ -335,6 +335,7 @@ class BiEncoder(transformers.PreTrainedModel):
         """
         del dataset_input_ids
         del dataset_attention_mask
+        del token_type_ids
 
         outputs = (
             self.embedder(
