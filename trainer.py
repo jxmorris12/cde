@@ -368,6 +368,8 @@ class CustomTrainer(transformers.Trainer):
         
         # Uncomment next line to log stuff on every GPU.
         # print(f"[rank {get_rank()}] query 0 =", self.embedder_tokenizer.decode(document_inputs["input_ids"][0], skip_special_tokens=True))
+        document_first_tokens = gather(document_inputs["input_ids"][:, 1])
+        query_first_tokens = gather(query_inputs["input_ids"][:, 1])
 
         # Create labels based on document IDs.
         document_unique_ids = gather(document_inputs["input_ids"].sum(dim=1))
@@ -402,6 +404,8 @@ class CustomTrainer(transformers.Trainer):
             "stats_collisions": num_collisions_documents,
             "stats_collisions_queries": num_collisions_queries,
             "stats_dataset_inputs_unique_tokens": ds_input_document_unique_tokens,
+            "stats_unique_first_tokens_document": document_first_tokens.unique().numel(),
+            "stats_unique_first_tokens_query": query_first_tokens.unique().numel(),
         }
         if self.is_in_train:
             for key, val in metrics.items():

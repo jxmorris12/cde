@@ -17,7 +17,8 @@ from lib import (
     cluster_subdomains,
     get_rank, 
     get_world_size, 
-    tqdm_if_main_worker
+    tqdm_if_main_worker,
+    torch_main_worker_finish_first
 ) 
 
 
@@ -237,6 +238,7 @@ class AutoClusterWithinDomainSampler(FixedSubdomainSampler):
             print("[autocluster ran assertions]")
 
 
+@torch_main_worker_finish_first
 def get_sampler(
     dataset: datasets.Dataset,
     sampling_strategy: str,

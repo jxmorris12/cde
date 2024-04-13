@@ -1,3 +1,4 @@
+from typing import Callable
 import multiprocessing
 import os
 
@@ -61,3 +62,29 @@ def get_num_proc() -> int:
     except AttributeError:
         return multiprocessing.cpu_count() // world_size
 
+
+def torch_main_worker_finish_first(func: Callable):
+    def wrapper(*args, **kwargs):
+        # Get local rank (need to support non-DDP).
+        try:
+            local_rank = torch.distributed.get_rank()
+            ddp_enabled = True
+        except (RuntimeError, ValueError):
+            local_rank = -1
+            ddp_enabled = False
+        is_main_worker = local_rank <= 0
+        # Run on main worker first.
+        if is_main_worker:
+            result = func(*args, **kwargs)
+        # Then everyone waits.
+        if ddp_enabled:
+            torch.distributed.barrier()
+        # Run on other workers now.
+        if not is_main_worker:
+            result = func(*args, **kwargs)
+        # Now everyone waits again.
+        if ddp_enabled:
+            torch.distributed.barrier()
+        return result
+
+    return wrapper

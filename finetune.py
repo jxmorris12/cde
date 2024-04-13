@@ -16,7 +16,7 @@ from dataset import (
     load_synthetic_words_dataset, 
     BeirDataset, NomicSupervisedDataset, NomicUnsupervisedDataset
 )
-from lib import get_rank, load_embedder_and_tokenizer, ModelConfig
+from lib import get_rank, get_world_size, load_embedder_and_tokenizer, ModelConfig
 from model import get_model_class
 from run_args import ModelArguments, DataArguments, TrainingArguments
 from sampler import get_sampler
@@ -169,11 +169,12 @@ def main():
         raise ValueError(f'Unsupported dataset {data_args.dataset}')
     
     print("[*] loading sampler")
+    effective_train_batch_size = (training_args.per_device_train_batch_size * get_world_size())
     train_sampler_fn = functools.partial(
         get_sampler,
         dataset=train_dataset,
         sampling_strategy=data_args.sampling_strategy,
-        batch_size=training_args.per_device_train_batch_size,
+        batch_size=effective_train_batch_size,
         cluster_size=data_args.train_cluster_size,
         shuffle=True,
         clustering_model=data_args.clustering_model,
@@ -181,6 +182,7 @@ def main():
     )
     data_args_eval = copy.copy(data_args)
     data_args_eval.sampling_strategy = "domain" # always set this for eval
+    effective_val_batch_size = training_args.per_device_eval_batch_size
     eval_sampler_fn = functools.partial(
         get_sampler,
         dataset=(eval_dataset or train_dataset),

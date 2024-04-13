@@ -103,7 +103,7 @@ class DenseEncoder(torch.nn.Module):
             passages = ['{} {}'.format(doc.get('title', ''), doc['text']).strip() for doc in corpus]
         else:
             passages = corpus
-        return self.encode(dataset=passages, *args, **kwargs)
+        return self.encode(dataset=passages, *args, **kwargs, prefix=self.document_prefix)
 
     def encode_queries(self, query_list, **kwargs) -> np.ndarray:
         return self.encode(
@@ -159,7 +159,7 @@ class DenseEncoder(torch.nn.Module):
             drop_last=False,
             num_workers=num_workers, 
             collate_fn=data_collator,
-            persistent_workers=True,
+            persistent_workers=False,
             pin_memory=True
         )
         self._put_model_on_device()

@@ -431,6 +431,7 @@ def cluster_subdomains(
             dataset=dataset,
             subdomains=subdomains,
             query_to_doc=query_to_doc,
+            cluster_size=cluster_size,
             batch_size=batch_size,
             model=model,
         )
