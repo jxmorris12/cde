@@ -1,6 +1,7 @@
 from typing import Dict, List, Mapping, Optional, Union
 
 import functools
+import math
 import os
 
 import datasets
@@ -148,10 +149,12 @@ class DenseEncoder(torch.nn.Module):
             )
         )
         data_collator = transformers.DataCollatorWithPadding(self.tokenizer, pad_to_multiple_of=8)
-        num_workers = max(1, self.gpu_count) * 2
+        effective_batch_size = (batch_size * max(1, self.gpu_count))
+        max_num_batches = int(math.ceil(len(dataset) / effective_batch_size))
+        num_workers = min(max_num_batches, max(1, self.gpu_count) * 4)
         data_loader = torch.utils.data.DataLoader(
             dataset,
-            batch_size=(batch_size * max(1, self.gpu_count)),
+            batch_size=effective_batch_size,
             shuffle=False,
             drop_last=False,
             num_workers=num_workers, 

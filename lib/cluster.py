@@ -249,7 +249,7 @@ def cluster_dataset_uncached(
         model: str,
         query_key: str,
         document_key: str,
-        batch_size: int,
+        cluster_size: int,
     ) -> Dict[int, List[int]]:
     print("[cluster_dataset_uncached] calling embed_for_clustering...")
     q, X = embed_for_clustering(
@@ -261,7 +261,7 @@ def cluster_dataset_uncached(
     )
     gc.collect()
     
-    k = math.ceil(len(X) / batch_size)
+    k = math.ceil(len(X) / cluster_size)
     is_sparse = (model == "bm25")
 
     print("--> calling faiss...")
@@ -292,7 +292,7 @@ def cluster_dataset(
         model: str,
         query_key: str,
         document_key: str,
-        batch_size: int,
+        cluster_size: int,
     ) -> Dict[int, List[int]]:
     # TODO: Turn this caching logic into a nice decorator?
     clustering_hash = get_cache_location_from_kwargs(
@@ -300,7 +300,7 @@ def cluster_dataset(
         dataset_fingerprint=dataset._fingerprint,
         document_key=document_key,
         query_key=query_key,
-        batch_size=batch_size,
+        batch_size=cluster_size, # TODO: Update this without invalidating cache somehow.
         model=model,
         query_to_doc=query_to_doc,
     )
@@ -319,7 +319,7 @@ def cluster_dataset(
                 query_to_doc=query_to_doc,
                 query_key=query_key,
                 document_key=document_key,
-                batch_size=batch_size,
+                cluster_size=cluster_size,
             )
         else:
             num_sub_datasets = math.ceil(len(dataset) / MAX_DATASET_LEN)
@@ -342,7 +342,7 @@ def cluster_dataset(
                     query_to_doc=query_to_doc,
                     query_key=query_key,
                     document_key=document_key,
-                    batch_size=batch_size,
+                    cluster_size=cluster_size,
                 )
                 new_clusters = set()
                 for data_idx, cluster in tqdm_if_main_worker(mini_result.items()):
@@ -366,11 +366,15 @@ def cluster_subdomains_uncached(
         dataset: datasets.Dataset,
         subdomains: Dict[int, List[int]],
         query_to_doc: bool,
-        batch_size: int, 
+        cluster_size: int, 
+        batch_size: int,
         model: str,
     ) -> Dict[int, List[int]]:
+    """Creates clusters of cluster_size and combines them into subdomain-specific batches of ~batch_size."""
     offset = 0
     final_assignments = collections.defaultdict(list)
+   
+    assert batch_size >= cluster_size
     
     # subdomains_smallest_first = sorted(subdomains.items(), key=lambda x: len(x[1]))
     subdomains_largest_first = sorted(subdomains.items(), key=lambda x: -len(x[1]))
@@ -385,14 +389,16 @@ def cluster_subdomains_uncached(
             query_key=dataset._document_input_ids_key,
             document_key=dataset._query_input_ids_key,
             query_to_doc=query_to_doc,
-            batch_size=batch_size,
+            cluster_size=cluster_size,
         )
 
         print("[autocluster] collecting cluster")
         new_cluster_idxs = set()
-        for j, cluster in tqdm_if_main_worker(cluster_assignments.items(), leave=False):
-            if isinstance(cluster, list): cluster = cluster[0]
-            if isinstance(cluster, torch.Tensor): cluster = cluster.item()
+        clusters_per_batch = round(batch_size / cluster_size)
+        for j, raw_cluster in tqdm_if_main_worker(cluster_assignments.items(), leave=False):
+            if isinstance(raw_cluster, list): raw_cluster = raw_cluster[0]
+            if isinstance(raw_cluster, torch.Tensor): raw_cluster = raw_cluster.item()
+            cluster = raw_cluster // clusters_per_batch
             final_assignments[cluster + offset].append(data_idxs[j])
             new_cluster_idxs.add(cluster)
         offset += len(new_cluster_idxs)
@@ -405,12 +411,14 @@ def cluster_subdomains(
         subdomains: Dict[int, List[int]],
         query_to_doc: bool,
         batch_size: int, 
+        cluster_size: int,
         model: str,
     ) -> Dict[int, List[int]]:
     clustering_hash = get_cache_location_from_kwargs(
         method="cluster_subdomains",
         dataset_fingerprint=dataset._fingerprint,
         batch_size=batch_size,
+        cluster_size=cluster_size,
         model=model,
         query_to_doc=query_to_doc,
     )
