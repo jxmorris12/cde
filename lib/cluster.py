@@ -369,20 +369,33 @@ def cluster_subdomains_uncached(
         cluster_size: int, 
         batch_size: int,
         model: str,
-    ) -> Dict[int, List[int]]:
+    ) -> List[Dict[int, List[int]]]:
     """Creates clusters of cluster_size and combines them into subdomain-specific batches of ~batch_size."""
     offset = 0
     final_assignments = collections.defaultdict(list)
    
-    assert batch_size >= cluster_size
+    if batch_size < cluster_size:
+        print("WARNING: batch size", batch_size, "is less than cluster size", cluster_size)
     
     # subdomains_smallest_first = sorted(subdomains.items(), key=lambda x: len(x[1]))
     subdomains_largest_first = sorted(subdomains.items(), key=lambda x: -len(x[1]))
+    all_cluster_assignments = []
     for j, (_, data_idxs) in enumerate(subdomains_largest_first):
         perc = (j + 1) / len(subdomains) * 100
         print(f"({j + 1} / {len(subdomains)} -- {perc:.1f}%) selecting {len(data_idxs)} indices for clustering")
         mini_dataset = dataset.dataset.select(data_idxs, keep_in_memory=True)
         print("[autocluster] calling cluster_dataset")
+
+        # print("[autocluster] collecting cluster")
+        # new_cluster_idxs = set()
+        # clusters_per_batch = round(batch_size / cluster_size)
+        # for j, raw_cluster in tqdm_if_main_worker(cluster_assignments.items(), leave=False):
+        #     if isinstance(raw_cluster, list): raw_cluster = raw_cluster[0]
+        #     if isinstance(raw_cluster, torch.Tensor): raw_cluster = raw_cluster.item()
+        #     cluster = raw_cluster // clusters_per_batch
+        #     final_assignments[cluster + offset].append(data_idxs[j])
+        #     new_cluster_idxs.add(cluster)
+        # offset += len(new_cluster_idxs)
         cluster_assignments = cluster_dataset(
             dataset=mini_dataset,
             model=model,
@@ -391,19 +404,14 @@ def cluster_subdomains_uncached(
             query_to_doc=query_to_doc,
             cluster_size=cluster_size,
         )
-
-        print("[autocluster] collecting cluster")
-        new_cluster_idxs = set()
-        clusters_per_batch = round(batch_size / cluster_size)
-        for j, raw_cluster in tqdm_if_main_worker(cluster_assignments.items(), leave=False):
+        mini_cluster_assignments = collections.defaultdict(list)
+        for j, raw_cluster in tqdm_if_main_worker(cluster_assignments.items(), leave=False, colour="blue"):
             if isinstance(raw_cluster, list): raw_cluster = raw_cluster[0]
             if isinstance(raw_cluster, torch.Tensor): raw_cluster = raw_cluster.item()
-            cluster = raw_cluster // clusters_per_batch
-            final_assignments[cluster + offset].append(data_idxs[j])
-            new_cluster_idxs.add(cluster)
-        offset += len(new_cluster_idxs)
+            mini_cluster_assignments[raw_cluster].append(data_idxs[j])
+        all_cluster_assignments.append(mini_cluster_assignments)
     print(f"[cluster_subdomains] expanded {len(subdomains)} domains to {len(final_assignments)} clusters.")
-    return final_assignments
+    return all_cluster_assignments
 
 
 def cluster_subdomains(
@@ -413,9 +421,9 @@ def cluster_subdomains(
         batch_size: int, 
         cluster_size: int,
         model: str,
-    ) -> Dict[int, List[int]]:
+    ) -> List[Dict[int, List[int]]]:
     clustering_hash = get_cache_location_from_kwargs(
-        method="cluster_subdomains",
+        method="cluster_subdomains__list",
         dataset_fingerprint=dataset._fingerprint,
         batch_size=batch_size,
         cluster_size=cluster_size,

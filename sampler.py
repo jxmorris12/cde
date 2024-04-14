@@ -18,7 +18,6 @@ from lib import (
     get_rank, 
     get_world_size, 
     tqdm_if_main_worker,
-    torch_main_worker_finish_first
 ) 
 
 
@@ -135,10 +134,15 @@ class FixedSubdomainSampler(RandomSampler):
                 np.random.default_rng(self.seed).shuffle(self.batch_assignments[k])
         assert sum(map(len, self.batch_assignments.values())) == len(dataset)
     
-    def _get_indices(self) -> List[int]:
+    def _get_batch_lists(self) -> List[Iterable[int]]:
+        """List of sub-batches which will be flattened and reshaped into the full clusters."""
         batch_lists = list(self.batch_assignments.values())
         np_gen = np.random.default_rng(seed=(self.seed + self.epoch))
         np_gen.shuffle(batch_lists)
+        return batch_lists
+    
+    def _get_indices(self) -> List[int]:
+        batch_lists = self._get_batch_lists()
         # 1. Concatenate all datasets from all batches (which should be pre-shuffled once)
         all_assignments = torch.tensor(
             [v for L in tqdm_if_main_worker(batch_lists, desc="Sampler tensorizing clusters") for v in L])
@@ -159,6 +163,7 @@ class FixedSubdomainSampler(RandomSampler):
         # 5. Flatten and return
         print(f"[sampler] finished running get_indices on rank {get_rank()}")
         all_indices = []
+        np_gen = np.random.default_rng(seed=(self.seed + self.epoch))
         for batch_tensor in tqdm_if_main_worker(all_assignments[batch_perm], colour="green", desc="Sampler shuffling per-batch"): 
             batch_list = batch_tensor.tolist()
             np_gen.shuffle(batch_list)
@@ -202,6 +207,7 @@ class AutoClusterSampler(FixedSubdomainSampler):
 
 class AutoClusterWithinDomainSampler(FixedSubdomainSampler):
     dataset: NomicDataset
+    all_cluster_assignments: List[Dict[int, Iterable[int]]]
     def __init__(
             self, 
             dataset: NomicDataset,
@@ -220,7 +226,7 @@ class AutoClusterWithinDomainSampler(FixedSubdomainSampler):
             num_samples=num_samples,
         )
         self.dataset = dataset
-        self.batch_assignments = cluster_subdomains(
+        self.all_cluster_assignments = cluster_subdomains(
             dataset=self.dataset,
             subdomains=self.batch_assignments,
             query_to_doc=query_to_doc,
@@ -228,17 +234,20 @@ class AutoClusterWithinDomainSampler(FixedSubdomainSampler):
             batch_size=batch_size,
             model=model,
         )
-        run_assertions = False
-        if run_assertions:
-            print("[autocluster running assertions]")
-            tq = functools.partial(tqdm_if_main_worker, leave=False)
-            assert sum(map(len, tq(self.batch_assignments.values(), desc="asserting total length of all clusters"))) == len(dataset)
-            assert len(set(v for b in tq(self.batch_assignments.values()) for v in b), desc="asserting all values are unique") == len(dataset)
-            assert set(v for b in tq(self.batch_assignments.values(), desc="asserting values cover range") for v in b) == set(range(len(dataset)))
-            print("[autocluster ran assertions]")
+    
+    def _get_batch_lists(self) -> List[Iterable[int]]:
+        """Put clusters next to each other in batches."""
+        all_batches = []
+        np_gen = np.random.default_rng(seed=(self.seed + self.epoch))
+        for minicluster in tqdm_if_main_worker(self.all_cluster_assignments, colour="red", leave=False):
+            all_sub_batches = []
+            for cluster_idx, cluster_list in minicluster.items():
+                all_sub_batches.append(cluster_list)
+            np_gen.shuffle(all_sub_batches)
+            all_batches.extend(all_sub_batches)
+        return all_batches
 
 
-@torch_main_worker_finish_first
 def get_sampler(
     dataset: datasets.Dataset,
     sampling_strategy: str,

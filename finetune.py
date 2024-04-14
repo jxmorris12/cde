@@ -182,7 +182,6 @@ def main():
     )
     data_args_eval = copy.copy(data_args)
     data_args_eval.sampling_strategy = "domain" # always set this for eval
-    effective_val_batch_size = training_args.per_device_eval_batch_size
     eval_sampler_fn = functools.partial(
         get_sampler,
         dataset=(eval_dataset or train_dataset),
@@ -193,6 +192,7 @@ def main():
         clustering_query_to_doc=data_args.clustering_query_to_doc,
         num_samples=(training_args.per_device_eval_batch_size * training_args.max_eval_batches),
     )
+    print("[***] creating val samplers")
     eval_sampler_fns = {
         "cluster_within_domain": functools.partial(eval_sampler_fn, sampling_strategy="cluster_within_domain"),
         "domain": functools.partial(eval_sampler_fn, sampling_strategy="domain"),
@@ -208,6 +208,7 @@ def main():
         dataset_backbone=dataset_backbone,
     )
 
+    print("[***] creating collator")
     collator = collator_cls(
         tokenizer=embedder_tokenizer,
         padding='longest',
@@ -233,6 +234,7 @@ def main():
         )
         wandb.watch(model)
 
+    print("[***] creating trainer")
     trainer = CustomTrainer(
         data_collator=collator,
         model=model,
@@ -247,6 +249,7 @@ def main():
     )
     checkpoint = get_checkpoint(training_args)
     logging.info("train() loaded checkpoint %s", checkpoint)
+    print("[***] trainer.train()")
     trainer.train(resume_from_checkpoint=checkpoint)
     trainer.evaluate_retrieval_datasets()
 
