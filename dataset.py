@@ -33,6 +33,7 @@ from lib import (
 
 os.environ['TOKENIZERS_PARALLELISM'] = '0'
 
+
 def load_msmarco_hard_negatives_uncached() -> Dict[str, Dict[str, Any]]:
     """Loads hard negative passage for MSMARCO.
 
@@ -178,7 +179,6 @@ class BeirDataset(torch.utils.data.Dataset):
     queries: datasets.Dataset
     rerank_results: Dict[str, Dict[str, int]]
     size: int
-    column_names: List[str] = ["idx", "query_embedding", "document_embeddings", "negative_document_embeddings"]
     hard_negatives: Optional[Dict[str, Any]]
     def __init__(
             self,
@@ -368,11 +368,8 @@ class NomicUnsupervisedDataset(torch.utils.data.Dataset):
         subdomain_idxs_dict = get_subdomain_idxs_cached(
             dataset=self.dataset
         )
-        
-        # Share subdomain_idxs between processes so that it doesn't end up copied in every single
-        # dataloader.
-        manager = torch.multiprocessing.Manager()
-        self.subdomain_idxs = manager.dict(**subdomain_idxs_dict)
+        # TODO: Share dict between processes.
+        self.subdomain_idxs = subdomain_idxs_dict
         assert len(self.dataset) == 238_998_494
         self.tokenizer = tokenizer
         self.max_seq_length = max_seq_length
