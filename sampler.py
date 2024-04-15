@@ -190,6 +190,10 @@ class AutoClusterSampler(FixedSubdomainSampler):
             num_samples=num_samples,
         )
         self.dataset = dataset
+       
+    
+    @property
+    def batch_assignments(self) -> Dict[int, List[int]]:
         cluster_assignments = cluster_dataset(
             dataset=dataset,
             model=model,
@@ -199,9 +203,6 @@ class AutoClusterSampler(FixedSubdomainSampler):
             cluster_size=cluster_size,
         )
         assert len(self.dataset) == len(cluster_assignments)
-    
-    @property
-    def batch_assignments(self) -> Dict[int, List[int]]:
         batch_assignments = collections.defaultdict(list)
         for i, cluster in tqdm_if_main_worker(cluster_assignments.items()):
             if isinstance(cluster, list): cluster = cluster[0]
@@ -229,17 +230,21 @@ class AutoClusterWithinDomainSampler(FixedSubdomainSampler):
             shuffle=False,
             num_samples=num_samples,
         )
+        self.query_to_doc = query_to_doc
+        self.batch_size = batch_size
+        self.cluster_size = cluster_size
         self.dataset = dataset
+        self.model = model
     
     @property
     def subdomain_cluster_assignments(self) -> List[Dict[int, List[int]]]:
         return cluster_subdomains(
             dataset=self.dataset,
             subdomains=self.batch_assignments,
-            query_to_doc=query_to_doc,
-            cluster_size=cluster_size,
-            batch_size=batch_size,
-            model=model,
+            query_to_doc=self.query_to_doc,
+            cluster_size=self.cluster_size,
+            batch_size=self.batch_size,
+            model=self.model,
         )
     
     def _get_batch_lists(self) -> List[Iterable[int]]:
