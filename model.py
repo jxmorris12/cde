@@ -120,35 +120,18 @@ class TwoEmbeddersWithMLP(transformers.PreTrainedModel):
         return outputs
 
 
-class DatasetTransformer(transformers.PreTrainedModel):
-    embedder: transformers.PreTrainedModel
-    dataset_backbone: transformers.PreTrainedModel
+class DatasetConditionedBiencoder(transformers.PreTrainedModel):
     def __init__(
             self, 
             config, #: transformers.PreTrainedConfig, 
-            embedder: transformers.PreTrainedModel, 
             dataset_backbone: transformers.PreTrainedModel,
         ):
         super().__init__(config=config)
-
-        if config.limit_layers:
-            print(f"Limiting layers to {config.limit_layers}")
-            limit_layers(embedder, config.limit_layers)
-            limit_layers(dataset_backbone, config.limit_layers)
-        
-        self.first_stage_model = BiEncoder(
-            config=config,
-            embedder=embedder
-        )
         self.backbone = dataset_backbone
-
-        self.hidden_size = embedder.config.hidden_size
-
-        self.backbone = dataset_backbone
-        self.embedding_dim = embedder.config.hidden_size
+        self.embedding_dim = dataset_backbone.config.hidden_size
         self.hidden_size = self.backbone.config.hidden_size
         self.n_soft_prompt = 8
-
+        self.hidden_size = dataset_backbone.config.hidden_size
         if self.backbone.config.model_type.startswith("nomic"):
             # We only want to apply positional embeddings to the
             # *text* portion of the backbone network.
@@ -171,30 +154,13 @@ class DatasetTransformer(transformers.PreTrainedModel):
             torch.nn.ReLU(),
             torch.nn.Linear(self.hidden_size, self.hidden_size)
         )
-        self.temp = config.logit_scale
-        if config.disable_dropout:
-            disable_dropout(self)
-        
         self.randomize_dataset_sequence_order = True
-        
-    def forward_first_stage(
-            self,
-            dataset_input_ids: torch.Tensor,
-            dataset_attention_mask: torch.Tensor,
-    ) -> torch.Tensor:
-        assert dataset_input_ids is not None, "got None for dataset_input_ids"
-        return self.first_stage_model(
-            input_ids=dataset_input_ids,
-            attention_mask=dataset_attention_mask
-        )
-        
-    def forward_second_stage(
+    
+    def forward(
             self, 
             input_ids: torch.Tensor,
             attention_mask: torch.Tensor,
-            dataset_embeddings: torch.Tensor,
-        ) -> torch.Tensor:
-        # print("forward_second_stage //", input_ids.shape, input_ids.shape, "//", dataset_embeddings.shape)
+            dataset_embeddings: torch.Tensor) -> torch.Tensor:
         dataset_embeddings = dataset_embeddings[None, :, :] # (b, d) -> (1, b, d)
         
         batch_size = input_ids.shape[0]
@@ -246,6 +212,35 @@ class DatasetTransformer(transformers.PreTrainedModel):
         output_vectors = output_pooled
         return self.output_projection(output_vectors) # (b, 2d) -> (b, d)
 
+
+class DatasetTransformer(transformers.PreTrainedModel):
+    embedder: transformers.PreTrainedModel
+    dataset_backbone: transformers.PreTrainedModel
+    def __init__(
+            self, 
+            config, #: transformers.PreTrainedConfig, 
+            embedder: transformers.PreTrainedModel, 
+            dataset_backbone: transformers.PreTrainedModel,
+        ):
+        super().__init__(config=config)
+
+        if config.limit_layers:
+            print(f"Limiting layers to {config.limit_layers}")
+            limit_layers(embedder, config.limit_layers)
+            limit_layers(dataset_backbone, config.limit_layers)
+        
+        self.first_stage_model = BiEncoder(
+            config=config,
+            embedder=embedder
+        )
+        self.second_stage_model = DatasetConditionedBiencoder(
+            config=config,
+            dataset_backbone=dataset_backbone
+        )
+        self.temp = config.logit_scale
+        if config.disable_dropout:
+            disable_dropout(self)
+        
     def forward(
             self, 
             input_ids: torch.Tensor,
@@ -259,11 +254,11 @@ class DatasetTransformer(transformers.PreTrainedModel):
         attention_mask (bool torch.Tensor)
         """
         if dataset_embeddings is None:
-            dataset_embeddings = self.forward_first_stage(
-                dataset_input_ids=dataset_input_ids, 
-                dataset_attention_mask=dataset_attention_mask
+            dataset_embeddings = self.first_stage_model(
+                input_ids=dataset_input_ids, 
+                attention_mask=dataset_attention_mask
             )
-        return self.forward_second_stage(
+        return self.second_stage_model(
             input_ids=input_ids,
             attention_mask=attention_mask,
             dataset_embeddings=dataset_embeddings,

@@ -608,6 +608,7 @@ class CustomTrainer(transformers.Trainer):
                 metric_key_prefix=eval_with_sampler_key
             )
             all_metrics = (metrics | all_metrics)
+            gc.collect()
         return all_metrics
 
     def evaluate_retrieval_datasets(self) -> Dict[str, float]:

@@ -83,9 +83,9 @@ class GradCache:
         model = kwargs["model"]
         model_is_ddp = isinstance(model, nn.parallel.DistributedDataParallel)
         if model_is_ddp:
-            model_has_two_stages = hasattr(model.module, "forward_first_stage")
+            model_has_two_stages = hasattr(model.module, "second_stage_model")
         else:
-            model_has_two_stages = hasattr(model, "forward_first_stage")
+            model_has_two_stages = hasattr(model, "second_stage_model")
 
         if model_has_two_stages:
             return self.cache_step_two_stage(*args, **kwargs)
@@ -266,7 +266,8 @@ class GradCache:
         if (get_world_size() > 0) and no_sync_except_last:
             sync_contexts = [
                 functools.partial(self.accelerator.no_sync, model) for _ in range(len(model_inputs) - 1)
-            ] + [functools.partial(self.accelerator.trigger_sync_in_backward, model)]
+            ] + [nullcontext]
+            # ] + [functools.partial(self.accelerator.trigger_sync_in_backward, model)]
         else:
             sync_contexts = [nullcontext for _ in range(len(model_inputs))]
 
@@ -351,7 +352,8 @@ class GradCache:
         if (get_world_size() > 0) and no_sync_except_last:
             sync_contexts = [
                 functools.partial(self.accelerator.no_sync, model) for _ in range(len(model_inputs) - 1)
-            ] + [functools.partial(self.accelerator.trigger_sync_in_backward, model)]
+            ] + [nullcontext]
+            # ] + [functools.partial(self.accelerator.trigger_sync_in_backward, model)]
         else:
             sync_contexts = [nullcontext for _ in range(len(model_inputs))]
         if len(model_inputs) > min_tqdm_inputs:
@@ -423,9 +425,14 @@ class GradCache:
                 first_stage_model,
                 device_ids=model.device_ids,
             )
-            # TODO: Should we cache this? Would that save some overhead?
+            second_stage_model = model.module.second_stage_model
+            second_stage_model = torch.nn.parallel.DistributedDataParallel(
+                second_stage_model,
+                device_ids=model.device_ids,
+            )
         else:
             first_stage_model = model.first_stage_model
+            second_stage_model = model.second_stage_model
 
         first_stage_input_chunks = first_stage_model_inputs[0]
 
@@ -435,7 +442,7 @@ class GradCache:
                 first_stage_input_chunks_tqdm,
                 desc="computing first stage outputs",
                 leave=False,
-                colour="#F7B1AB"
+                colour="pink"
             )
 
         first_stage_rnd_states = []
@@ -457,7 +464,7 @@ class GradCache:
         # concatenate all sub-batch representations
         output_embeddings = []
         second_stage_rnd_states = []
-        for _model, second_stage_input_chunks in zip([model, model], second_stage_model_inputs):
+        for _model, second_stage_input_chunks in zip([second_stage_model, second_stage_model], second_stage_model_inputs):
             second_stage_input_chunks_tqdm = second_stage_input_chunks
             if len(second_stage_input_chunks) > min_tqdm_inputs:
                 second_stage_input_chunks_tqdm = tqdm_if_main_worker(
@@ -485,7 +492,11 @@ class GradCache:
         ###
         ### Using output representations, compute loss :)
         ###
-        output_gradient_cache, loss = self.build_cache(backward_fn, *output_embeddings, **loss_kwargs)
+        output_gradient_cache, loss = self.build_cache(
+            backward_fn, 
+            *output_embeddings, 
+            **loss_kwargs
+        )
         if not run_backward:
             # We also support a mode now where we don't actually compute gradients, we just
             # compute loss in this multi-stage process, which is used for consistent evaluation.
@@ -501,7 +512,7 @@ class GradCache:
         ###
         first_stage_embedding = first_stage_embedding.detach().requires_grad_()
         for _model, second_stage_input_chunks, random_states, cached_gradients in zip(
-            [model, model], second_stage_model_inputs, second_stage_rnd_states, second_stage_gradients
+            [second_stage_model, second_stage_model], second_stage_model_inputs, second_stage_rnd_states, second_stage_gradients
         ):
             self.forward_backward_two_stage(
                 model=_model,
@@ -515,11 +526,11 @@ class GradCache:
         ###
         ### Compute gradients wrt first stage
         ### 
-        model_is_ddp = isinstance(model, nn.parallel.DistributedDataParallel)
         if no_sync_except_last and model_is_ddp:
             sync_contexts = [
                 functools.partial(self.accelerator.no_sync, model) for _ in range(len(model_inputs) - 1)
-            ] + [functools.partial(self.accelerator.trigger_sync_in_backward, model)]
+            ] + [nullcontext]
+            # ] + [functools.partial(self.accelerator.trigger_sync_in_backward, first_stage_model)]
         else:
             sync_contexts = [nullcontext for _ in range(len(first_stage_input_chunks))]
         
