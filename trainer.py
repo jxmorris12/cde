@@ -334,6 +334,7 @@ class CustomTrainer(transformers.Trainer):
         effective_batch_size = len(dataset_inputs["input_ids"])
         transductive_corpus_size = self.args.transductive_corpus_size
         assert transductive_corpus_size <= effective_batch_size, "cannot provide more transductive inputs than in batch"
+
         if transductive_corpus_size < effective_batch_size:
             C_perm = torch.randperm(effective_batch_size, device=query_inputs["input_ids"].device)
             C_perm = C_perm[:transductive_corpus_size]
@@ -355,7 +356,7 @@ class CustomTrainer(transformers.Trainer):
         # Store on doc
         document_inputs["dataset_input_ids"] = dataset_inputs["input_ids"][R2]
         document_inputs["dataset_attention_mask"] = dataset_inputs["attention_mask"][R2]
-
+        
         return (query_inputs, document_inputs, negative_document_inputs)
 
     def compute_loss(
@@ -365,8 +366,9 @@ class CustomTrainer(transformers.Trainer):
         return_outputs: bool = False,
     ) -> Union[Tuple[torch.Tensor, Dict[str, torch.Tensor]], torch.Tensor]:
         query_inputs, document_inputs, negative_document_inputs = self._split_inputs(inputs=inputs)
+        return torch.tensor(0.1, device=self.args.device)
         
-        # Uncomment next line to log stuff on every GPU.
+        # Uncomment next line to log text on every GPU.
         # print(f"[rank {get_rank()}] query 0 =", self.embedder_tokenizer.decode(document_inputs["input_ids"][0], skip_special_tokens=True))
         document_first_tokens = gather(document_inputs["input_ids"][:, 1].contiguous())
         query_first_tokens = gather(query_inputs["input_ids"][:, 1].contiguous())

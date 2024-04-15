@@ -272,6 +272,16 @@ class TrainingArguments(transformers.TrainingArguments):
             )
         },
     )
+    # dataloader_prefetch_factor: Optional[int] = field(
+    #     default=4,
+    #     metadata={
+    #         "help": (
+    #             "Number of batches loaded in advance by each worker. "
+    #             "2 means there will be a total of 2 * num_workers batches prefetched across all workers. "
+    #             "Default is 2 for PyTorch < 2.0.0 and otherwise None."
+    #         )
+    #     },
+    # )
     def __setattr__(self, name, value):
         super(transformers.TrainingArguments, self).__setattr__(name, value)
 
