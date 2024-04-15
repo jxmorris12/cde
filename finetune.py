@@ -90,11 +90,8 @@ def main():
     embedder, embedder_tokenizer = load_embedder_and_tokenizer(
         model_args.embedder,
     )
-    dataset_embedder, dataset_tokenizer = load_embedder_and_tokenizer(
-        model_args.dataset_embedder,
-    )
     dataset_backbone, dataset_tokenizer = load_embedder_and_tokenizer(
-        model_args.dataset_embedder,
+        model_args.embedder,
     )
 
     beir_dataset_names = [
@@ -204,7 +201,6 @@ def main():
     model = model_cls(
         config=model_config,
         embedder=embedder,
-        dataset_embedder=dataset_embedder,
         dataset_backbone=dataset_backbone,
     )
 

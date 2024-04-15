@@ -54,10 +54,6 @@ class ModelArguments:
         default="nomic-ai/nomic-embed-text-v1-unsupervised",
         metadata={"help": "embedder name for the model (encoder-decoder)"}
     )
-    dataset_embedder: str = field(
-        default="nomic-ai/nomic-embed-text-v1-unsupervised",
-        metadata={"help": "embedder name for the model that embeds random dataset instances"}
-    )
     embedder_rerank: str = field(
         default="sentence-transformers/gtr-t5-base",
         metadata={"help": "embedder name for reranking"}

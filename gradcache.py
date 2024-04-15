@@ -80,7 +80,12 @@ class GradCache:
         Call the cache_step function.
         :return: Current step loss.
         """
-        model_has_two_stages = hasattr(kwargs["model"], "forward_first_stage")
+        model = kwargs["model"]
+        model_is_ddp = isinstance(model, nn.parallel.DistributedDataParallel)
+        if model_is_ddp:
+            model_has_two_stages = hasattr(model.module, "forward_first_stage")
+        else:
+            model_has_two_stages = hasattr(model, "forward_first_stage")
 
         if model_has_two_stages:
             return self.cache_step_two_stage(*args, **kwargs)
@@ -362,7 +367,7 @@ class GradCache:
             model_inputs_tqdm, random_states, cached_gradients, sync_contexts
         ):
             with state, sync_context(), (autocast() if self.bf16 else nullcontext()):
-                y = model.forward_second_stage(
+                y = model(
                     input_ids=x["input_ids"],
                     attention_mask=x["attention_mask"],
                     dataset_embeddings=dataset_embeddings,
@@ -411,7 +416,18 @@ class GradCache:
         ##
         ## First stage no grad
         ##
-        first_stage_model = model # TODO: Generalize this
+        model_is_ddp = isinstance(model, nn.parallel.DistributedDataParallel)
+        if model_is_ddp:
+            first_stage_model = model.module.first_stage_model
+            first_stage_model = torch.nn.parallel.DistributedDataParallel(
+                first_stage_model,
+                device_ids=model.device_ids,
+            )
+            print("wrapping first_stage_model")
+            # TODO: Should we cache this?
+        else:
+            first_stage_model = model.first_stage_model
+
         first_stage_input_chunks = first_stage_model_inputs[0]
 
         first_stage_input_chunks_tqdm = first_stage_input_chunks
@@ -429,9 +445,9 @@ class GradCache:
             for x in first_stage_input_chunks_tqdm:
                 first_stage_rnd_states.append(RandContext(*self.get_input_tensors(x)))
                 with autocast() if self.bf16 else nullcontext():
-                    y = first_stage_model.forward_first_stage(
-                        dataset_input_ids=x['dataset_input_ids'],
-                        dataset_attention_mask=x['dataset_attention_mask'],
+                    y = first_stage_model(
+                        input_ids=x['dataset_input_ids'],
+                        attention_mask=x['dataset_attention_mask'],
                     )
                 first_stage_embedding.append(self.get_reps(y))
         # concatenate all sub-batch representations
@@ -456,7 +472,7 @@ class GradCache:
                 for x in second_stage_input_chunks_tqdm:
                     rnd_states.append(RandContext(*self.get_input_tensors(x)))
                     with autocast() if self.bf16 else nullcontext():
-                        y = _model.forward_second_stage(
+                        y = _model(
                             input_ids=x["input_ids"],
                             attention_mask=x["attention_mask"],
                             dataset_embeddings=first_stage_embedding,
@@ -521,9 +537,9 @@ class GradCache:
             first_stage_input_chunks, first_stage_rnd_states, first_stage_gradients, sync_contexts
         ):
             with state, sync_context(), (autocast() if self.bf16 else nullcontext()):
-                y = first_stage_model.forward_first_stage(
-                    dataset_input_ids=x['dataset_input_ids'],
-                    dataset_attention_mask=x['dataset_attention_mask'],
+                y = first_stage_model(
+                    input_ids=x['dataset_input_ids'],
+                    attention_mask=x['dataset_attention_mask'],
                 )
             reps = self.get_reps(y)
             surrogate = torch.dot(reps.flatten(), gradient.flatten())

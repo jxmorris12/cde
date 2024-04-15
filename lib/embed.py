@@ -136,7 +136,7 @@ class DenseEncoder(torch.nn.Module):
             else:
                 raise RuntimeError("unknown dataset format to encode")
         if len(prefix):
-            def add_prefix(ex: Dict[str, str]):
+            def add_prefix(ex: Dict[str, str]) -> Dict[str, str]:
                 ex[col] = (prefix + ex[col])
                 return ex
             dataset = dataset.map(add_prefix, desc=f"Prepending prefix {prefix}")

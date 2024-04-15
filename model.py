@@ -29,15 +29,12 @@ def disable_dropout(model: torch.nn.Module):
 
 class TwoEmbeddersWithMLP(transformers.PreTrainedModel):
     embedder: transformers.PreTrainedModel
-    dataset_embedder: transformers.PreTrainedModel
     embedder: transformers.PreTrainedModel
-    dataset_embedder: transformers.PreTrainedModel
     dataset_backbone: transformers.PreTrainedModel
     def __init__(
             self, 
             config, #: transformers.PreTrainedConfig, 
             embedder: transformers.PreTrainedModel, 
-            dataset_embedder: transformers.PreTrainedModel, 
             dataset_backbone: transformers.PreTrainedModel,
         ):
         super().__init__(config=config)
@@ -46,14 +43,8 @@ class TwoEmbeddersWithMLP(transformers.PreTrainedModel):
         if config.limit_layers:
             print(f"Limiting layers to {config.limit_layers}")
             limit_layers(embedder, config.limit_layers)
-            limit_layers(dataset_embedder, config.limit_layers)
             limit_layers(dataset_backbone, config.limit_layers)
         self.embedder = embedder
-        self.dataset_embedder = dataset_embedder
-        if hasattr(dataset_embedder, "encoder"):
-            self.dataset_embedder = dataset_embedder.encoder
-        else:
-            self.dataset_embedder = dataset_embedder
         self.backbone = dataset_backbone
 
         # TODO make this a little nicer. (Not every model has 'embeddings...')
@@ -85,7 +76,7 @@ class TwoEmbeddersWithMLP(transformers.PreTrainedModel):
         batch_size = input_ids.shape[0]
         _corpus_size = dataset_input_ids.shape[0]
         dataset_backbone_input_embeddings = mean_pool(
-            hidden_states=self.dataset_embedder(
+            hidden_states=self.backbone(
                 input_ids=dataset_input_ids,
                 attention_mask=dataset_attention_mask
             ).last_hidden_state,
@@ -131,14 +122,12 @@ class TwoEmbeddersWithMLP(transformers.PreTrainedModel):
 
 class DatasetTransformer(transformers.PreTrainedModel):
     embedder: transformers.PreTrainedModel
-    dataset_embedder: transformers.PreTrainedModel
     dataset_backbone: transformers.PreTrainedModel
     def __init__(
             self, 
             config, #: transformers.PreTrainedConfig, 
             embedder: transformers.PreTrainedModel, 
             dataset_backbone: transformers.PreTrainedModel,
-            dataset_embedder: transformers.PreTrainedModel = None,  #  ignored 
         ):
         super().__init__(config=config)
 
@@ -147,14 +136,16 @@ class DatasetTransformer(transformers.PreTrainedModel):
             limit_layers(embedder, config.limit_layers)
             limit_layers(dataset_backbone, config.limit_layers)
         
-        del dataset_embedder
-        self.embedder = embedder
+        self.first_stage_model = BiEncoder(
+            config=config,
+            embedder=embedder
+        )
         self.backbone = dataset_backbone
 
-        self.hidden_size = self.embedder.config.hidden_size
+        self.hidden_size = embedder.config.hidden_size
 
         self.backbone = dataset_backbone
-        self.embedding_dim = self.embedder.config.hidden_size
+        self.embedding_dim = embedder.config.hidden_size
         self.hidden_size = self.backbone.config.hidden_size
         self.n_soft_prompt = 8
 
@@ -180,11 +171,6 @@ class DatasetTransformer(transformers.PreTrainedModel):
             torch.nn.ReLU(),
             torch.nn.Linear(self.hidden_size, self.hidden_size)
         )
-        self.corpus_projection = torch.nn.Sequential(
-            torch.nn.Linear(self.embedding_dim, self.hidden_size),
-            torch.nn.ReLU(),
-            torch.nn.Linear(self.hidden_size, self.hidden_size)
-        )
         self.temp = config.logit_scale
         if config.disable_dropout:
             disable_dropout(self)
@@ -197,13 +183,10 @@ class DatasetTransformer(transformers.PreTrainedModel):
             dataset_attention_mask: torch.Tensor,
     ) -> torch.Tensor:
         assert dataset_input_ids is not None, "got None for dataset_input_ids"
-        outputs = (
-            self.embedder(
-                input_ids=dataset_input_ids,
-                attention_mask=dataset_attention_mask).last_hidden_state
+        return self.first_stage_model(
+            input_ids=dataset_input_ids,
+            attention_mask=dataset_attention_mask
         )
-        dataset_embeddings = mean_pool(outputs, dataset_attention_mask) # (b, s, d) -> (b, d)
-        return self.corpus_projection(dataset_embeddings) # (1, b, d) -> (1, b, d)
         
     def forward_second_stage(
             self, 
@@ -269,15 +252,17 @@ class DatasetTransformer(transformers.PreTrainedModel):
             attention_mask: torch.Tensor,
             dataset_input_ids: Optional[torch.Tensor] = None,
             dataset_attention_mask: Optional[torch.Tensor] = None,
+            dataset_embeddings: Optional[torch.Tensor] = None,
         ) -> torch.Tensor:
         """
         input_ids (long torch.Tensor) – ids of input tokens
         attention_mask (bool torch.Tensor)
         """
-        dataset_embeddings = self.forward_first_stage(
-            dataset_input_ids=dataset_input_ids, 
-            dataset_attention_mask=dataset_attention_mask
-        )
+        if dataset_embeddings is None:
+            dataset_embeddings = self.forward_first_stage(
+                dataset_input_ids=dataset_input_ids, 
+                dataset_attention_mask=dataset_attention_mask
+            )
         return self.forward_second_stage(
             input_ids=input_ids,
             attention_mask=attention_mask,
@@ -292,7 +277,6 @@ class BiEncoder(transformers.PreTrainedModel):
             config, #: transformers.PreTrainedConfig, 
             embedder: transformers.PreTrainedModel, 
             dataset_backbone: transformers.PreTrainedModel = None,
-            dataset_embedder: transformers.PreTrainedModel = None, 
         ):
         super().__init__(config=config)
         self.tokenizer = transformers.AutoTokenizer.from_pretrained('bert-base-uncased')
@@ -301,8 +285,7 @@ class BiEncoder(transformers.PreTrainedModel):
             print(f"Limiting layers to {config.limit_layers}")
             limit_layers(embedder, config.limit_layers)
             limit_layers(dataset_backbone, config.limit_layers)
-        
-        del dataset_embedder
+    
         del dataset_backbone
         self.embedder = embedder
         self.hidden_size = self.embedder.config.hidden_size
