@@ -365,9 +365,13 @@ class NomicUnsupervisedDataset(torch.utils.data.Dataset):
             )["train"]
         )
         print("[NomicUnsupervisedDataset] loading subdomain idxs")
-        self.subdomain_idxs = get_subdomain_idxs_cached(
+        subdomain_idxs_dict = get_subdomain_idxs_cached(
             dataset=self.dataset
         )
+        with torch.multiprocessing.Manager() as manager:
+            # Share subdomain_idxs between processes so that it doesn't end up copied in every single
+            # dataloader.
+            self.subdomain_idxs = manager.dict(**subdomain_idxs_dict)
         assert len(self.dataset) == 238_998_494
         self.tokenizer = tokenizer
         self.max_seq_length = max_seq_length

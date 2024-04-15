@@ -54,10 +54,6 @@ class ModelArguments:
         default="nomic-ai/nomic-embed-text-v1-unsupervised",
         metadata={"help": "embedder name for the model (encoder-decoder)"}
     )
-    dataset_embedder: str = field(
-        default="nomic-ai/nomic-embed-text-v1-unsupervised",
-        metadata={"help": "embedder name for the model that embeds random dataset instances"}
-    )
     embedder_rerank: str = field(
         default="sentence-transformers/gtr-t5-base",
         metadata={"help": "embedder name for reranking"}
@@ -263,6 +259,16 @@ class TrainingArguments(transformers.TrainingArguments):
         metadata={
             "help": (
                 "Run in jack's tiny debug mode. Disables eval."
+            )
+        },
+    )
+    # https://github.com/pytorch/pytorch/issues/118421
+    ddp_bucket_cap_mb: Optional[int] = field(
+        default=100,
+        metadata={
+            "help": (
+                "When using distributed training, the value of the flag `bucket_cap_mb` passed to "
+                "`DistributedDataParallel`."
             )
         },
     )

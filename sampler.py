@@ -130,8 +130,9 @@ class FixedSubdomainSampler(RandomSampler):
         g = torch.Generator()
         g.manual_seed(self.seed)
         if shuffle:
+            np_gen = np.random.default_rng(self.seed)
             for k in tqdm_if_main_worker(self.batch_assignments.keys(), desc="Shuffling clusters", colour="red"):
-                np.random.default_rng(self.seed).shuffle(self.batch_assignments[k])
+                np_gen.shuffle(self.batch_assignments[k])
         assert sum(map(len, self.batch_assignments.values())) == len(dataset)
     
     def _get_batch_lists(self) -> List[Iterable[int]]:
@@ -163,10 +164,9 @@ class FixedSubdomainSampler(RandomSampler):
         # 5. Flatten and return
         print(f"[sampler] finished running get_indices on rank {get_rank()}")
         all_indices = []
-        np_gen = np.random.default_rng(seed=(self.seed + self.epoch))
         for batch_tensor in tqdm_if_main_worker(all_assignments[batch_perm], colour="green", desc="Sampler shuffling per-batch"): 
-            batch_list = batch_tensor.tolist()
-            np_gen.shuffle(batch_list)
+            rand_perm = torch.randperm(len(batch_tensor), generator=g)
+            batch_list = batch_tensor[rand_perm].tolist()
             all_indices.extend(batch_list)
         return all_indices
 
@@ -199,10 +199,14 @@ class AutoClusterSampler(FixedSubdomainSampler):
             cluster_size=cluster_size,
         )
         assert len(self.dataset) == len(cluster_assignments)
-        self.batch_assignments = collections.defaultdict(list)
+    
+    @property
+    def batch_assignments(self) -> Dict[int, List[int]]:
+        batch_assignments = collections.defaultdict(list)
         for i, cluster in tqdm_if_main_worker(cluster_assignments.items()):
             if isinstance(cluster, list): cluster = cluster[0]
-            self.batch_assignments[cluster].append(i)
+            batch_assignments[cluster].append(i)
+        return batch_assignments
 
 
 class AutoClusterWithinDomainSampler(FixedSubdomainSampler):
@@ -226,7 +230,10 @@ class AutoClusterWithinDomainSampler(FixedSubdomainSampler):
             num_samples=num_samples,
         )
         self.dataset = dataset
-        self.all_cluster_assignments = cluster_subdomains(
+    
+    @property
+    def subdomain_cluster_assignments(self) -> List[Dict[int, List[int]]]:
+        return cluster_subdomains(
             dataset=self.dataset,
             subdomains=self.batch_assignments,
             query_to_doc=query_to_doc,
@@ -239,7 +246,8 @@ class AutoClusterWithinDomainSampler(FixedSubdomainSampler):
         """Put clusters next to each other in batches."""
         all_batches = []
         np_gen = np.random.default_rng(seed=(self.seed + self.epoch))
-        for minicluster in tqdm_if_main_worker(self.all_cluster_assignments, colour="red", leave=False):
+        all_cluster_assignments = self.subdomain_cluster_assignments
+        for minicluster in tqdm_if_main_worker(all_cluster_assignments, colour="red", leave=False):
             all_sub_batches = []
             for cluster_idx, cluster_list in minicluster.items():
                 all_sub_batches.append(cluster_list)

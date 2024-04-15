@@ -361,7 +361,7 @@ def test_gradient_gradcache__transductive():
         for param_name in true_grad_sums.keys() 
     }
     for param_name in gc_grad_sums.keys():
-         assert torch.isclose(
+        assert torch.isclose(
             gc_grad_sums[param_name], 
-            true_grad_sums[param_name]
+            true_grad_sums[param_name],
         )

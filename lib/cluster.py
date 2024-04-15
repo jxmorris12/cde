@@ -372,7 +372,6 @@ def cluster_subdomains_uncached(
     ) -> List[Dict[int, List[int]]]:
     """Creates clusters of cluster_size and combines them into subdomain-specific batches of ~batch_size."""
     offset = 0
-    final_assignments = collections.defaultdict(list)
    
     if batch_size < cluster_size:
         print("WARNING: batch size", batch_size, "is less than cluster size", cluster_size)
@@ -385,17 +384,9 @@ def cluster_subdomains_uncached(
         print(f"({j + 1} / {len(subdomains)} -- {perc:.1f}%) selecting {len(data_idxs)} indices for clustering")
         mini_dataset = dataset.dataset.select(data_idxs, keep_in_memory=True)
         print("[autocluster] calling cluster_dataset")
-
-        # print("[autocluster] collecting cluster")
-        # new_cluster_idxs = set()
-        # clusters_per_batch = round(batch_size / cluster_size)
-        # for j, raw_cluster in tqdm_if_main_worker(cluster_assignments.items(), leave=False):
-        #     if isinstance(raw_cluster, list): raw_cluster = raw_cluster[0]
-        #     if isinstance(raw_cluster, torch.Tensor): raw_cluster = raw_cluster.item()
-        #     cluster = raw_cluster // clusters_per_batch
-        #     final_assignments[cluster + offset].append(data_idxs[j])
-        #     new_cluster_idxs.add(cluster)
-        # offset += len(new_cluster_idxs)
+        
+        # The idea is that we cluster each dataset individually and then track the clusters via
+        # nested dicts like this.
         cluster_assignments = cluster_dataset(
             dataset=mini_dataset,
             model=model,
@@ -410,7 +401,7 @@ def cluster_subdomains_uncached(
             if isinstance(raw_cluster, torch.Tensor): raw_cluster = raw_cluster.item()
             mini_cluster_assignments[raw_cluster].append(data_idxs[j])
         all_cluster_assignments.append(mini_cluster_assignments)
-    print(f"[cluster_subdomains] expanded {len(subdomains)} domains to {len(final_assignments)} clusters.")
+    print(f"[cluster_subdomains] expanded {len(subdomains)} domains to {len(all_cluster_assignments)} clusters.")
     return all_cluster_assignments
 
 
