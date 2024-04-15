@@ -211,6 +211,8 @@ def main():
         return_tensors='pt',
         max_length=model_args.max_seq_length,
     )
+    
+    checkpoint = get_checkpoint(training_args)
     if get_rank() == 0:
         wandb_run_id = training_args.exp_name
         print("starting wandb run with name", wandb_run_id)
@@ -218,7 +220,7 @@ def main():
             entity="jack-morris",
             project="tti-nomic-5",
             name=wandb_run_id,
-            #resume=True,
+            resume=(checkpoint is not None),
     )
         wandb.config.update(
             {
@@ -243,7 +245,6 @@ def main():
         eval_sampler_fns=eval_sampler_fns,
         retrieval_datasets=retrieval_datasets,
     )
-    checkpoint = get_checkpoint(training_args)
     logging.info("train() loaded checkpoint %s", checkpoint)
     print("[***] trainer.train()")
     trainer.train(resume_from_checkpoint=checkpoint)

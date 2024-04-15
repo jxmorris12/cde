@@ -24,7 +24,7 @@ def calculate_gradient_norm(model: torch.nn.Module):
     for param in model.parameters():
         if param.grad is not None:
             param_norm = param.grad.data.norm(2)  # Calculate the 2-norm of the gradients
-            total_norm += param_norm.item() ** 2
+            total_norm += param_norm.detach() ** 2
     total_norm = total_norm ** (1. / 2)  # Take the square root to get the total norm
     return total_norm
 
@@ -254,7 +254,7 @@ class CustomTrainer(transformers.Trainer):
         acc = pred_labels.float().mean()
 
         metrics = {
-            "acc": acc.item(),
+            "acc": acc.detach(),
             "stats_total_queries": len(e1),
             "stats_total_documents": len(e2),
             "batch_size": batch_size,
@@ -325,24 +325,24 @@ class CustomTrainer(transformers.Trainer):
         else:
             pass
         
-        # if get_world_size() > 1:
-        #     # Aggregate all transductive inputs from all GPUs
-        #     dataset_inputs["input_ids"] = gather(dataset_inputs["input_ids"])
-        #     dataset_inputs["attention_mask"] = gather(dataset_inputs["attention_mask"])
+        if get_world_size() > 1:
+            # Aggregate all transductive inputs from all GPUs
+            dataset_inputs["input_ids"] = gather(dataset_inputs["input_ids"])
+            dataset_inputs["attention_mask"] = gather(dataset_inputs["attention_mask"])
     
         # # Sample fewer inputs if batch size is too large
-        # effective_batch_size = len(dataset_inputs["input_ids"])
+        effective_batch_size = len(dataset_inputs["input_ids"])
         transductive_corpus_size = self.args.transductive_corpus_size
-        # assert transductive_corpus_size <= effective_batch_size, "cannot provide more transductive inputs than in batch"
-        # if transductive_corpus_size < effective_batch_size:
-        #     C_perm = torch.randperm(effective_batch_size, device=query_inputs["input_ids"].device)
-        #     C_perm = C_perm[:transductive_corpus_size]
-        #     # Take the random indices from worker 0
-        #     if get_world_size() > 1:
-        #         torch.distributed.broadcast(C_perm, src=0)
+        assert transductive_corpus_size <= effective_batch_size, "cannot provide more transductive inputs than in batch"
+        if transductive_corpus_size < effective_batch_size:
+            C_perm = torch.randperm(effective_batch_size, device=query_inputs["input_ids"].device)
+            C_perm = C_perm[:transductive_corpus_size]
+            # Take the random indices from worker 0
+            if get_world_size() > 1:
+                torch.distributed.broadcast(C_perm, src=0)
 
-        #     dataset_inputs["input_ids"] = dataset_inputs["input_ids"][C_perm]
-        #     dataset_inputs["attention_mask"] = dataset_inputs["attention_mask"][C_perm]
+            dataset_inputs["input_ids"] = dataset_inputs["input_ids"][C_perm]
+            dataset_inputs["attention_mask"] = dataset_inputs["attention_mask"][C_perm]
 
         # Randomly reorder dataset input ids.
         R1 = torch.randperm(transductive_corpus_size)
@@ -398,10 +398,10 @@ class CustomTrainer(transformers.Trainer):
         # Dataset input stats
         ds_input_document_unique_tokens = document_inputs["dataset_input_ids"].unique().numel()
 
-        query_first_token_most_common = query_first_tokens.flatten().mode().values.item()
+        query_first_token_most_common = query_first_tokens.flatten().mode().values.detach()
         query_first_token_mean = (query_first_tokens == query_first_token_most_common).float().mean()
 
-        document_first_token_most_common = document_first_tokens.flatten().mode().values.item()
+        document_first_token_most_common = document_first_tokens.flatten().mode().values.detach()
         document_first_token_mean = (document_first_tokens == document_first_token_most_common).float().mean()
 
         metrics = {

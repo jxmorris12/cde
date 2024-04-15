@@ -262,6 +262,16 @@ class TrainingArguments(transformers.TrainingArguments):
             )
         },
     )
+    # https://github.com/pytorch/pytorch/issues/118421
+    ddp_bucket_cap_mb: Optional[int] = field(
+        default=100,
+        metadata={
+            "help": (
+                "When using distributed training, the value of the flag `bucket_cap_mb` passed to "
+                "`DistributedDataParallel`."
+            )
+        },
+    )
     def __setattr__(self, name, value):
         super(transformers.TrainingArguments, self).__setattr__(name, value)
 

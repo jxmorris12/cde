@@ -423,8 +423,7 @@ class GradCache:
                 first_stage_model,
                 device_ids=model.device_ids,
             )
-            print("wrapping first_stage_model")
-            # TODO: Should we cache this?
+            # TODO: Should we cache this? Would that save some overhead?
         else:
             first_stage_model = model.first_stage_model
 
