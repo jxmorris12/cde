@@ -103,6 +103,7 @@ def test_loss_gradcache():
         query_inputs, 
         document_inputs, 
         model=model,
+        model_stages=[model.first_stage_model, model.second_stage_model],
         one_hot_labels=one_hot_labels,
         no_sync_except_last=False,
         backward_fn=(lambda t: t.backward()),
@@ -179,6 +180,7 @@ def test_loss_gradcache__transductive():
         query_inputs, 
         document_inputs, 
         model=model,
+        model_stages=[model.first_stage_model, model.second_stage_model],
         one_hot_labels=one_hot_labels,
         no_sync_except_last=False,
         backward_fn=(lambda t: t.backward()),
@@ -212,7 +214,6 @@ def test_gradient_gradcache__biencoder():
     model = BiEncoder(
          config=tiny_config,
          embedder=tiny_model,
-         dataset_backbone=tiny_model,
     )
     dataset = NomicSupervisedDataset(
         tokenizer=tiny_tokenizer,
@@ -333,6 +334,7 @@ def test_gradient_gradcache__transductive():
         query_inputs, 
         document_inputs, 
         model=model,
+        model_stages=[model.first_stage_model, model.second_stage_model],
         one_hot_labels=one_hot_labels,
         no_sync_except_last=False,
         backward_fn=(lambda t: t.backward()),

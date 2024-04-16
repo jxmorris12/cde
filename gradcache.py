@@ -75,10 +75,7 @@ class GradCache:
         self.bf16 = bf16
         self._get_input_tensors_strict = False
 
-        self.first_stage_model = None
-        self.second_stage_model = None
-
-    def __call__(self, *args, **kwargs):
+    def __call__(self, *args, model_stages: Optional[Tuple[nn.Module, nn.Module]] = None, **kwargs):
         """
         Call the cache_step function.
         :return: Current step loss.
@@ -91,7 +88,7 @@ class GradCache:
             model_has_two_stages = hasattr(model, "second_stage_model")
 
         if model_has_two_stages:
-            return self.cache_step_two_stage(*args, **kwargs)
+            return self.cache_step_two_stage(*args, model_stages=model_stages, **kwargs)
         else:
             return self.cache_step_one_stage(*args, **kwargs)
 
@@ -268,8 +265,9 @@ class GradCache:
         # https://huggingface.co/docs/accelerate/en/concept_guides/gradient_synchronization
         if (get_world_size() > 0) and no_sync_except_last:
             sync_contexts = [
-                model.no_sync for _ in range(len(model_inputs) - 1)
+                functools.partial(self.accelerator.no_sync, model) for _ in range(len(model_inputs) - 1)
             ] + [nullcontext]
+            # ] + [functools.partial(self.accelerator.trigger_sync_in_backward, model)]
         else:
             sync_contexts = [nullcontext for _ in range(len(model_inputs))]
 
@@ -353,7 +351,7 @@ class GradCache:
         """
         if (get_world_size() > 0) and no_sync_except_last:
             sync_contexts = [
-                model.no_sync for _ in range(len(model_inputs) - 1)
+                functools.partial(self.accelerator.no_sync, model) for _ in range(len(model_inputs) - 1)
             ] + [nullcontext]
         else:
             sync_contexts = [nullcontext for _ in range(len(model_inputs))]
@@ -380,7 +378,12 @@ class GradCache:
             backward_fn(surrogate)  # [added]
 
     def cache_step_two_stage(
-        self, *model_inputs, model: nn.Module, no_sync_except_last: bool = False, backward_fn: Callable, run_backward: bool, **loss_kwargs
+        self, 
+            *model_inputs, 
+            model: nn.Module, no_sync_except_last: bool = False, 
+            backward_fn: Callable, run_backward: bool, 
+            model_stages: Optional[Tuple[nn.Module, nn.Module]] = None,
+            **loss_kwargs
     ) -> Tensor:
         """
         Run a cached step to compute gradient over the inputs.
@@ -420,21 +423,8 @@ class GradCache:
         ## First stage no grad
         ##
         model_is_ddp = isinstance(model, nn.parallel.DistributedDataParallel)
-        if model_is_ddp:
-            if self.first_stage_model is None:
-                self.first_stage_model = torch.nn.parallel.DistributedDataParallel(
-                    model.module.first_stage_model,
-                    device_ids=model.device_ids,
-                )
-                self.second_stage_model = torch.nn.parallel.DistributedDataParallel(
-                    model.module.second_stage_model,
-                    device_ids=model.device_ids,
-                )
-            first_stage_model = self.first_stage_model
-            second_stage_model = self.second_stage_model
-        else:
-            first_stage_model = model.first_stage_model
-            second_stage_model = model.second_stage_model
+        assert model_stages is not None
+        first_stage_model, second_stage_model = model_stages
 
         first_stage_input_chunks = first_stage_model_inputs[0]
 
@@ -530,7 +520,7 @@ class GradCache:
         ### 
         if no_sync_except_last and model_is_ddp:
             sync_contexts = [
-                model.no_sync for _ in range(len(model_inputs) - 1)
+                functools.partial(self.accelerator.no_sync, model) for _ in range(len(model_inputs) - 1)
             ] + [nullcontext]
         else:
             sync_contexts = [nullcontext for _ in range(len(first_stage_input_chunks))]
@@ -555,4 +545,9 @@ class GradCache:
             reps = self.get_reps(y)
             surrogate = torch.dot(reps.flatten(), gradient.flatten())
             backward_fn(surrogate)
+        
+        # print(f"** {get_rank()} ** 1.weht", first_stage_model.module.embedder.embeddings.word_embeddings.weight[0, 0:4])
+        # print(f"** {get_rank()} ** 1.grad", first_stage_model.module.embedder.embeddings.word_embeddings.weight.grad[0, 0:4])
+        # print(f"** {get_rank()} ** 2.weht", second_stage_model.module.backbone.embeddings.word_embeddings.weight[0, 0:4])
+        # print(f"** {get_rank()} ** 2.grad", second_stage_model.module.backbone.embeddings.word_embeddings.weight.grad[0, 0:4])
         return loss

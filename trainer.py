@@ -19,7 +19,7 @@ from lib import gather, get_rank, get_world_size, inputs_for_key, RerankHelper, 
 from sampler import Sampler
 
 
-def calculate_gradient_norm(model: torch.nn.Module):
+def calculate_gradient_norm(model: torch.nn.Module) -> torch.Tensor:
     total_norm = 0.0
     for param in model.parameters():
         if param.grad is not None:
@@ -35,7 +35,9 @@ class CustomTrainer(transformers.Trainer):
     _train_sampler_fn: Callable[[], Sampler]
     _eval_sampler_fns: Callable[[], Dict[str, Sampler]]
 
-    def __init__(self, *args,
+    def __init__(
+                self, 
+                *args,
                  embedder_tokenizer: transformers.PreTrainedTokenizer,
                  retrieval_datasets: Dict[str, datasets.Dataset],
                  train_sampler_fn: Callable[[], Sampler],
@@ -63,6 +65,8 @@ class CustomTrainer(transformers.Trainer):
         self.use_gc = self.args.use_gc # whether to use gradcache
         self.gc = None # lazily initialized during training
         self._extra_logs = TensorRunningAverages()
+        self.model_has_two_stages = hasattr(self.model, "second_stage_model")
+        self._model_stages = None
     
     def _get_train_sampler(self) -> torch.utils.data.Sampler:
         return self._train_sampler_fn()
@@ -252,6 +256,7 @@ class CustomTrainer(transformers.Trainer):
 
         metrics = {
             "acc": acc.detach(),
+            "loss_unscaled": (loss / get_world_size()).detach(),
             "stats_total_queries": len(e1),
             "stats_total_documents": len(e2),
             "batch_size": batch_size,
@@ -356,6 +361,43 @@ class CustomTrainer(transformers.Trainer):
         
         return (query_inputs, document_inputs, negative_document_inputs)
 
+    def get_model_stages(self, model: torch.nn.Module) -> Optional[Tuple[torch.nn.Module, torch.nn.Module]]:
+        """We have to individually wrap models when our model is two stages (in the transductive setting) so
+        that we can make sure DDP works properly, since it needs to individually hook into the forward() of
+        both models.
+        """
+        if not self.model_has_two_stages:
+            return None
+        elif self._model_stages is None:
+            # We have to create separate DDP instances so that we can call the forward() functions individually
+            # from the two halves of our model and have gradients sync properly.
+            if isinstance(model, torch.nn.parallel.DistributedDataParallel):
+                self._model_stages = self.accelerator.prepare(
+                    model.module.first_stage_model,
+                    model.module.second_stage_model,
+                )
+            else:
+                self._model_stages = self.accelerator.prepare(
+                    model.first_stage_model,
+                    model.second_stage_model,
+                )
+        return self._model_stages
+
+    def _log_grad_norm_metrics(self, model: torch.nn.Module) -> None:
+        if self.is_in_train:
+            if self.model_has_two_stages:
+                model_stages = self.get_model_stages(model=model)
+                grad_norm_metrics = {
+                    "grad_norm_first_stage": calculate_gradient_norm(model_stages[0]),
+                    "grad_norm_second_stage": calculate_gradient_norm(model_stages[1]),
+                }
+            else:
+                grad_norm_metrics = {
+                    "grad_norm_only_stage": calculate_gradient_norm(self.model),
+                }
+            for key, val in grad_norm_metrics.items():
+                self._log_extra(key, val)
+
     def compute_loss(
         self,
         model: transformers.PreTrainedModel,
@@ -415,6 +457,7 @@ class CustomTrainer(transformers.Trainer):
             "stats_unique_first_tokens_query": query_first_tokens.unique().numel(),
             "stats_query_first_token_mean": query_first_token_mean,
             "stats_document_first_token_mean": document_first_token_mean,
+            ###########################################################################
         }
         if self.is_in_train:
             for key, val in metrics.items():
@@ -431,6 +474,7 @@ class CustomTrainer(transformers.Trainer):
                 query_inputs, 
                 document_inputs, 
                 model=model,
+                model_stages=self.get_model_stages(model=model),
                 no_sync_except_last=(get_world_size() > 1),
                 backward_fn=backward_fn,
                 run_backward=self.model.training,
@@ -438,7 +482,8 @@ class CustomTrainer(transformers.Trainer):
                 one_hot_labels=one_hot_labels,
                 duplicate_labels=duplicate_labels,
             )
-            
+            self._log_grad_norm_metrics(model=model)
+
             return loss
         else:
             e1 = model(**query_inputs)
@@ -459,6 +504,7 @@ class CustomTrainer(transformers.Trainer):
                 one_hot_labels=one_hot_labels,
                 duplicate_labels=duplicate_labels,
             )
+            self._log_grad_norm_metrics(model=model)
             return loss
     
     # Custom retrieval evalution code
