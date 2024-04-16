@@ -123,7 +123,7 @@ class TwoEmbeddersWithMLP(transformers.PreTrainedModel):
 class DatasetConditionedBiencoder(transformers.PreTrainedModel):
     def __init__(
             self, 
-            config, #: transformers.PreTrainedConfig, 
+            config,
             dataset_backbone: transformers.PreTrainedModel,
         ):
         super().__init__(config=config)
@@ -182,6 +182,8 @@ class DatasetConditionedBiencoder(transformers.PreTrainedModel):
                         for _ in range(batch_size)])
             randomized_order = randomized_order.to(soft_prompt.device)
             soft_prompt.gather(1, randomized_order[..., None].expand_as(soft_prompt))     
+        
+        
         inputs_embeds = self.backbone.embeddings(input_ids) # (b, s) -> (b, s, d)
         inputs_embeds = torch.cat((soft_prompt, inputs_embeds), dim=1) # (v, 4+b+s, d)
 
@@ -218,7 +220,7 @@ class DatasetTransformer(transformers.PreTrainedModel):
     dataset_backbone: transformers.PreTrainedModel
     def __init__(
             self, 
-            config, #: transformers.PreTrainedConfig, 
+            config,
             embedder: transformers.PreTrainedModel, 
             dataset_backbone: transformers.PreTrainedModel,
         ):
@@ -271,7 +273,6 @@ class BiEncoder(transformers.PreTrainedModel):
             self, 
             config, #: transformers.PreTrainedConfig, 
             embedder: transformers.PreTrainedModel, 
-            dataset_backbone: transformers.PreTrainedModel = None,
         ):
         super().__init__(config=config)
         self.tokenizer = transformers.AutoTokenizer.from_pretrained('bert-base-uncased')
@@ -279,9 +280,7 @@ class BiEncoder(transformers.PreTrainedModel):
         if config.limit_layers:
             print(f"Limiting layers to {config.limit_layers}")
             limit_layers(embedder, config.limit_layers)
-            limit_layers(dataset_backbone, config.limit_layers)
     
-        del dataset_backbone
         self.embedder = embedder
         self.hidden_size = self.embedder.config.hidden_size
         self.mlp = torch.nn.Sequential(

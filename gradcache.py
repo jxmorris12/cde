@@ -75,6 +75,9 @@ class GradCache:
         self.bf16 = bf16
         self._get_input_tensors_strict = False
 
+        self.first_stage_model = None
+        self.second_stage_model = None
+
     def __call__(self, *args, **kwargs):
         """
         Call the cache_step function.
@@ -265,9 +268,8 @@ class GradCache:
         # https://huggingface.co/docs/accelerate/en/concept_guides/gradient_synchronization
         if (get_world_size() > 0) and no_sync_except_last:
             sync_contexts = [
-                functools.partial(self.accelerator.no_sync, model) for _ in range(len(model_inputs) - 1)
+                model.no_sync for _ in range(len(model_inputs) - 1)
             ] + [nullcontext]
-            # ] + [functools.partial(self.accelerator.trigger_sync_in_backward, model)]
         else:
             sync_contexts = [nullcontext for _ in range(len(model_inputs))]
 
@@ -351,9 +353,8 @@ class GradCache:
         """
         if (get_world_size() > 0) and no_sync_except_last:
             sync_contexts = [
-                functools.partial(self.accelerator.no_sync, model) for _ in range(len(model_inputs) - 1)
+                model.no_sync for _ in range(len(model_inputs) - 1)
             ] + [nullcontext]
-            # ] + [functools.partial(self.accelerator.trigger_sync_in_backward, model)]
         else:
             sync_contexts = [nullcontext for _ in range(len(model_inputs))]
         if len(model_inputs) > min_tqdm_inputs:
@@ -420,16 +421,17 @@ class GradCache:
         ##
         model_is_ddp = isinstance(model, nn.parallel.DistributedDataParallel)
         if model_is_ddp:
-            first_stage_model = model.module.first_stage_model
-            first_stage_model = torch.nn.parallel.DistributedDataParallel(
-                first_stage_model,
-                device_ids=model.device_ids,
-            )
-            second_stage_model = model.module.second_stage_model
-            second_stage_model = torch.nn.parallel.DistributedDataParallel(
-                second_stage_model,
-                device_ids=model.device_ids,
-            )
+            if self.first_stage_model is None:
+                self.first_stage_model = torch.nn.parallel.DistributedDataParallel(
+                    model.module.first_stage_model,
+                    device_ids=model.device_ids,
+                )
+                self.second_stage_model = torch.nn.parallel.DistributedDataParallel(
+                    model.module.second_stage_model,
+                    device_ids=model.device_ids,
+                )
+            first_stage_model = self.first_stage_model
+            second_stage_model = self.second_stage_model
         else:
             first_stage_model = model.first_stage_model
             second_stage_model = model.second_stage_model
@@ -528,9 +530,8 @@ class GradCache:
         ### 
         if no_sync_except_last and model_is_ddp:
             sync_contexts = [
-                functools.partial(self.accelerator.no_sync, model) for _ in range(len(model_inputs) - 1)
+                model.no_sync for _ in range(len(model_inputs) - 1)
             ] + [nullcontext]
-            # ] + [functools.partial(self.accelerator.trigger_sync_in_backward, first_stage_model)]
         else:
             sync_contexts = [nullcontext for _ in range(len(first_stage_input_chunks))]
         
@@ -548,8 +549,8 @@ class GradCache:
         ):
             with state, sync_context(), (autocast() if self.bf16 else nullcontext()):
                 y = first_stage_model(
-                    input_ids=x['dataset_input_ids'],
-                    attention_mask=x['dataset_attention_mask'],
+                    input_ids=x["dataset_input_ids"],
+                    attention_mask=x["dataset_attention_mask"],
                 )
             reps = self.get_reps(y)
             surrogate = torch.dot(reps.flatten(), gradient.flatten())

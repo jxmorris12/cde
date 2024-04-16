@@ -32,13 +32,11 @@ def calculate_gradient_norm(model: torch.nn.Module):
 class CustomTrainer(transformers.Trainer):
     retrieval_datasets: Dict[str, datasets.Dataset]
     embedder_tokenizer: transformers.PreTrainedTokenizer
-    dataset_tokenizer:  transformers.PreTrainedTokenizer
     _train_sampler_fn: Callable[[], Sampler]
     _eval_sampler_fns: Callable[[], Dict[str, Sampler]]
 
     def __init__(self, *args,
                  embedder_tokenizer: transformers.PreTrainedTokenizer,
-                 dataset_tokenizer:  transformers.PreTrainedTokenizer,
                  retrieval_datasets: Dict[str, datasets.Dataset],
                  train_sampler_fn: Callable[[], Sampler],
                  eval_sampler_fns: Callable[[], Dict[str, Sampler]],
@@ -62,7 +60,6 @@ class CustomTrainer(transformers.Trainer):
             "query_input_ids", "query_attention_mask",
         ]
         self.embedder_tokenizer = embedder_tokenizer 
-        self.dataset_tokenizer = dataset_tokenizer
         self.use_gc = self.args.use_gc # whether to use gradcache
         self.gc = None # lazily initialized during training
         self._extra_logs = TensorRunningAverages()
@@ -155,7 +152,7 @@ class CustomTrainer(transformers.Trainer):
             return None
     
         keys = ["query_input_ids", "document_input_ids"]
-        tokenizers = [ self.embedder_tokenizer,  self.embedder_tokenizer, self.dataset_tokenizer]
+        tokenizers = [ self.embedder_tokenizer,  self.embedder_tokenizer, self.embedder_tokenizer]
         data = [
                 tokenizer.batch_decode(batch[key][:n], skip_special_tokens=True)
                 for (tokenizer, key) in zip(tokenizers, keys)
@@ -366,8 +363,6 @@ class CustomTrainer(transformers.Trainer):
         return_outputs: bool = False,
     ) -> Union[Tuple[torch.Tensor, Dict[str, torch.Tensor]], torch.Tensor]:
         query_inputs, document_inputs, negative_document_inputs = self._split_inputs(inputs=inputs)
-        return torch.tensor(0.1, device=self.args.device)
-        
         # Uncomment next line to log text on every GPU.
         # print(f"[rank {get_rank()}] query 0 =", self.embedder_tokenizer.decode(document_inputs["input_ids"][0], skip_special_tokens=True))
         document_first_tokens = gather(document_inputs["input_ids"][:, 1].contiguous())
@@ -414,11 +409,12 @@ class CustomTrainer(transformers.Trainer):
             "stats_dataset_inputs_unique_tokens": ds_input_document_unique_tokens,
             "stats_unique_first_tokens_document": document_first_tokens.unique().numel(),
             "stats_unique_first_tokens_query": query_first_tokens.unique().numel(),
+            "stats_num_ds_inputs": len(document_inputs["dataset_input_ids"]),
             ###########################################################################
             "stats_unique_first_tokens_document": document_first_tokens.unique().numel(),
             "stats_unique_first_tokens_query": query_first_tokens.unique().numel(),
             "stats_query_first_token_mean": query_first_token_mean,
-            "statsdocument_first_token_mean": document_first_token_mean,
+            "stats_document_first_token_mean": document_first_token_mean,
         }
         if self.is_in_train:
             for key, val in metrics.items():

@@ -90,23 +90,20 @@ def main():
     embedder, embedder_tokenizer = load_embedder_and_tokenizer(
         model_args.embedder,
     )
-    dataset_backbone, dataset_tokenizer = load_embedder_and_tokenizer(
-        model_args.embedder,
-    )
 
     beir_dataset_names = [
         # https://github.com/beir-cellar/beir/blob/f062f038c4bfd19a8ca942a9910b1e0d218759d4/examples/dataset/download_dataset.py#L13
-         'arguana',
-         'webis-touche2020',
-         'quora',
-         'nfcorpus',
-         'scidocs', 
-         'scifact',
-         'trec-covid',
-         'signal1m',
-         'fiqa',
-         'trec-news',  
-         'msmarco',
+        #  'arguana',
+        #  'webis-touche2020',
+        #  'quora',
+        #  'nfcorpus',
+        #  'scidocs', 
+        #  'scifact',
+        #  'trec-covid',
+        #  'signal1m',
+        #  'fiqa',
+        #  'trec-news',  
+        #  'msmarco',
     #############################################
          'nq',
         # 'cqadupstack',
@@ -198,11 +195,20 @@ def main():
     model_args.transductive_corpus_size = training_args.transductive_corpus_size
     model_config = ModelConfig(**vars(model_args))
     model_cls = get_model_class(model_args.architecture)
-    model = model_cls(
-        config=model_config,
-        embedder=embedder,
-        dataset_backbone=dataset_backbone,
-    )
+    if model_args.architecture == 'biencoder':
+        model = model_cls(
+            config=model_config,
+            embedder=embedder,
+        )
+    else:
+        dataset_backbone, dataset_tokenizer = load_embedder_and_tokenizer(
+            model_args.embedder,
+        )
+        model = model_cls(
+            config=model_config,
+            embedder=embedder,
+            dataset_backbone=dataset_backbone,
+        )
 
     print("[***] creating collator")
     collator = collator_cls(
@@ -238,12 +244,14 @@ def main():
         model=model,
         args=training_args,
         train_dataset=train_dataset,
-        eval_dataset=eval_dataset,
-        dataset_tokenizer=dataset_tokenizer,
+        eval_dataset=None,
+        # eval_dataset=eval_dataset,
         embedder_tokenizer=embedder_tokenizer,
         train_sampler_fn=train_sampler_fn,
-        eval_sampler_fns=eval_sampler_fns,
-        retrieval_datasets=retrieval_datasets,
+        eval_sampler_fns={},
+        # eval_sampler_fns=eval_sampler_fns,
+        retrieval_datasets={},
+        # retrieval_datasets=retrieval_datasets,
     )
     logging.info("train() loaded checkpoint %s", checkpoint)
     print("[***] trainer.train()")
