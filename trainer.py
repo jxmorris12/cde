@@ -254,7 +254,11 @@ class CustomTrainer(transformers.Trainer):
         logits = scores - (duplicate_labels.float() * 10**10)
         loss = torch.nn.functional.cross_entropy(
             logits, labels, label_smoothing=0.0
-        ) * get_world_size()
+        ) 
+        if self.args.ddp_share_negatives_between_gpus:
+            # traditionally people multiply the contrastive loss by the number of gpus.
+            # so we do it too here.
+            loss = loss * get_world_size()
         if (loss.isnan()):
             raise RuntimeError("Loss is nan!")
         
@@ -348,7 +352,7 @@ class CustomTrainer(transformers.Trainer):
             C_perm = torch.randperm(effective_batch_size, device=query_inputs["input_ids"].device)
             C_perm = C_perm[:transductive_corpus_size]
             # Take the random indices from worker 0
-            if get_world_size() > 1:
+            if (get_world_size() > 1) and self.args.ddp_share_negatives_between_gpus:
                 torch.distributed.broadcast(C_perm, src=0)
 
             dataset_inputs["input_ids"] = dataset_inputs["input_ids"][C_perm]
