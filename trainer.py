@@ -383,10 +383,16 @@ class CustomTrainer(transformers.Trainer):
             # We have to create separate DDP instances so that we can call the forward() functions individually
             # from the two halves of our model and have gradients sync properly.
             if isinstance(model, torch.nn.parallel.DistributedDataParallel):
-                self._model_stages = self.accelerator.prepare(
-                    model.module.first_stage_model,
-                    model.module.second_stage_model,
-                )
+                if self.use_gc:
+                    self._model_stages = self.accelerator.prepare(
+                        model.module.first_stage_model,
+                        model.module.second_stage_model,
+                    )
+                else:
+                    self._model_stages = [
+                        model.module.first_stage_model,
+                        model.module.second_stage_model,
+                    ]
             else:
                 self._model_stages = self.accelerator.prepare(
                     model.first_stage_model,
@@ -497,6 +503,7 @@ class CustomTrainer(transformers.Trainer):
 
             return loss
         else:
+            # model = self._wrap_model(model)
             e1 = model(**query_inputs)
             e2 = model(**document_inputs)
 

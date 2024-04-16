@@ -546,8 +546,4 @@ class GradCache:
             surrogate = torch.dot(reps.flatten(), gradient.flatten())
             backward_fn(surrogate)
         
-        # print(f"** {get_rank()} ** 1.weht", first_stage_model.module.embedder.embeddings.word_embeddings.weight[0, 0:4])
-        # print(f"** {get_rank()} ** 1.grad", first_stage_model.module.embedder.embeddings.word_embeddings.weight.grad[0, 0:4])
-        # print(f"** {get_rank()} ** 2.weht", second_stage_model.module.backbone.embeddings.word_embeddings.weight[0, 0:4])
-        # print(f"** {get_rank()} ** 2.grad", second_stage_model.module.backbone.embeddings.word_embeddings.weight.grad[0, 0:4])
         return loss

@@ -183,8 +183,7 @@ class DatasetConditionedBiencoder(transformers.PreTrainedModel):
                          self.n_soft_prompt + torch.randperm(corpus_size)), dim=0) 
                         for _ in range(batch_size)])
             randomized_order = randomized_order.to(soft_prompt.device)
-            soft_prompt.gather(1, randomized_order[..., None].expand_as(soft_prompt))     
-        
+            soft_prompt = soft_prompt.gather(1, randomized_order[..., None].expand_as(soft_prompt))
         
         inputs_embeds = self.backbone.embeddings(input_ids) # (b, s) -> (b, s, d)
         inputs_embeds = torch.cat((soft_prompt, inputs_embeds), dim=1) # (v, 4+b+s, d)
@@ -248,19 +247,17 @@ class DatasetTransformer(transformers.PreTrainedModel):
             self, 
             input_ids: torch.Tensor,
             attention_mask: torch.Tensor,
-            dataset_input_ids: Optional[torch.Tensor] = None,
-            dataset_attention_mask: Optional[torch.Tensor] = None,
-            dataset_embeddings: Optional[torch.Tensor] = None,
+            dataset_input_ids: Optional[torch.Tensor],
+            dataset_attention_mask: Optional[torch.Tensor],
         ) -> torch.Tensor:
         """
         input_ids (long torch.Tensor) – ids of input tokens
         attention_mask (bool torch.Tensor)
         """
-        if dataset_embeddings is None:
-            dataset_embeddings = self.first_stage_model(
-                input_ids=dataset_input_ids, 
-                attention_mask=dataset_attention_mask
-            )
+        dataset_embeddings = self.first_stage_model(
+            input_ids=dataset_input_ids, 
+            attention_mask=dataset_attention_mask
+        )
         return self.second_stage_model(
             input_ids=input_ids,
             attention_mask=attention_mask,
