@@ -309,7 +309,6 @@ class TrainingArguments(transformers.TrainingArguments):
         ############################################################################
         self.dataloader_num_workers = num_workers
         self.dataloader_persistent_workers = (num_workers > 0)
-        # self.dataloader_persistent_workers = False
         self.dataloader_pin_memory = True
         today_date = datetime.date.today()
         formatted_date = today_date.strftime("%Y-%m-%d")
@@ -319,5 +318,7 @@ class TrainingArguments(transformers.TrainingArguments):
         logging.info(f"outputting model to directory: {self.output_dir}")
         logging.info(f"setting dataloader_drop_last from {self.dataloader_drop_last} -> {True}")
         self.dataloader_drop_last = True
-        ############################################################################
         self.ddp_broadcast_buffers = False
+        ############################################################################
+        self.metric_for_best_model = "loss"
+        self.greater_is_better = False
