@@ -66,7 +66,8 @@ def get_checkpoint(training_args) -> Optional[str]:
 
 def main():
     # Helps with debugging.
-    # torch.autograd.set_detect_anomaly(True)
+    torch.autograd.set_detect_anomaly(True)
+    # torch.compile() settings.
     torch.compiler.reset()
     torch._dynamo.config.optimize_ddp = False
     # Following things are taken from 

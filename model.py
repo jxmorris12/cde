@@ -132,7 +132,9 @@ class DatasetConditionedBiencoder(transformers.PreTrainedModel):
         self.hidden_size = self.backbone.config.hidden_size
         self.n_soft_prompt = 8
         self.hidden_size = dataset_backbone.config.hidden_size
-        if self.backbone.config.model_type.startswith("nomic"):
+
+        disable_transductive_rotary_embedding = vars(config).get("disable_transductive_rotary_embedding", True)
+        if self.backbone.config.model_type.startswith("nomic") and disable_transductive_rotary_embedding:
             # We only want to apply positional embeddings to the
             # *text* portion of the backbone network.
             self.backbone.config.rotary_start_pos = 0.0

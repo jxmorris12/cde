@@ -68,6 +68,13 @@ class CustomTrainer(transformers.Trainer):
         self.model_has_two_stages = hasattr(self.model, "second_stage_model")
         self._model_stages = None
     
+    def consider_gather(self, tensor: torch.Tensor) -> torch.Tensor:
+        # TODO: Argparse for optional non-gather
+        if self.args.ddp_share_negatives_between_gpus:
+            return gather(tensor)
+        else:
+            return tensor
+    
     def _get_train_sampler(self) -> torch.utils.data.Sampler:
         return self._train_sampler_fn()
     
@@ -227,8 +234,8 @@ class CustomTrainer(transformers.Trainer):
                 duplicate_labels: torch.Tensor,
                 return_scores: bool = True
             ) -> Tuple[torch.Tensor, torch.Tensor]:
-        e1 = gather(e1)
-        e2 = gather(e2)
+        e1 = self.consider_gather(e1)
+        e2 = self.consider_gather(e2)
 
         e1 = e1 / e1.norm(p=2, dim=1, keepdim=True) # Query
         e2 = e2 / e2.norm(p=2, dim=1, keepdim=True) # Document
@@ -329,10 +336,10 @@ class CustomTrainer(transformers.Trainer):
         
         if get_world_size() > 1:
             # Aggregate all transductive inputs from all GPUs
-            dataset_inputs["input_ids"] = gather(dataset_inputs["input_ids"])
-            dataset_inputs["attention_mask"] = gather(dataset_inputs["attention_mask"])
+            dataset_inputs["input_ids"] = self.consider_gather(dataset_inputs["input_ids"])
+            dataset_inputs["attention_mask"] = self.consider_gather(dataset_inputs["attention_mask"])
     
-        # # Sample fewer inputs if batch size is too large
+        # Sample fewer inputs if batch size is too large
         effective_batch_size = len(dataset_inputs["input_ids"])
         transductive_corpus_size = self.args.transductive_corpus_size
         assert transductive_corpus_size <= effective_batch_size, "cannot provide more transductive inputs than in batch"
@@ -407,12 +414,12 @@ class CustomTrainer(transformers.Trainer):
         query_inputs, document_inputs, negative_document_inputs = self._split_inputs(inputs=inputs)
         # Uncomment next line to log text on every GPU.
         # print(f"[rank {get_rank()}] query 0 =", self.embedder_tokenizer.decode(document_inputs["input_ids"][0], skip_special_tokens=True))
-        document_first_tokens = gather(document_inputs["input_ids"][:, 1].contiguous())
-        query_first_tokens = gather(query_inputs["input_ids"][:, 1].contiguous())
+        document_first_tokens = self.consider_gather(document_inputs["input_ids"][:, 1].contiguous())
+        query_first_tokens = self.consider_gather(query_inputs["input_ids"][:, 1].contiguous())
 
         # Create labels based on document IDs.
-        document_unique_ids = gather(document_inputs["input_ids"].sum(dim=1))
-        idx = gather(inputs["idx"])
+        document_unique_ids = self.consider_gather(document_inputs["input_ids"].sum(dim=1))
+        idx = self.consider_gather(inputs["idx"])
         one_hot_labels = (idx[:, None] == idx[None, :]).float()
         if self.args.automatically_deduplicate_documents:
             smart_labels = (
@@ -421,7 +428,7 @@ class CustomTrainer(transformers.Trainer):
             smart_labels = one_hot_labels.clone()
         
         # Aggregate labels for duplicate queries.
-        query_unique_ids = gather(query_inputs["input_ids"].sum(dim=1))
+        query_unique_ids = self.consider_gather(query_inputs["input_ids"].sum(dim=1))
         if self.args.automatically_deduplicate_queries:
             smart_labels = (
                 (query_unique_ids[:, None] == query_unique_ids[None, :]).float() @ smart_labels.float())

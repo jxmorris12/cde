@@ -82,6 +82,12 @@ class ModelArguments:
             "help": "temperature for contrastive learning",
         }
     )
+    disable_transductive_rotary_embedding: bool = field(
+        default=True,
+        metadata={
+            "help": "Whether to disable rotary embedding on the transductive part of that model"
+        }
+    )
 
 @dataclass
 class DataArguments:
@@ -247,6 +253,12 @@ class TrainingArguments(transformers.TrainingArguments):
                 "`DistributedDataParallel`."
             )
         },
+    )
+    ddp_share_negatives_between_gpus: bool = field(
+        default=True,
+        metadata={
+            "help": "Whether to share negative examples between GPUs (alters batch size)"
+        }
     )
     max_eval_batches: int = field(
         default=16,

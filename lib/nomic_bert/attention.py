@@ -110,7 +110,11 @@ class FlashAttention(nn.Module):
             original_qkv = qkv.clone()
             # no_rotary_qkv = original_qkv[no_rotary_token_mask]
             # qkv = original_qkv[~no_rotary_token_mask]
-            qkv[no_rotary_token_mask] = 0
+            qkv_zeros = torch.zeros_like(qkv, device=qkv.device)
+            qkv = qkv_zeros.where(
+                no_rotary_token_mask[:, None, None, None].expand_as(qkv),
+                qkv # TODO: Confirm this isn't backwards.
+            )
             # if cu_seqlens is not None:
             #     cu_seqlens_offset = (
             #         torch.arange(len(cu_seqlens), dtype=cu_seqlens.dtype, device=cu_seqlens.device) * self.rotary_start_pos
@@ -143,7 +147,10 @@ class FlashAttention(nn.Module):
         if self.rotary_start_pos > 0:
             ############## SECOND NEW PART ##############
             # take the original (pre-rotary) QKV
-            qkv = original_qkv.where(no_rotary_token_mask[:, None, None, None].expand_as(qkv), qkv)
+            qkv = original_qkv.where(
+                no_rotary_token_mask[:, None, None, None].expand_as(qkv), 
+                qkv
+            )
             # if cu_seqlens is not None:
             #     cu_seqlens = cu_seqlens + cu_seqlens_offset
             # if max_seq_len is not None:
