@@ -325,7 +325,7 @@ class BiEncoder(transformers.PreTrainedModel):
 def get_model_class(name: str):
     if name == 'two_head_mlp':
         return TwoEmbeddersWithMLP
-    elif name == 'query_independent_dt':
+    elif name in ['query_independent_dt', 'transductive']: # first name is the old one
         return DatasetTransformer
     elif name == 'biencoder':
         return BiEncoder

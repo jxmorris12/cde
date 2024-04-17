@@ -148,7 +148,7 @@ class FixedSubdomainSampler(RandomSampler):
         all_assignments = torch.tensor(
             [v for L in tqdm_if_main_worker(batch_lists, desc="Sampler tensorizing clusters") for v in L])
         
-        effective_batch_size = self.batch_size * get_world_size()
+        effective_batch_size = self.batch_size
         effective_length = len(self.dataset) - (len(self.dataset) % effective_batch_size)
         # 2. Trim off the end (effectively drop_last=True)
         all_assignments = all_assignments[:effective_length]
@@ -190,17 +190,19 @@ class AutoClusterSampler(FixedSubdomainSampler):
             num_samples=num_samples,
         )
         self.dataset = dataset
-       
+        self.model = model
+        self.query_to_doc = query_to_doc
+        self.cluster_size = cluster_size
     
     @property
     def batch_assignments(self) -> Dict[int, List[int]]:
         cluster_assignments = cluster_dataset(
-            dataset=dataset,
-            model=model,
-            query_key=dataset._document_input_ids_key,
-            document_key=dataset._query_input_ids_key,
-            query_to_doc=query_to_doc,
-            cluster_size=cluster_size,
+            dataset=self.dataset,
+            model=self.model,
+            query_key=self.dataset._document_input_ids_key,
+            document_key=self.dataset._query_input_ids_key,
+            query_to_doc=self.query_to_doc,
+            cluster_size=self.cluster_size,
         )
         assert len(self.dataset) == len(cluster_assignments)
         batch_assignments = collections.defaultdict(list)

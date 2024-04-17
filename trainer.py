@@ -69,17 +69,10 @@ class CustomTrainer(transformers.Trainer):
         self._model_stages = None
     
     def consider_gather(self, tensor: torch.Tensor) -> torch.Tensor:
-        # TODO: Argparse for optional non-gather
         if self.args.ddp_share_negatives_between_gpus:
             return gather(tensor)
         else:
             return tensor
-        
-    def consider_broadcast(self, tensor: torch.Tensor, src: int) -> torch.Tensor:
-        # Take the random indices from worker 0
-        if (get_world_size() > 1) and self.args.ddp_share_negatives_between_gpus:
-            torch.distributed.broadcast(tensor, src=src)
-        return tensor
     
     def _get_train_sampler(self) -> torch.utils.data.Sampler:
         return self._train_sampler_fn()
@@ -214,14 +207,13 @@ class CustomTrainer(transformers.Trainer):
         super()._inner_training_loop(*args, **kwargs)
         
     def training_step(self, model: torch.nn.Module, inputs: Dict[str, Union[torch.Tensor, Any]]) -> torch.Tensor:
+        """
+        Overriding from trainer so that we can disable backward()
+        in favor of the gradcache backward()
+        """
         # Reset dataloader index
         self.train_dataloader.dataset.reset_dataset_idx()
 
-        if not self.use_gc:
-            return super().training_step(model=model, inputs=inputs)
-
-        # Overriding from trainer so that we can disable backward()
-        # in favor of the gradcache backward()
         model.train()
         inputs = self._prepare_inputs(inputs)
         with self.compute_loss_context_manager():
@@ -231,6 +223,19 @@ class CustomTrainer(transformers.Trainer):
         # Uncomment next line to test eval straightaway.
         # self.control.should_evaluate = True  #########
         ##############################################
+        if not self.use_gc:
+            self.accelerator.backward(loss)
+
+            mm = model.module if hasattr(model, "module") else model
+
+            def npp(m):
+                np = list(m.named_parameters())[:12]
+                return [(n, p.norm(p=2).item()) for n, p in np]
+            
+            # if (self.state.global_step > 200) and (get_rank() == 0):
+            #     breakpoint()
+            # print(f"Rank {get_rank()} -- first_stage --", npp(mm.first_stage_model))
+            # print(f"Rank {get_rank()} -- second_stage --", npp(mm.second_stage_model))
         return loss.detach() / self.args.gradient_accumulation_steps
 
     def _contrastive_loss(
@@ -258,13 +263,15 @@ class CustomTrainer(transformers.Trainer):
         labels = one_hot_labels / one_hot_labels.sum(dim=1, keepdim=True)
 
         logits = scores - (duplicate_labels.float() * 10**10)
-        loss = torch.nn.functional.cross_entropy(
+        loss_unscaled = torch.nn.functional.cross_entropy(
             logits, labels, label_smoothing=0.0
         ) 
         if self.args.ddp_share_negatives_between_gpus:
             # traditionally people multiply the contrastive loss by the number of gpus.
             # so we do it too here.
-            loss = loss * get_world_size()
+            loss = loss_unscaled * get_world_size()
+        else:
+            loss = loss_unscaled
         if (loss.isnan()):
             raise RuntimeError("Loss is nan!")
         
@@ -273,7 +280,7 @@ class CustomTrainer(transformers.Trainer):
 
         metrics = {
             "acc": acc.detach(),
-            "loss_unscaled": (loss / get_world_size()).detach(),
+            "loss_unscaled": loss_unscaled.detach(),
             "stats_total_queries": len(e1),
             "stats_total_documents": len(e2),
             "batch_size": batch_size,
@@ -353,17 +360,9 @@ class CustomTrainer(transformers.Trainer):
         transductive_corpus_size = self.args.transductive_corpus_size
         assert transductive_corpus_size <= effective_batch_size, "cannot provide more transductive inputs than in batch"
 
-        if transductive_corpus_size < effective_batch_size:
-            C_perm = torch.randperm(effective_batch_size, device=dataset_inputs["input_ids"].device)
-            C_perm = C_perm[:transductive_corpus_size]
-            C_perm = self.consider_broadcast(C_perm, src=0)
-
-            dataset_inputs["input_ids"] = dataset_inputs["input_ids"][C_perm]
-            dataset_inputs["attention_mask"] = dataset_inputs["attention_mask"][C_perm]
-
         # Randomly reorder dataset input ids.
-        R1 = torch.randperm(transductive_corpus_size)
-        R2 = torch.randperm(transductive_corpus_size)
+        R1 = torch.randperm(effective_batch_size)[:transductive_corpus_size]
+        R2 = torch.randperm(effective_batch_size)[:transductive_corpus_size]
 
         # Store on query 
         query_inputs["dataset_input_ids"] = dataset_inputs["input_ids"][R1]
@@ -516,19 +515,19 @@ class CustomTrainer(transformers.Trainer):
 
             return loss
         else:
-            # model = self._wrap_model(model)
             e1 = model(**query_inputs)
             e2 = model(**document_inputs)
 
-            if len(negative_document_inputs):
-                negative_document_inputs["dataset_input_ids"] = document_inputs["dataset_input_ids"]
-                negative_document_inputs["dataset_attention_mask"] = document_inputs["dataset_attention_mask"]
-                e2_hn = model(**negative_document_inputs)
-                e2 = torch.cat((e2, e2_hn), dim=0)
-                negative_document_unique_ids = negative_document_inputs["input_ids"].sum(dim=1)
-                corpus_unique_ids = torch.cat(
-                    (corpus_unique_ids, negative_document_unique_ids), dim=0
-                )
+            # TODO: Re-implement hard negatives in loss.
+            # if len(negative_document_inputs):
+            #     negative_document_inputs["dataset_input_ids"] = document_inputs["dataset_input_ids"]
+            #     negative_document_inputs["dataset_attention_mask"] = document_inputs["dataset_attention_mask"]
+            #     e2_hn = model(**negative_document_inputs)
+            #     e2 = torch.cat((e2, e2_hn), dim=0)
+            #     negative_document_unique_ids = negative_document_inputs["input_ids"].sum(dim=1)
+            #     corpus_unique_ids = torch.cat(
+            #         (corpus_unique_ids, negative_document_unique_ids), dim=0
+            #     )
 
             loss, _scores = self._contrastive_loss(
                 e1, e2, 
