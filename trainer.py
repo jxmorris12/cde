@@ -354,8 +354,9 @@ class CustomTrainer(transformers.Trainer):
         assert transductive_corpus_size <= effective_batch_size, "cannot provide more transductive inputs than in batch"
 
         if transductive_corpus_size < effective_batch_size:
-            C_perm = torch.randperm(effective_batch_size, device=query_inputs["input_ids"].device)
-            C_perm = self.consider_broadcast(C_perm[:transductive_corpus_size], src=0)
+            C_perm = torch.randperm(effective_batch_size, device=dataset_inputs["input_ids"].device)
+            C_perm = C_perm[:transductive_corpus_size]
+            C_perm = self.consider_broadcast(C_perm, src=0)
 
             dataset_inputs["input_ids"] = dataset_inputs["input_ids"][C_perm]
             dataset_inputs["attention_mask"] = dataset_inputs["attention_mask"][C_perm]
@@ -400,10 +401,16 @@ class CustomTrainer(transformers.Trainer):
                         model.module.second_stage_model,
                     ]
             else:
-                self._model_stages = self.accelerator.prepare(
-                    model.first_stage_model,
-                    model.second_stage_model,
-                )
+                if self.use_gc:
+                    self._model_stages = self.accelerator.prepare(
+                        model.first_stage_model,
+                        model.second_stage_model,
+                    )
+                else:
+                    self._model_stages = [
+                        model.first_stage_model,
+                        model.second_stage_model,
+                    ]
         return self._model_stages
 
     def _log_grad_norm_metrics(self, model: torch.nn.Module) -> None:
