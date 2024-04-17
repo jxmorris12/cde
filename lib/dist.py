@@ -4,6 +4,7 @@ import os
 
 import torch
 
+
 def get_world_size() -> int:
     try:
         return torch.distributed.get_world_size()
@@ -88,3 +89,30 @@ def torch_main_worker_finish_first(func: Callable):
         return result
 
     return wrapper
+
+
+def print0(*args, **kwargs) -> None:
+    if get_rank() == 0:
+        print(*args, **kwargs)
+
+
+def verify_ddp_weights_equal(model: torch.nn.Module, atol: float = 1e-5) -> None:
+    if hasattr(model, "module"):
+        model = model.module
+    
+    world_size = get_world_size()
+    for name, param in model.named_parameters():
+        gathered_param = gather(param).reshape((world_size, -1))
+        absolute_diffs = (gathered_param[None, 0, :] - gathered_param).abs()
+        rank_params_eq = (absolute_diffs < atol).all()
+        assert rank_params_eq, f"❌ param [{name}] not equal - got max_absolute_diff={absolute_diffs.max()}"
+        ###################################################################################################################
+        gathered_param_grad = gather(param.grad).reshape((world_size, -1))
+        absolute_grad_diffs = (gathered_param_grad[None, 0, :] - gathered_param_grad).abs()
+        rank_grad_params_eq = (absolute_grad_diffs < atol).all()
+        assert rank_grad_params_eq, f"❌ param [{name}] grad not equal - got max_absolute_diff={absolute_grad_diffs.max()}"
+        ###################################################################################################################
+        
+    
+    print0("Verified DDP parameter correctness ✅")
+    

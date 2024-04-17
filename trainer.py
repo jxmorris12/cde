@@ -15,7 +15,12 @@ import wandb
 from beir.retrieval.evaluation import EvaluateRetrieval
 from gradcache import GradCache
 from dataset import BeirDataset
-from lib import gather, get_rank, get_world_size, inputs_for_key, RerankHelper, TensorRunningAverages
+from lib import (
+    gather, get_rank, get_world_size, 
+    inputs_for_key, 
+    verify_ddp_weights_equal, 
+    RerankHelper, TensorRunningAverages
+)
 from sampler import Sampler
 
 
@@ -67,6 +72,7 @@ class CustomTrainer(transformers.Trainer):
         self._extra_logs = TensorRunningAverages()
         self.model_has_two_stages = hasattr(self.model, "second_stage_model")
         self._model_stages = None
+        self._run_ddp_verify = True
     
     def consider_gather(self, tensor: torch.Tensor) -> torch.Tensor:
         if self.args.ddp_share_negatives_between_gpus:
@@ -234,6 +240,10 @@ class CustomTrainer(transformers.Trainer):
             #     breakpoint()
             # print(f"Rank {get_rank()} -- first_stage --", npp(mm.first_stage_model))
             # print(f"Rank {get_rank()} -- second_stage --", npp(mm.second_stage_model))
+        
+        if self._run_ddp_verify and (get_world_size() > 1) and self.state.global_step in [2, 2000, 20_000]:
+            if get_rank() == 0: print("[verify_ddp_weights_equal] running at step", self.state.global_step)
+            verify_ddp_weights_equal(model) # TODO: Only call this every once in a while
         return loss.detach() / self.args.gradient_accumulation_steps
 
     def _contrastive_loss(
