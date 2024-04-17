@@ -74,6 +74,12 @@ class CustomTrainer(transformers.Trainer):
             return gather(tensor)
         else:
             return tensor
+        
+    def consider_broadcast(self, tensor: torch.Tensor, src: int) -> torch.Tensor:
+        # Take the random indices from worker 0
+        if (get_world_size() > 1) and self.args.ddp_share_negatives_between_gpus:
+            torch.distributed.broadcast(tensor, src=src)
+        return tensor
     
     def _get_train_sampler(self) -> torch.utils.data.Sampler:
         return self._train_sampler_fn()
@@ -338,10 +344,9 @@ class CustomTrainer(transformers.Trainer):
         else:
             pass
         
-        if get_world_size() > 1:
-            # Aggregate all transductive inputs from all GPUs
-            dataset_inputs["input_ids"] = self.consider_gather(dataset_inputs["input_ids"])
-            dataset_inputs["attention_mask"] = self.consider_gather(dataset_inputs["attention_mask"])
+        # Aggregate all transductive inputs from all GPUs
+        dataset_inputs["input_ids"] = self.consider_gather(dataset_inputs["input_ids"])
+        dataset_inputs["attention_mask"] = self.consider_gather(dataset_inputs["attention_mask"])
     
         # Sample fewer inputs if batch size is too large
         effective_batch_size = len(dataset_inputs["input_ids"])
@@ -350,10 +355,7 @@ class CustomTrainer(transformers.Trainer):
 
         if transductive_corpus_size < effective_batch_size:
             C_perm = torch.randperm(effective_batch_size, device=query_inputs["input_ids"].device)
-            C_perm = C_perm[:transductive_corpus_size]
-            # Take the random indices from worker 0
-            if (get_world_size() > 1) and self.args.ddp_share_negatives_between_gpus:
-                torch.distributed.broadcast(C_perm, src=0)
+            C_perm = self.consider_broadcast(C_perm[:transductive_corpus_size], src=0)
 
             dataset_inputs["input_ids"] = dataset_inputs["input_ids"][C_perm]
             dataset_inputs["attention_mask"] = dataset_inputs["attention_mask"][C_perm]
@@ -377,6 +379,10 @@ class CustomTrainer(transformers.Trainer):
         that we can make sure DDP works properly, since it needs to individually hook into the forward() of
         both models.
         """
+        # TODO: Try doing this by wrapping self._wrap_model():
+        #           https://github.com/huggingface/transformers/blame/main/src/transformers/trainer.py
+        # TODO: properly set kwargs such as DDP broadcast buffers in the wrapped
+        #           modules
         if not self.model_has_two_stages:
             return None
         elif self._model_stages is None:
