@@ -332,5 +332,5 @@ class TrainingArguments(transformers.TrainingArguments):
         self.dataloader_drop_last = True
         self.ddp_broadcast_buffers = False
         ############################################################################
-        self.metric_for_best_model = "loss"
+        # self.metric_for_best_model = "loss"
         self.greater_is_better = False

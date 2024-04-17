@@ -403,8 +403,11 @@ class GradCache:
             }
             for x in model_inputs
         ]
+        # TODO: Argparse for different chunk sizes for first and second stage.
+        # For now we just use the heuristic that the first stage can take ~2x
+        # the chunk size.
         first_stage_model_inputs = [
-            self.split_inputs(x, chunk_size)
+            self.split_inputs(x, chunk_size * 2)
             for x, chunk_size in zip(first_stage_model_inputs, self.chunk_sizes)
         ]
         second_stage_model_inputs = [
@@ -525,7 +528,9 @@ class GradCache:
         else:
             sync_contexts = [nullcontext for _ in range(len(first_stage_input_chunks))]
         
-        first_stage_gradients = first_stage_embedding.grad.split(self.chunk_sizes[0])
+        # TODO: There's a *2 here too; get that from argparsed value once we add argparse
+        # support for "max_batch_size_first_stage" or something like that.
+        first_stage_gradients = first_stage_embedding.grad.split(self.chunk_sizes[0] * 2)
         first_stage_input_chunks_tqdm = first_stage_input_chunks
         if len(first_stage_input_chunks) > min_tqdm_inputs:
             first_stage_input_chunks_tqdm = tqdm_if_main_worker(
