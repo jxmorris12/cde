@@ -94,7 +94,9 @@ class RandomSampler(Sampler):
     """Samples randomly from a dataset during training."""    
     def __iter__(self):  
         idxs = self._get_indices()
-        for i in idxs[self.rank:self.total_size:self.world_size]:
+        chunk_size = (self.total_size // self.world_size)
+        my_chunk_start = chunk_size * self.rank
+        for i in idxs[my_chunk_start:my_chunk_start+chunk_size]:
             yield i
         
     def __len__(self) -> int:

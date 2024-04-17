@@ -226,12 +226,10 @@ class CustomTrainer(transformers.Trainer):
         if not self.use_gc:
             self.accelerator.backward(loss)
 
-            mm = model.module if hasattr(model, "module") else model
-
-            def npp(m):
-                np = list(m.named_parameters())[:12]
-                return [(n, p.norm(p=2).item()) for n, p in np]
-            
+            # mm = model.module if hasattr(model, "module") else model
+            # def npp(m):
+            #     np = list(m.named_parameters())[:12]
+            #     return [(n, p.norm(p=2).item()) for n, p in np]
             # if (self.state.global_step > 200) and (get_rank() == 0):
             #     breakpoint()
             # print(f"Rank {get_rank()} -- first_stage --", npp(mm.first_stage_model))

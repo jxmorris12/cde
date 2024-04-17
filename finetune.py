@@ -163,12 +163,12 @@ def main():
     else:
         raise ValueError(f'Unsupported dataset {data_args.dataset}')
     
-    print("[*] loading sampler")
 
     if training_args.ddp_share_negatives_between_gpus:
         effective_train_batch_size = (training_args.per_device_train_batch_size * get_world_size())
     else:
         effective_train_batch_size = (training_args.per_device_train_batch_size)
+    print(f"[*] loading sampler with effective_train_batch_size = {effective_train_batch_size}")
     train_sampler_fn = functools.partial(
         get_sampler,
         dataset=train_dataset,
