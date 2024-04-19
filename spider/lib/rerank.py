@@ -20,7 +20,15 @@ class RerankHelper:
     
     Template: https://github.com/beir-cellar/beir/blob/main/beir/reranking/rerank.py#L7
     """
-    def __init__(self, model: torch.nn.Module, tokenizer: transformers.PreTrainedTokenizer, batch_size: int, max_seq_length: int, name: str, fake_dataset_info: bool):
+    def __init__(self, 
+            model: torch.nn.Module, 
+            tokenizer: transformers.PreTrainedTokenizer, 
+            batch_size: int, 
+            max_reranking_queries: int, 
+            max_seq_length: int, 
+            name: str, 
+            fake_dataset_info: bool
+        ):
         self.model = model
         self.tokenizer = tokenizer
         self.batch_size = batch_size
@@ -30,7 +38,7 @@ class RerankHelper:
         # Subsample queries from large sets so that we can evaluate
         # in a reasonable amount of time. Also remember this will be
         # distributed across GPUs. So it's not that bad.
-        self.max_reranking_queries = 64
+        self.max_reranking_queries = max_reranking_queries
     
     def _forward_batched(self, **kwargs) -> torch.Tensor:
         return forward_batched(

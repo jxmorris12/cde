@@ -345,7 +345,7 @@ def get_subdomain_idxs_cached(dataset: datasets.Dataset):
         subdomain_idxs = collections.defaultdict(list)
         print("Getting subdomains from dataset")
         subdomains = dataset["dataset"]
-        for i in tqdm.trange(len(dataset), desc="Counting dataset subdomains"):
+        for i in tqdm.trange(len(dataset), desc="Counting dataset subdomains", colour="blue"):
             subdomain = subdomains[i]
             subdomain_idxs[subdomain].append(i)
         pickle.dump(subdomain_idxs, open(cache_file_path, 'wb'))

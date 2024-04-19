@@ -94,14 +94,17 @@ def forward_batched(
         dataset_attention_mask: torch.Tensor,
         batch_size: int,
 ) -> torch.Tensor:
-    if hasattr(model, "forward_first_stage"):
+    if hasattr(model, "module"):
+        model = model.module
+    
+    if hasattr(model, "first_stage_model"):
         i = 0
         dataset_embeddings = []
         while i < len(dataset_input_ids):
             dataset_embeddings.append(
-                model.forward_first_stage(
-                    dataset_input_ids=dataset_input_ids[i:i+batch_size],
-                    dataset_attention_mask=dataset_attention_mask[i:i+batch_size],
+                model.first_stage_model(
+                    input_ids=dataset_input_ids[i:i+batch_size],
+                    attention_mask=dataset_attention_mask[i:i+batch_size],
                 )
             )
             i += batch_size
@@ -111,7 +114,7 @@ def forward_batched(
         outputs = []
         while j < len(input_ids):
             outputs.append(
-                model.forward_second_stage(
+                model.second_stage_model(
                     input_ids=input_ids[j:j+batch_size],
                     attention_mask=attention_mask[j:j+batch_size],
                     dataset_embeddings=dataset_embeddings

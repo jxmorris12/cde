@@ -21,7 +21,8 @@ from spider.trainer import CustomTrainer
 def load_trainer_from_checkpoint_and_args(
         model_folder: str, 
         args_str: str, 
-        beir_dataset_names: Optional[List[str]] = None
+        beir_dataset_names: Optional[List[str]] = None,
+        load_from_checkpoint: bool = True
     ):
     torch.compiler.reset()
     torch._dynamo.config.optimize_ddp = False
@@ -52,7 +53,11 @@ def load_trainer_from_checkpoint_and_args(
         training_args.max_eval_batches = 1
 
     beir_dict = {
-        d: BeirDataset(dataset=d, embedder_rerank=model_args.embedder_rerank) 
+        d: BeirDataset(
+            dataset=d, 
+            embedder_rerank=model_args.embedder_rerank,
+            use_prefix=data_args.use_prefix,
+        ) 
         for d in sorted(beir_dataset_names)
     }
     retrieval_datasets = {
@@ -97,7 +102,9 @@ def load_trainer_from_checkpoint_and_args(
         retrieval_datasets=retrieval_datasets,
     )
     checkpoint_path = transformers.trainer_utils.get_last_checkpoint(
-        model_folder)
-    trainer._load_from_checkpoint(checkpoint_path)
+        model_folder
+    )
+    if load_from_checkpoint:
+        trainer._load_from_checkpoint(checkpoint_path)
     return trainer
     

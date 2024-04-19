@@ -552,6 +552,7 @@ class CustomTrainer(transformers.Trainer):
             eval_dataset: BeirDataset,
             model: torch.nn.Module,
             metric_key_prefix: str,
+            n: int,
         ) -> Dict[str, float]:
         # github.com/jxmorris12/tti/blob/master/trainer.py
         # github.com/beir-cellar/beir/blob/main/examples/retrieval/evaluation/reranking/evaluate_bm25_ce_reranking.py
@@ -571,8 +572,9 @@ class CustomTrainer(transformers.Trainer):
         reranker = RerankHelper(
             model=model, 
             tokenizer=self.embedder_tokenizer, 
-            batch_size=self.args.max_batch_size_fits_in_memory,
             max_seq_length=self.max_seq_length,
+            batch_size=self.args.max_batch_size_fits_in_memory,
+            max_reranking_queries=n,
             name=metric_key_prefix,
             fake_dataset_info=(self.args.dataset_info == "fake"),
         )
@@ -694,7 +696,7 @@ class CustomTrainer(transformers.Trainer):
             gc.collect()
         return all_metrics
 
-    def evaluate_retrieval_datasets(self) -> Dict[str, float]:
+    def evaluate_retrieval_datasets(self, n: int = 64) -> Dict[str, float]:
         model = self.model
         all_metrics = {}
         for eval_dataset_name, eval_dataset in self.retrieval_datasets.items():
@@ -703,6 +705,7 @@ class CustomTrainer(transformers.Trainer):
                 eval_dataset=eval_dataset,
                 model=model,
                 metric_key_prefix=metric_key_prefix,
+                n=n,
             )
             # Prefix all keys with metric_key_prefix + '_'
             for key in list(metrics.keys()):
