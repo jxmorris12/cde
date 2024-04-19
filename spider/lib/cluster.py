@@ -10,7 +10,7 @@ import datasets
 import torch
 import tqdm
 
-from lib.cluster_faiss import paired_kmeans_faiss
+from spider.lib.cluster_faiss import paired_kmeans_faiss
 from bm25_pt.bm25 import TokenizedBM25
 
 from .dist import (

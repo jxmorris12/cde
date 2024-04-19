@@ -5,9 +5,12 @@ datasets
 datasets/
 logs/
 notebooks/
+saves
 saves/
 slurm-*.out
 slurm-scripts/
 wandb/
+
+spider.egg-info/
 
 profile*.txt

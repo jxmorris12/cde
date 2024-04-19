@@ -12,7 +12,7 @@ import numpy as np
 import torch
 
 from dataset import NomicSupervisedDataset, NomicUnsupervisedDataset
-from lib import (
+from spider.lib import (
     cluster_dataset,
     cluster_subdomains,
     get_rank, 

@@ -11,7 +11,7 @@ from collate import TokenizerCollator
 from dataset import (
     BeirDataset
 )
-from lib import load_embedder_and_tokenizer, ModelConfig
+from spider.lib import load_embedder_and_tokenizer, ModelConfig
 from model import get_model_class
 from run_args import ModelArguments, DataArguments, TrainingArguments
 from trainer import CustomTrainer
@@ -42,11 +42,8 @@ def load_trainer_from_checkpoint_and_args(
     embedder, embedder_tokenizer = load_embedder_and_tokenizer(
         model_args.embedder,
     )
-    dataset_embedder, dataset_tokenizer = load_embedder_and_tokenizer(
-        model_args.dataset_embedder,
-    )
     dataset_backbone, dataset_tokenizer = load_embedder_and_tokenizer(
-        model_args.dataset_embedder,
+        model_args.embedder,
     )
 
     beir_dataset_names = beir_dataset_names or []
@@ -64,12 +61,21 @@ def load_trainer_from_checkpoint_and_args(
     model_args.transductive_corpus_size = training_args.transductive_corpus_size
     model_config = ModelConfig(**vars(model_args))
     model_cls = get_model_class(model_args.architecture)
-    model = model_cls(
-        config=model_config,
-        embedder=embedder,
-        dataset_embedder=dataset_embedder,
-        dataset_backbone=dataset_backbone,
-    )
+
+    if model_args.architecture == 'biencoder':
+        model = model_cls(
+            config=model_config,
+            embedder=embedder,
+        )
+    else:
+        dataset_backbone, dataset_tokenizer = load_embedder_and_tokenizer(
+            model_args.embedder,
+        )
+        model = model_cls(
+            config=model_config,
+            embedder=embedder,
+            dataset_backbone=dataset_backbone,
+        )
 
     collator = TokenizerCollator(
         tokenizer=embedder_tokenizer,
@@ -85,7 +91,6 @@ def load_trainer_from_checkpoint_and_args(
         args=training_args,
         train_dataset=None,
         eval_dataset=None,
-        dataset_tokenizer=dataset_tokenizer,
         embedder_tokenizer=embedder_tokenizer,
         train_sampler_fn=None,
         eval_sampler_fns={},

@@ -1,14 +1,10 @@
-import sys
-sys.path.append('/home/paperspace/tti3')
-sys.path.append('/home/sasha/tti3')
-
 import pytest
 import torch
 import transformers
 
-from lib import load_embedder_and_tokenizer, ModelConfig
-from model import DatasetTransformer
-from run_args import ModelArguments
+from spider.lib import load_embedder_and_tokenizer, ModelConfig
+from spider.model import DatasetTransformer
+from spider.run_args import ModelArguments
 
 
 def test_dataset_transformer_invariance_synthetic():
@@ -16,16 +12,15 @@ def test_dataset_transformer_invariance_synthetic():
         pytest.skip("no CUDA found")
     model_config = ModelConfig(**vars(ModelArguments()))
     model, _ = load_embedder_and_tokenizer("nomic-ai/nomic-bert-2048")
-    embedder, _ = load_embedder_and_tokenizer("nomic-ai/nomic-bert-2048")
     backbone, _ = load_embedder_and_tokenizer("nomic-ai/nomic-bert-2048")
     model_config.transductive_corpus_size = 2
     model_config.limit_layers = 1
     dt = DatasetTransformer(
         config=model_config,
         embedder=model,
-        dataset_embedder=embedder,
         dataset_backbone=backbone,
     ).cuda()
+    dt.eval()
 
     i1 = torch.tensor([
         [1, 2, 3, 4],
@@ -72,16 +67,15 @@ def test_dataset_transformer_invariance_real():
     model_config = ModelConfig(**vars(ModelArguments()))
     mn = "nomic-ai/nomic-bert-2048"
     model, _ = load_embedder_and_tokenizer(mn)
-    embedder, _ = load_embedder_and_tokenizer(mn)
     backbone, _ = load_embedder_and_tokenizer(mn)
     tokenizer = transformers.AutoTokenizer.from_pretrained(mn)
     model_config.transductive_corpus_size = 4
     dt = DatasetTransformer(
         config=model_config,
         embedder=model,
-        dataset_embedder=embedder,
         dataset_backbone=backbone,
     ).cuda()
+    dt.eval()
 
     t1 = tokenizer(
         [

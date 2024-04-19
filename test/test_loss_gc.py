@@ -1,7 +1,3 @@
-import sys
-sys.path.append('/home/paperspace/tti3')
-sys.path.append('/home/sasha/tti3')
-
 from typing import Tuple
 
 import functools
@@ -9,11 +5,11 @@ import functools
 import torch
 import transformers
 
-from collate import TokenizerCollator
-from dataset import NomicSupervisedDataset
-from gradcache import GradCache
-from lib.misc import inputs_for_key
-from model import BiEncoder, DatasetTransformer
+from spider.collate import TokenizerCollator
+from spider.dataset import NomicSupervisedDataset
+from spider.gradcache import GradCache
+from spider.lib.misc import inputs_for_key
+from spider.model import BiEncoder, DatasetTransformer
 
 
 def contrastive_loss(
@@ -25,6 +21,7 @@ def contrastive_loss(
         e1 = e1 / e1.norm(p=2, dim=1, keepdim=True) # Query
         e2 = e2 / e2.norm(p=2, dim=1, keepdim=True) # Document
         scores = e1 @ e2.T
+        print("_contrastive_loss:", scores[0:2, 0:2])
 
         batch_size, _ = scores.shape
         # This multiply-by-20 thing is used in BeIR and LaPRador:
@@ -98,7 +95,8 @@ def test_loss_gradcache():
     document_unique_ids = document_inputs["input_ids"].sum(dim=1)
     one_hot_labels = (
         document_unique_ids[:, None] == document_unique_ids[None, :])
-
+    
+    model.eval()
     gc_loss = gc(
         query_inputs, 
         document_inputs, 
@@ -175,7 +173,7 @@ def test_loss_gradcache__transductive():
     document_unique_ids = document_inputs["input_ids"].sum(dim=1)
     one_hot_labels = (
         document_unique_ids[:, None] == document_unique_ids[None, :])
-
+    model.eval()
     gc_loss = gc(
         query_inputs, 
         document_inputs, 
@@ -329,6 +327,7 @@ def test_gradient_gradcache__transductive():
     document_unique_ids = document_inputs["input_ids"].sum(dim=1)
     one_hot_labels = (
         document_unique_ids[:, None] == document_unique_ids[None, :])
+    model.eval()
 
     gc_loss = gc(
         query_inputs, 

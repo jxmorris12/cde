@@ -10,7 +10,7 @@ import torch
 import transformers
 
 
-from lib import get_rank, get_world_size
+from spider.lib import get_rank, get_world_size
 
 
 @dataclass

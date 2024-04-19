@@ -3,7 +3,7 @@ from typing import Optional
 import torch
 import transformers
 
-from lib.tensor import mean_pool
+from spider.lib.tensor import mean_pool
 
 
 def limit_layers(model: transformers.PreTrainedModel, n_layers: int) -> None:
@@ -179,8 +179,8 @@ class DatasetConditionedBiencoder(transformers.PreTrainedModel):
             randomized_order = torch.stack(
                 [
                     torch.cat(
-                        (torch.arange(self.n_soft_prompt), 
-                         self.n_soft_prompt + torch.randperm(corpus_size)), dim=0) 
+                        (torch.randperm(corpus_size), 
+                        torch.arange(self.n_soft_prompt) + corpus_size), dim=0) 
                         for _ in range(batch_size)])
             randomized_order = randomized_order.to(soft_prompt.device)
             soft_prompt = soft_prompt.gather(1, randomized_order[..., None].expand_as(soft_prompt))
@@ -212,7 +212,8 @@ class DatasetConditionedBiencoder(transformers.PreTrainedModel):
         # TODO: Argparse for pooling strategy.
         # output_vectors = torch.cat((soft_prompt_pooled, output_pooled), dim=1) # (b, d) + (b, d) -> (b, 2d)
         output_vectors = output_pooled
-        return self.output_projection(output_vectors) # (b, 2d) -> (b, d)
+        output = self.output_projection(output_vectors) # (b, 2d) -> (b, d)
+        return output
 
 
 class DatasetTransformer(transformers.PreTrainedModel):
@@ -319,7 +320,8 @@ class BiEncoder(transformers.PreTrainedModel):
         )
         document_embeddings = mean_pool(outputs, attention_mask)
         # return
-        return self.mlp(document_embeddings)
+        output = self.mlp(document_embeddings)
+        return output
 
 
 def get_model_class(name: str):

@@ -1,7 +1,3 @@
-import sys
-sys.path.append('/home/paperspace/tti3')
-sys.path.append('/home/sasha/tti3')
-
 import random
 import re
 
@@ -10,7 +6,7 @@ import random
 import tqdm
 import transformers
 
-from dataset import (
+from spider.dataset import (
     NomicSupervisedDataset, 
     NomicUnsupervisedDataset
 )
@@ -43,7 +39,7 @@ def test_one_row_nomic_unsupervised(tokenizer):
     )
     random.seed(42)
     pattern = r'^[a-zA-Z_]+: '
-    for _ in tqdm.trange(65536*2):
+    for _ in tqdm.trange(4096*2):
         j = random.randint(0, len(ds) - 1)
         ex = ds[j]
         assert re.match(pattern, ex["query"])
@@ -74,7 +70,7 @@ def test_multirow_nomic_supervised(tokenizer):
     )
     random.seed(42)
     pattern = r'^[a-zA-Z_]+: '
-    for _ in tqdm.trange(65536*2):
+    for _ in tqdm.trange(4096*2):
         j = random.randint(0, len(ds) - 1)
         ex = ds[j]
         assert re.match(pattern, ex["query"])

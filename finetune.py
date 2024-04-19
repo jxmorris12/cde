@@ -11,16 +11,16 @@ import torch
 import transformers
 import wandb
 
-from collate import DocumentQueryCollatorWithPadding, TokenizerCollator
-from dataset import (
+from spider.collate import DocumentQueryCollatorWithPadding, TokenizerCollator
+from spider.dataset import (
     load_synthetic_words_dataset, 
     BeirDataset, NomicSupervisedDataset, NomicUnsupervisedDataset
 )
-from lib import get_rank, get_world_size, load_embedder_and_tokenizer, ModelConfig
-from model import get_model_class
-from run_args import ModelArguments, DataArguments, TrainingArguments
-from sampler import get_sampler
-from trainer import CustomTrainer
+from spider.lib import get_rank, get_world_size, load_embedder_and_tokenizer, ModelConfig
+from spider.model import get_model_class
+from spider.run_args import ModelArguments, DataArguments, TrainingArguments
+from spider.sampler import get_sampler
+from spider.trainer import CustomTrainer
 
 
 logger = logging.getLogger(__name__)

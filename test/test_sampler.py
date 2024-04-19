@@ -1,11 +1,7 @@
 import pytest
 
-import sys
-sys.path.append('/home/paperspace/tti3')
-sys.path.append('/home/sasha/tti3')
-
-from dataset import NomicSupervisedDataset
-from sampler import FixedSubdomainSampler, RandomSampler
+from spider.dataset import NomicSupervisedDataset
+from spider.sampler import FixedSubdomainSampler, RandomSampler
 
 @pytest.fixture
 def nomic_dataset():

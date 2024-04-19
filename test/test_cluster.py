@@ -1,7 +1,3 @@
-import sys
-sys.path.append('/home/paperspace/tti3')
-sys.path.append('/home/sasha/tti3')
-
 from typing import Dict
 
 import pytest
@@ -11,7 +7,7 @@ import numpy as np
 import torch
 import transformers
 
-from lib import cluster_dataset, paired_kmeans_faiss
+from spider.lib import cluster_dataset, paired_kmeans_faiss
 
 
 @pytest.fixture

@@ -19,7 +19,7 @@ import tqdm
 import transformers
 
 from .dist import get_num_proc, get_rank
-from lib.nomic_bert import NomicBertModel
+from spider.lib.nomic_bert import NomicBertModel
 
 
 def get_tti_cache_dir() -> str:

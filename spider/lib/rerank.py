@@ -9,10 +9,10 @@ import torch
 import tqdm
 import transformers
 
-from lib.dist import gather, get_rank, get_world_size
-from lib.embed import embed_with_cache
-from lib.tensor import forward_batched
-from lib.misc import tqdm_if_main_worker
+from spider.lib.dist import gather, get_rank, get_world_size
+from spider.lib.embed import embed_with_cache
+from spider.lib.tensor import forward_batched
+from spider.lib.misc import tqdm_if_main_worker
 
 
 class RerankHelper:

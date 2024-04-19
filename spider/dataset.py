@@ -31,9 +31,6 @@ from spider.lib import (
 )
 
 
-os.environ['TOKENIZERS_PARALLELISM'] = '0'
-
-
 def load_msmarco_hard_negatives_uncached() -> Dict[str, Dict[str, Any]]:
     """Loads hard negative passage for MSMARCO.
 

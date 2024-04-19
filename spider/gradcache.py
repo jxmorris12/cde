@@ -13,8 +13,8 @@ from torch import Tensor, nn
 from torch.cuda.amp import autocast
 from torch.utils.checkpoint import get_device_states, set_device_states
 
-from lib.dist import get_rank, get_world_size
-from lib.misc import tqdm_if_main_worker
+from spider.lib.dist import get_rank, get_world_size
+from spider.lib.misc import tqdm_if_main_worker
 
 min_tqdm_inputs = 8
 
@@ -393,9 +393,11 @@ class GradCache:
         :param loss_kwargs: Additional keyword arguments to the loss function.
         :return: The current's loss.
         """
+        print("cache_step_two_stage")
         # TODO: Pass these keys to constructor as
         # `first_stage_data_keys` and `second_stage_data_keys` or
         # something like that.
+        first_chunk_size_scale = 1
         first_stage_model_inputs = [
             { 
                 "dataset_input_ids": x["dataset_input_ids"], 
@@ -407,7 +409,7 @@ class GradCache:
         # For now we just use the heuristic that the first stage can take ~2x
         # the chunk size.
         first_stage_model_inputs = [
-            self.split_inputs(x, chunk_size * 2)
+            self.split_inputs(x, chunk_size * first_chunk_size_scale)
             for x, chunk_size in zip(first_stage_model_inputs, self.chunk_sizes)
         ]
         second_stage_model_inputs = [
@@ -530,7 +532,7 @@ class GradCache:
         
         # TODO: There's a *2 here too; get that from argparsed value once we add argparse
         # support for "max_batch_size_first_stage" or something like that.
-        first_stage_gradients = first_stage_embedding.grad.split(self.chunk_sizes[0] * 2)
+        first_stage_gradients = first_stage_embedding.grad.split(self.chunk_sizes[0] * first_chunk_size_scale)
         first_stage_input_chunks_tqdm = first_stage_input_chunks
         if len(first_stage_input_chunks) > min_tqdm_inputs:
             first_stage_input_chunks_tqdm = tqdm_if_main_worker(
