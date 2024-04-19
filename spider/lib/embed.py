@@ -11,7 +11,7 @@ import transformers
 
 from spider.lib.misc import (
     datasets_fast_load_from_disk, 
-    get_tti_cache_dir,
+    get_spider_cache_dir,
     tqdm_if_main_worker,
 )
 from spider.lib.tensor import (
@@ -203,7 +203,7 @@ def embed_with_cache(
         batch_size: int = 4096
     ) -> datasets.Dataset:
     embedder_cache_path = model_name.replace('/', '__')
-    cache_folder = os.path.join(get_tti_cache_dir(), 'corpus_embeddings', embedder_cache_path)
+    cache_folder = os.path.join(get_spider_cache_dir(), 'corpus_embeddings', embedder_cache_path)
     os.makedirs(cache_folder, exist_ok=True)
     cache_path = os.path.join(cache_folder, cache_name) #  + "_small")
 

@@ -22,18 +22,21 @@ from .dist import get_num_proc, get_rank
 from spider.lib.nomic_bert import NomicBertModel
 
 
-def get_tti_cache_dir() -> str:
+def get_spider_cache_dir() -> str:
     script_directory = os.path.normpath(
         os.path.join(
             os.path.dirname(os.path.abspath(__file__)),
-            os.pardir)
+            os.pardir,
+            os.pardir,
+        )
     )
+    print("get_spider_cache_dir() =>",  os.path.join(script_directory, "data"))
     return os.path.join(script_directory, "data")
 
 
 def get_cache_location_from_kwargs(**kwargs):
     cache_location = os.path.join(
-        get_tti_cache_dir(), "cluster"
+        get_spider_cache_dir(), "cluster"
     )
     os.makedirs(cache_location, exist_ok=True)
     return os.path.join(cache_location, md5_hash_kwargs(**kwargs))

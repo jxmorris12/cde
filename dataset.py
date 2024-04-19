@@ -24,7 +24,7 @@ from spider.lib import (
     datasets_fast_load_from_disk,
     download_url, 
     download_url_and_unzip, 
-    get_tti_cache_dir,
+    get_spider_cache_dir,
     get_num_proc,
     get_rank,
     get_reranking_results
@@ -335,7 +335,7 @@ class NomicSupervisedDataset:
 
 
 def get_subdomain_idxs_cached(dataset: datasets.Dataset):
-    cache_folder = os.path.join(get_tti_cache_dir(), "subdomain_idxs")
+    cache_folder = os.path.join(get_spider_cache_dir(), "subdomain_idxs")
     os.makedirs(cache_folder, exist_ok=True)
     cache_name = dataset._fingerprint + "__sub.p"
     cache_file_path = os.path.join(cache_folder, cache_name)
