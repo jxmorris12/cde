@@ -7,14 +7,14 @@ import torch
 import transformers
 import wandb
 
-from collate import TokenizerCollator
-from dataset import (
+from spider.collate import TokenizerCollator
+from spider.dataset import (
     BeirDataset
 )
 from spider.lib import load_embedder_and_tokenizer, ModelConfig
-from model import get_model_class
-from run_args import ModelArguments, DataArguments, TrainingArguments
-from trainer import CustomTrainer
+from spider.model import get_model_class
+from spider.run_args import ModelArguments, DataArguments, TrainingArguments
+from spider.trainer import CustomTrainer
 
 
 # Helps with debugging.

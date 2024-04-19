@@ -10,8 +10,8 @@ import streamlit as st
 import torch
 import transformers
 
-from dataset import NomicSupervisedDataset, NomicUnsupervisedDataset
-from sampler import (
+from spider.dataset import NomicSupervisedDataset, NomicUnsupervisedDataset
+from spider.sampler import (
     RandomSampler, 
     FixedSubdomainSampler, 
     AutoClusterSampler, 

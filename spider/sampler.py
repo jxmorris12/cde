@@ -11,7 +11,7 @@ import datasets
 import numpy as np
 import torch
 
-from dataset import NomicSupervisedDataset, NomicUnsupervisedDataset
+from spider.dataset import NomicSupervisedDataset, NomicUnsupervisedDataset
 from spider.lib import (
     cluster_dataset,
     cluster_subdomains,

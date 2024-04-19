@@ -13,15 +13,16 @@ import transformers
 import wandb
 
 from beir.retrieval.evaluation import EvaluateRetrieval
-from gradcache import GradCache
-from dataset import BeirDataset
+
+from spider.gradcache import GradCache
+from spider.dataset import BeirDataset
 from spider.lib import (
     gather, get_rank, get_world_size, 
     inputs_for_key, 
     verify_ddp_weights_equal, 
     RerankHelper, TensorRunningAverages
 )
-from sampler import Sampler
+from spider.sampler import Sampler
 
 
 def calculate_gradient_norm(model: torch.nn.Module) -> torch.Tensor:
