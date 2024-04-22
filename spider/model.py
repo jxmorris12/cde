@@ -164,6 +164,11 @@ class DatasetConditionedBiencoder(transformers.PreTrainedModel):
             attention_mask: torch.Tensor,
             dataset_embeddings: torch.Tensor) -> torch.Tensor:
         dataset_embeddings = dataset_embeddings[None, :, :] # (b, d) -> (1, b, d)
+
+        if dataset_embeddings.shape[1] > self.config.transductive_corpus_size:
+            # If too many dataset embeddings are passed in, just take the first N until
+            # we have the proper number.
+            dataset_embeddings = dataset_embeddings[:, :self.config.transductive_corpus_size, :]
         
         batch_size = input_ids.shape[0]
         _, corpus_size, _hidden_dim = dataset_embeddings.shape

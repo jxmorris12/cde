@@ -32,6 +32,8 @@ class Sampler(abc.ABC, torch.utils.data.Sampler):
             shuffle: bool, 
             max_num_batches: Optional[int] = None,
             num_samples: Optional[int] = None,
+            seed: int = 42,
+            epoch: int = 0 
         ):
         self.dataset = dataset
         self.batch_size = batch_size
@@ -39,11 +41,15 @@ class Sampler(abc.ABC, torch.utils.data.Sampler):
         # https://github.com/pytorch/pytorch/blob/main/torch/utils/data/distributed.py#L68
         self.rank = get_rank()
         self.world_size = get_world_size()
-        self.num_samples = num_samples or (math.floor(len(self.dataset) / self.world_size))
+        self.num_samples = num_samples or (
+            math.floor(len(self.dataset) / self.world_size / self.batch_size) 
+                * self.batch_size
+        )
+        if get_rank() == 0: print(f"sampler set self.num_samples={self.num_samples} (original num_samples={num_samples})")
         self.total_size = self.num_samples * self.world_size
         self.shuffle = shuffle
-        self.seed = 42
-        self.epoch = 0
+        self.seed = seed
+        self.epoch = epoch
 
     def __hash__(self) -> int:
         return hash(self.__reduce__())

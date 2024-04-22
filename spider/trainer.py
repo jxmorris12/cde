@@ -8,21 +8,27 @@ import time
 
 import datasets
 import torch
-from transformers.trainer_utils import speed_metrics
 import transformers
 import wandb
 
 from beir.retrieval.evaluation import EvaluateRetrieval
+from transformers.trainer_utils import speed_metrics
 
-from spider.gradcache import GradCache
 from spider.dataset import BeirDataset
+from spider.gradcache import GradCache
 from spider.lib import (
     gather, get_rank, get_world_size, 
     inputs_for_key, 
     verify_ddp_weights_equal, 
-    RerankHelper, TensorRunningAverages
+    RerankHelper, 
+    TensorRunningAverages
 )
 from spider.sampler import Sampler
+
+
+def reset_memory() -> None:
+    gc.collect()
+    torch.cuda.empty_cache()
 
 
 def calculate_gradient_norm(model: torch.nn.Module) -> torch.Tensor:
@@ -74,6 +80,14 @@ class CustomTrainer(transformers.Trainer):
         self.model_has_two_stages = hasattr(self.model, "second_stage_model")
         self._model_stages = None
         self._run_ddp_verify = True
+
+        effective_batch_size = get_world_size() * self.args.per_device_train_batch_size
+        self._memory_reset_step_frequency = int(200 * effective_batch_size / 256)
+        if get_rank() == 0:
+            print(
+                "effective_batch_size", effective_batch_size, 
+                "--> memory_reset_step_frequency = ", self._memory_reset_step_frequency
+            )
     
     def consider_gather(self, tensor: torch.Tensor) -> torch.Tensor:
         if self.args.ddp_share_negatives_between_gpus:
@@ -120,7 +134,7 @@ class CustomTrainer(transformers.Trainer):
             collate_fn=self.data_collator,
             shuffle=False, # shuffling happens in the sampler
             batch_size=self.args.per_device_train_batch_size,
-            drop_last=self.args.dataloader_drop_last,
+            drop_last=True,
             num_workers=self.args.dataloader_num_workers,
             pin_memory=self.args.dataloader_pin_memory,
             sampler=sampler
@@ -220,6 +234,12 @@ class CustomTrainer(transformers.Trainer):
         """
         # Reset dataloader index
         self.train_dataloader.dataset.reset_dataset_idx()
+
+        # Reset memory every once in awhile to try to help CPU/GPU OOM
+        if self.state.global_step % self._memory_reset_step_frequency == 0:
+            if get_rank() == 0:
+                print("[rank 0] Resetting memory")
+            reset_memory()
 
         model.train()
         inputs = self._prepare_inputs(inputs)
@@ -443,6 +463,17 @@ class CustomTrainer(transformers.Trainer):
         return_outputs: bool = False,
     ) -> Union[Tuple[torch.Tensor, Dict[str, torch.Tensor]], torch.Tensor]:
         query_inputs, document_inputs, negative_document_inputs = self._split_inputs(inputs=inputs)
+        
+        idx = self.consider_gather(inputs["idx"])
+        original_doc_input_ids = self.consider_gather(document_inputs["input_ids"].sum(dim=1))
+        if len(negative_document_inputs):
+            document_inputs["input_ids"] = torch.cat(
+                (document_inputs["input_ids"], negative_document_inputs["input_ids"]), dim=0
+            )
+            document_inputs["attention_mask"] = torch.cat(
+                (document_inputs["attention_mask"], negative_document_inputs["attention_mask"]), dim=0
+            )
+            negative_document_inputs["dataset_attention_mask"] = document_inputs["dataset_attention_mask"]
         # Uncomment next line to log text on every GPU.
         # print(f"[rank {get_rank()}] query 0 =", self.embedder_tokenizer.decode(document_inputs["input_ids"][0], skip_special_tokens=True))
         document_first_tokens = self.consider_gather(document_inputs["input_ids"][:, 1].contiguous())
@@ -450,11 +481,13 @@ class CustomTrainer(transformers.Trainer):
 
         # Create labels based on document IDs.
         document_unique_ids = self.consider_gather(document_inputs["input_ids"].sum(dim=1))
-        idx = self.consider_gather(inputs["idx"])
-        one_hot_labels = (idx[:, None] == idx[None, :]).float()
+        original_doc_idx = torch.arange(len(idx), device=document_unique_ids.device)
+
+        doc_idx = torch.arange(len(document_inputs["input_ids"]), device=document_unique_ids.device)
+        one_hot_labels = (original_doc_idx[:, None] == doc_idx[None, :]).float()
         if self.args.automatically_deduplicate_documents:
             smart_labels = (
-                document_unique_ids[:, None] == document_unique_ids[None, :])
+                original_doc_input_ids[:, None] == document_unique_ids[None, :])
         else:
             smart_labels = one_hot_labels.clone()
         
@@ -494,7 +527,9 @@ class CustomTrainer(transformers.Trainer):
             "stats_unique_first_tokens_document": document_first_tokens.unique().numel(),
             "stats_unique_first_tokens_query": query_first_tokens.unique().numel(),
             "stats_query_first_token_mean": query_first_token_mean,
+            "stats_query_first_token_value_mean": query_first_tokens.float().mean(),
             "stats_document_first_token_mean": document_first_token_mean,
+            "stats_document_first_token_value_mean": document_first_tokens.float().mean(),
             ###########################################################################
         }
         if self.is_in_train:
@@ -526,17 +561,6 @@ class CustomTrainer(transformers.Trainer):
         else:
             e1 = model(**query_inputs)
             e2 = model(**document_inputs)
-
-            # TODO: Re-implement hard negatives in loss.
-            # if len(negative_document_inputs):
-            #     negative_document_inputs["dataset_input_ids"] = document_inputs["dataset_input_ids"]
-            #     negative_document_inputs["dataset_attention_mask"] = document_inputs["dataset_attention_mask"]
-            #     e2_hn = model(**negative_document_inputs)
-            #     e2 = torch.cat((e2, e2_hn), dim=0)
-            #     negative_document_unique_ids = negative_document_inputs["input_ids"].sum(dim=1)
-            #     corpus_unique_ids = torch.cat(
-            #         (corpus_unique_ids, negative_document_unique_ids), dim=0
-            #     )
 
             loss, _scores = self._contrastive_loss(
                 e1, e2, 
@@ -693,7 +717,7 @@ class CustomTrainer(transformers.Trainer):
                 metric_key_prefix=eval_with_sampler_key
             )
             all_metrics = (metrics | all_metrics)
-            gc.collect()
+            reset_memory()
         return all_metrics
 
     def evaluate_retrieval_datasets(self, n: int = 64) -> Dict[str, float]:
@@ -739,4 +763,4 @@ class CustomTrainer(transformers.Trainer):
         if should_evaluate:
             # TODO: implement multi-gpu retrieval evaluation.
             self.evaluate_retrieval_datasets()
-            gc.collect()
+            reset_memory()

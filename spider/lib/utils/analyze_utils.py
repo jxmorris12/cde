@@ -106,5 +106,6 @@ def load_trainer_from_checkpoint_and_args(
     )
     if load_from_checkpoint:
         trainer._load_from_checkpoint(checkpoint_path)
+    trainer.model.eval()
     return trainer
     

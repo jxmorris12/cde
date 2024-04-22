@@ -37,7 +37,7 @@ class ModelArguments:
         metadata={"help": "The specific model version to use (can be a branch name, tag name or commit id)."},
     )
     max_seq_length: int = field(
-        default=128,
+        default=512,
         metadata={"help": "Maximum sequence length for tokenizer"}
     )
     torch_dtype: Optional[str] = field(
@@ -274,6 +274,12 @@ class TrainingArguments(transformers.TrainingArguments):
             )
         },
     )
+    init_model_state_dict_from_path: Optional[str] = field(
+        default=None,
+        metadata={
+            "help": "If set, will load model from weights within a checkpoint in this folder"
+        }
+    )
     # https://github.com/pytorch/pytorch/issues/118421
     ddp_bucket_cap_mb: Optional[int] = field(
         default=100,
@@ -308,7 +314,7 @@ class TrainingArguments(transformers.TrainingArguments):
             os.environ["WANDB_MODE"] = "disabled"
         ############################################################################
         num_devices = max(1, torch.cuda.device_count())
-        num_cpus = min(64, num_devices * 6, len(os.sched_getaffinity(0)))
+        num_cpus = min(64, num_devices * 4, len(os.sched_getaffinity(0)))
         num_workers = int(num_cpus / num_devices)
         if self.tiny_debug:
             print("[tiny_debug] Setting num workers to 0")

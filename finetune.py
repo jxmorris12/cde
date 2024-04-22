@@ -16,7 +16,7 @@ from spider.dataset import (
     load_synthetic_words_dataset, 
     BeirDataset, NomicSupervisedDataset, NomicUnsupervisedDataset
 )
-from spider.lib import get_rank, get_world_size, load_embedder_and_tokenizer, ModelConfig
+from spider.lib import get_rank, get_world_size, load_embedder_and_tokenizer, load_model_state_dict_from_path, ModelConfig
 from spider.model import get_model_class
 from spider.run_args import ModelArguments, DataArguments, TrainingArguments
 from spider.sampler import get_sampler
@@ -92,34 +92,35 @@ def main():
         model_args.embedder,
     )
 
-    beir_dataset_names = [
-        # https://github.com/beir-cellar/beir/blob/f062f038c4bfd19a8ca942a9910b1e0d218759d4/examples/dataset/download_dataset.py#L13
-        #  'arguana',
-        #  'webis-touche2020',
-        #  'quora',
-        #  'nfcorpus',
-        #  'scidocs', 
-        #  'scifact',
-        #  'trec-covid',
-        #  'signal1m',
-        #  'fiqa',
-        #  'trec-news',  
-        #  'msmarco',
-    #############################################
-         'nq',
-        # 'cqadupstack',
-    #############################################
-        #  'bioasq', # huge (14m samples)
-        #  'robust04',   
-        #  'fever', # JSON parse error
-        #  'dbpedia-entity',
-        #  'hotpotqa',
-        # 'climate-fever', # pyarrow.lib.ArrowIndexError: array slice would exceed array length
-    ]
     if training_args.tiny_debug: 
         datasets.logging.set_verbosity_info()
         beir_dataset_names = [ 'quora' ]
         training_args.max_eval_batches = 1
+    else:
+        beir_dataset_names = [
+            # https://github.com/beir-cellar/beir/blob/f062f038c4bfd19a8ca942a9910b1e0d218759d4/examples/dataset/download_dataset.py#L13
+            'arguana',
+            'webis-touche2020',
+            'quora',
+            'nfcorpus',
+            'scidocs', 
+            'scifact',
+            'trec-covid',
+            'signal1m',
+            'fiqa',
+            'trec-news',  
+            'msmarco',
+        #############################################
+            'nq',
+            # 'cqadupstack',
+        #############################################
+            #  'bioasq', # huge (14m samples)
+            #  'robust04',   
+            #  'fever', # JSON parse error
+            #  'dbpedia-entity',
+            #  'hotpotqa',
+            # 'climate-fever', # pyarrow.lib.ArrowIndexError: array slice would exceed array length
+        ]
 
     beir_dict = {
         d: BeirDataset(
@@ -148,7 +149,6 @@ def main():
             max_seq_length=model_args.max_seq_length,
             use_prefix=data_args.use_prefix,
         )
-        # eval_dataset = None
         # Need to tokenize and collate for this dataset
         collator_cls = TokenizerCollator
     elif data_args.dataset == 'nomic_supervised':
@@ -158,6 +158,7 @@ def main():
             max_seq_length=model_args.max_seq_length,
             use_prefix=data_args.use_prefix,
         )
+        eval_dataset = None
         # Need to tokenize and collate for this dataset
         collator_cls = TokenizerCollator
     else:
@@ -214,6 +215,12 @@ def main():
             embedder=embedder,
             dataset_backbone=dataset_backbone,
         )
+    
+    if training_args.init_model_state_dict_from_path:
+        state_dict = load_model_state_dict_from_path(
+            args.load_model_state_dict_from_path
+        )
+        model = model.load_state_dict(state_dict, strict=True)
 
     print("[main] creating collator")
     collator = collator_cls(
@@ -242,6 +249,7 @@ def main():
             allow_val_change=True,
         )
         wandb.watch(model)
+    
 
     print("[main] creating trainer")
     trainer = CustomTrainer(

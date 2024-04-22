@@ -319,16 +319,18 @@ class NomicSupervisedDataset:
         query = query_prefix + ex["query"]
         document = document_prefix + ex["document"]
         random_idx = random.choice(range(len(self.dataset)))
+        random_document = document_prefix + document
+        negative_documents = [document_prefix + d for d in ex["negative"][:self.num_hard_negatives]]
         return {
-            'idx': query_id,
-            ######################################################################
-            "query": query,
-            "document": document,
-            ######################################################################
-            "random_document": self.dataset[random_idx]["document"],
-            ######################################################################
-            # TODO re-add hard negatives :-)
-        }
+                'idx': query_id,
+                ######################################################################
+                "query": query,
+                "document": document,
+                ######################################################################
+                "random_document": random_document,
+                ######################################################################
+                "negative_document": negative_documents, 
+            }
 
 
 def get_subdomain_idxs_cached(dataset: datasets.Dataset):
@@ -342,7 +344,7 @@ def get_subdomain_idxs_cached(dataset: datasets.Dataset):
         subdomain_idxs = collections.defaultdict(list)
         print("Getting subdomains from dataset")
         subdomains = dataset["dataset"]
-        for i in tqdm.trange(len(dataset), desc="Counting dataset subdomains"):
+        for i in tqdm.trange(len(dataset), desc="Counting dataset subdomains", colour="blue"):
             subdomain = subdomains[i]
             subdomain_idxs[subdomain].append(i)
         pickle.dump(subdomain_idxs, open(cache_file_path, 'wb'))

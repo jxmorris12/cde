@@ -53,6 +53,7 @@ class TokenizerCollator(transformers.DataCollatorWithPadding):
         query = []
         document = []
         random_document = []
+        negative_document = []
 
         out_ex = {}
         out_ex["idx"] = []
@@ -61,6 +62,7 @@ class TokenizerCollator(transformers.DataCollatorWithPadding):
             query.append(ex["query"])
             document.append(ex["document"])
             out_ex["idx"].append(ex["idx"])
+            if "negative_document" in ex: negative_document.extend(ex["negative_document"])
             if "random_document" in ex: random_document.append(ex["random_document"])
 
         tokenize_fn = functools.partial(
@@ -77,6 +79,11 @@ class TokenizerCollator(transformers.DataCollatorWithPadding):
         document_encoded = tokenize_fn(document)
         out_ex["document_input_ids"] = document_encoded.input_ids
         out_ex["document_attention_mask"] = document_encoded.attention_mask
+
+        if len(negative_document):
+            negative_document_encoded = tokenize_fn(negative_document)
+            out_ex["negative_document_input_ids"] = negative_document_encoded.input_ids
+            out_ex["negative_document_attention_mask"] = negative_document_encoded.attention_mask
 
         if len(random_document):
             random_document_encoded = tokenize_fn(random_document)

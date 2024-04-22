@@ -91,21 +91,20 @@ class RerankHelper:
                 pair_ids.append([(j, doc_j)])
                 doc_j += 1
                 documents_text.append(corpus[corpus_idx_dict[doc_id]]["text"])
+            
+            query_text_inputs = [dataset.prefix_query + query_text]
+            document_text_inputs = [dataset.prefix_document + t for t in documents_text]
 
-            query_inputs = self.tokenizer(
-                [dataset.prefix_query + query_text],
+            all_tokenized_inputs = self.tokenizer(
+                query_text_inputs + document_text_inputs,
                 padding=True,
                 truncation=True,
                 max_length=self.max_seq_length,
                 return_tensors="pt",
             ).to(device)
-            document_inputs = self.tokenizer(
-                [dataset.prefix_document + t for t in documents_text],
-                padding=True,
-                truncation=True,
-                max_length=self.max_seq_length,
-                return_tensors="pt",
-            ).to(device)
+
+            query_inputs = transformers.BatchEncoding(data={ k: v[:len(query_text_inputs)] for k,v in all_tokenized_inputs.items() })
+            document_inputs = transformers.BatchEncoding(data={ k: v[len(query_text_inputs):] for k,v in all_tokenized_inputs.items() })
 
             if self.fake_dataset_info:
                 batch_size = document_inputs["input_ids"].shape[0]
@@ -152,10 +151,7 @@ class RerankHelper:
         pair_ids = torch.tensor(pair_ids, device=device)
         rerank_scores_biencoder = torch.tensor(rerank_scores_biencoder, device=device)
 
-        # use actual top-k docs (in case we have fewer)
-        # TODO: check this logic
         true_top_k = len(documents_text)
-        
         max_length = int(math.ceil(true_top_k * num_eval_queries / world_size)) * 2
 
         # add dummy elements to make same shapes for gather.
