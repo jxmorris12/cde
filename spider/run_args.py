@@ -274,7 +274,7 @@ class TrainingArguments(transformers.TrainingArguments):
             )
         },
     )
-    init_model_state_dict_from_path: Optional[str] = field(
+    model_state_dict_from_path: Optional[str] = field(
         default=None,
         metadata={
             "help": "If set, will load model from weights within a checkpoint in this folder"

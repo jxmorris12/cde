@@ -45,7 +45,7 @@ class Sampler(abc.ABC, torch.utils.data.Sampler):
             math.floor(len(self.dataset) / self.world_size / self.batch_size) 
                 * self.batch_size
         )
-        if get_rank() == 0: print(f"sampler set self.num_samples={self.num_samples} (original num_samples={num_samples})")
+        # if get_rank() == 0: print(f"[Sampler] set self.num_samples={self.num_samples} (original num_samples={num_samples})")
         self.total_size = self.num_samples * self.world_size
         self.shuffle = shuffle
         self.seed = seed

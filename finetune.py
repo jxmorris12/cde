@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Dict, List, Optional
 
 import copy
 import functools
@@ -24,6 +24,16 @@ from spider.trainer import CustomTrainer
 
 
 logger = logging.getLogger(__name__)
+
+def issue_warnings_after_load(load_result: Dict[str, List[str]]) -> None:
+    if len(load_result.missing_keys) != 0:
+        logger.warning(
+            f"There were missing keys in the checkpoint model loaded: {load_result.missing_keys}."
+        )
+    if len(load_result.unexpected_keys) != 0:
+        logger.warning(
+            f"There were unexpected keys in the checkpoint model loaded: {load_result.unexpected_keys}."
+        )
 
 def get_checkpoint(training_args) -> Optional[str]:
     last_checkpoint = None
@@ -216,11 +226,12 @@ def main():
             dataset_backbone=dataset_backbone,
         )
     
-    if training_args.init_model_state_dict_from_path:
+    if training_args.model_state_dict_from_path:
         state_dict = load_model_state_dict_from_path(
-            args.load_model_state_dict_from_path
+            training_args.model_state_dict_from_path
         )
-        model = model.load_state_dict(state_dict, strict=True)
+        load_result = model.load_state_dict(state_dict, strict=True)
+        issue_warnings_after_load(load_result)
 
     print("[main] creating collator")
     collator = collator_cls(
@@ -257,16 +268,20 @@ def main():
         model=model,
         args=training_args,
         train_dataset=train_dataset,
-        eval_dataset=None,
-        # eval_dataset=eval_dataset,
+        eval_dataset=eval_dataset,
         embedder_tokenizer=embedder_tokenizer,
         train_sampler_fn=train_sampler_fn,
-        eval_sampler_fns={},
-        # eval_sampler_fns=eval_sampler_fns,
-        retrieval_datasets={},
-        # retrieval_datasets=retrieval_datasets,
+        eval_sampler_fns=eval_sampler_fns,
+        retrieval_datasets=retrieval_datasets,
     )
     logging.info("train() loaded checkpoint %s", checkpoint)
+    if trainer._is_main_worker:
+        torch.save(
+            data_args, os.path.join(training_args.output_dir, "data_args.bin")
+        )
+        torch.save(
+            model_args, os.path.join(training_args.output_dir, "model_args.bin"),
+        )
     print("[main] trainer.train()")
     trainer.train(resume_from_checkpoint=checkpoint)
     trainer.evaluate_retrieval_datasets()

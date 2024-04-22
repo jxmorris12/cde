@@ -30,7 +30,9 @@ ARGS_STR_DICT = {
     "biencoder-16cluster-4kbatch-1epoch": "--per_device_train_batch_size 512 --per_device_eval_batch_size 512 --use_wandb 1 --bf16 1 --dataset nomic_unsupervised --sampling_strategy cluster_within_domain --num_train_epochs 2 --learning_rate 2e-5 --embedder nomic-ai/nomic-bert-2048 --clustering_model gtr_base --clustering_query_to_doc 1 --automatically_deduplicate_documents 1 --automatically_deduplicate_queries 1 --arch biencoder --dataset_info batch --ddp_find_unused_parameters 0 --eval_rerank_topk 512 --lr_scheduler_type inverse_sqrt --warmup_steps 5600 --disable_dropout 1 --eval_steps 12000 --max_seq_length 512 --max_batch_size_fits_in_memory 128 --use_gc 1 --logging_steps 20 --train_cluster_size 16384 --eval_cluster_size 224 --use_prefix 1 --transductive_corpus_size 512 --save_steps 1000 --logit_scale 50 --max_eval_batches 4 --exp_name 2024-04-15-biencoder-scratch-03-cluster16k",
     "biencoder-domain-1": "--per_device_train_batch_size 4096 --per_device_eval_batch_size 512 --use_wandb 1 --bf16 1 --dataset nomic_unsupervised --sampling_strategy domain --num_train_epochs 1 --learning_rate 2e-5 --embedder nomic-ai/nomic-bert-2048 --clustering_model gtr_base --clustering_query_to_doc 1 --automatically_deduplicate_documents 1 --automatically_deduplicate_queries 1 --arch biencoder --dataset_info batch --ddp_find_unused_parameters 0 --eval_rerank_topk 512 --lr_scheduler_type inverse_sqrt --warmup_steps 5600 --disable_dropout 1 --eval_steps 12000 --max_seq_length 512 --max_batch_size_fits_in_memory 256 --use_gc 1 --logging_steps 100 --train_cluster_size 16384 --eval_cluster_size 224 --use_prefix 1 --transductive_corpus_size 512 --save_steps 1000 --logit_scale 50 --max_eval_batches 4 --exp_name 2024-04-19-biencoder-scratch-06-domain --ddp_share_negatives_between_gpus=1",
 
-    "supervised-baseline-1epoch": "--per_device_train_batch_size 256 --per_device_eval_batch_size 256 --bf16 1 --use_wandb 1 --dataset nomic_supervised --sampling_strategy cluster_within_domain --num_train_epochs 1 --learning_rate 2e-5 --embedder nomic-ai/nomic-embed-text-v1-unsupervised --clustering_model gtr_base --clustering_query_to_doc 1 --automatically_deduplicate_documents 1 --automatically_deduplicate_queries 1 --arch biencoder --dataset_info batch --eval_rerank_topk 512 --use_prefix 1 --exp_name baseline-supervised-cluster224 --num_hard_negatives 7 --lr_scheduler_type linear --ddp_share_negatives_between_gpus 0 --use_gc 1 --max_batch_size_fits_in_memory 512 --warmup_steps 400 --logging_steps 40 --train_cluster_size 224",
+    "supervised-baseline-domain-1epoch": "--per_device_train_batch_size 256 --per_device_eval_batch_size 256 --bf16 1 --use_wandb 1 --dataset nomic_supervised --sampling_strategy domain --num_train_epochs 1 --learning_rate 2e-5 --embedder nomic-ai/nomic-embed-text-v1-unsupervised --clustering_model gtr_base --clustering_query_to_doc 1 --automatically_deduplicate_documents 1 --automatically_deduplicate_queries 1 --arch biencoder --dataset_info batch --eval_rerank_topk 512 --use_prefix 1 --exp_name baseline-supervised-domain --num_hard_negatives 7 --lr_scheduler_type linear --ddp_share_negatives_between_gpus 0 --use_gc 1 --max_batch_size_fits_in_memory 512 --warmup_steps 400 --logging_steps 40 --train_cluster_size 224",
+    "supervised-baseline-cluster224-1epoch": "--per_device_train_batch_size 256 --per_device_eval_batch_size 256 --bf16 1 --use_wandb 1 --dataset nomic_supervised --sampling_strategy cluster_within_domain --num_train_epochs 1 --learning_rate 2e-5 --embedder nomic-ai/nomic-embed-text-v1-unsupervised --clustering_model gtr_base --clustering_query_to_doc 1 --automatically_deduplicate_documents 1 --automatically_deduplicate_queries 1 --arch biencoder --dataset_info batch --eval_rerank_topk 512 --use_prefix 1 --exp_name baseline-supervised-cluster224 --num_hard_negatives 7 --lr_scheduler_type linear --ddp_share_negatives_between_gpus 0 --use_gc 1 --max_batch_size_fits_in_memory 512 --warmup_steps 400 --logging_steps 40 --train_cluster_size 224",
+    "supervised-baseline-cluster224-1epoch--nodedup": "--per_device_train_batch_size 256 --per_device_eval_batch_size 256 --bf16 1 --use_wandb 1 --dataset nomic_supervised --sampling_strategy cluster_within_domain --num_train_epochs 1 --learning_rate 2e-5 --embedder nomic-ai/nomic-embed-text-v1-unsupervised --clustering_model gtr_base --clustering_query_to_doc 1 --automatically_deduplicate_documents 0 --automatically_deduplicate_queries 0 --arch biencoder --dataset_info batch --eval_rerank_topk 512 --use_prefix 1 --exp_name baseline-supervised-cluster224--no-dedup --num_hard_negatives 7 --lr_scheduler_type linear --ddp_share_negatives_between_gpus 0 --use_gc 1 --max_batch_size_fits_in_memory 256 --warmup_steps 400 --logging_steps 40 --train_cluster_size 224 --save_steps 1000",
 }
 
 MODEL_FOLDER_DICT = {
@@ -41,28 +43,31 @@ MODEL_FOLDER_DICT = {
     "transductive-scratch-02-cluster224": "/data/saves/tti3/backup/2024-04-17-transductive-pretrain-16",
     "biencoder-16cluster-4kbatch-1epoch": "/data/saves/tti3/2024-04-15-biencoder-scratch-03-cluster16k-batch4k--1epoch",
     "biencoder-domain-1": "/data/saves/tti3/2024-04-19-biencoder-scratch-06-domain/",
-    "supervised-baseline-1epoch": "/data/saves/tti3/2024-04-22-baseline-supervised-cluster224/"
+    ################################################################################################
+    "supervised-baseline-cluster224-1epoch": "/data/saves/tti3/2024-04-22-baseline-supervised-cluster224/",
+    "supervised-baseline-cluster224-1epoch--nodedup": "/data/saves/tti3/2024-04-22-baseline-supervised-cluster224--no-dedup/",
+    "supervised-baseline-domain-1epoch": "/data/saves/tti3/2024-04-22-baseline-supervised-domain/",
 }
 assert ARGS_STR_DICT.keys() == MODEL_FOLDER_DICT.keys(), f"keys not equal: {ARGS_STR_DICT.keys()} != {MODEL_FOLDER_DICT.keys()}"
 
 beir_dataset_names = [ 
     'arguana',
-    'webis-touche2020',
-    'quora',
+    'fiqa',
+    'msmarco',
     'nfcorpus',
+    'nq',
+    'quora',
     'scidocs', 
     'scifact',
-    'trec-covid',
     'signal1m',
-    'fiqa',
+    'trec-covid',
     'trec-news',  
-    'msmarco',
-    'nq',
-    # 'cqadupstack',
+    'webis-touche2020',
 ]
 
 
 def parse_args() -> argparse.ArgumentParser:
+    # TODO: Cache results so we don't re-run eval for the same model.
     parser = argparse.ArgumentParser(description="Process model key")
     parser.add_argument(
         "model_key", 
