@@ -249,6 +249,10 @@ class DatasetConditionedEncoderDecoder(transformers.PreTrainedModel):
         # reduction by just sitting around unused.
         del self.backbone.shared
         self.backbone.shared = None
+        del self.backbone.encoder.embed_tokens
+        self.backbone.encoder.embed_tokens = None
+        del self.backbone.decoder.embed_tokens
+        self.backbone.decoder.embed_tokens = None
 
         # TODO: Verify that this properly disables causal masking.
         self.backbone.config.use_cache = False
