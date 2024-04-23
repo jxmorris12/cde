@@ -88,6 +88,7 @@ def main():
     torch._dynamo.config.cache_size_limit = 10_000
 
     os.environ["WANDB__SERVICE_WAIT"] = "30"
+    os.environ["TOKENIZERS_PARALLELISM"] = "0"
 
     parser = transformers.HfArgumentParser((ModelArguments, DataArguments, TrainingArguments))
     model_args, data_args, training_args = parser.parse_args_into_dataclasses()
@@ -227,6 +228,7 @@ def main():
         )
     
     if training_args.model_state_dict_from_path:
+        print("[load_model] loading from path", training_args.model_state_dict_from_path)
         state_dict = load_model_state_dict_from_path(
             training_args.model_state_dict_from_path
         )
@@ -268,7 +270,8 @@ def main():
         model=model,
         args=training_args,
         train_dataset=train_dataset,
-        eval_dataset=eval_dataset,
+        # eval_dataset=eval_dataset,
+        eval_dataset=None,
         embedder_tokenizer=embedder_tokenizer,
         train_sampler_fn=train_sampler_fn,
         eval_sampler_fns=eval_sampler_fns,

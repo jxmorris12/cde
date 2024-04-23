@@ -310,6 +310,7 @@ class CustomTrainer(transformers.Trainer):
         metrics = {
             "acc": acc.detach(),
             "loss_unscaled": loss_unscaled.detach(),
+            "stats_emb_dim": e1.shape[-1],
             "stats_total_queries": len(e1),
             "stats_total_documents": len(e2),
             "batch_size": batch_size,
@@ -486,17 +487,19 @@ class CustomTrainer(transformers.Trainer):
         doc_idx = torch.arange(len(document_inputs["input_ids"]), device=document_unique_ids.device)
         one_hot_labels = (original_doc_idx[:, None] == doc_idx[None, :]).float()
         if self.args.automatically_deduplicate_documents:
-            smart_labels = (
+            smart_labels_doc = (
                 original_doc_input_ids[:, None] == document_unique_ids[None, :])
         else:
-            smart_labels = one_hot_labels.clone()
+            smart_labels_doc = one_hot_labels.clone()
         
         # Aggregate labels for duplicate queries.
         query_unique_ids = self.consider_gather(query_inputs["input_ids"].sum(dim=1))
         if self.args.automatically_deduplicate_queries:
-            smart_labels = (
-                (query_unique_ids[:, None] == query_unique_ids[None, :]).float() @ smart_labels.float())
-            smart_labels = smart_labels.bool()
+            smart_labels_query = (
+                (query_unique_ids[:, None] == query_unique_ids[None, :]).float() @ one_hot_labels.float())
+            smart_labels = (smart_labels_doc | smart_labels_query.bool())
+        else:
+            smart_labels = smart_labels_doc
 
         num_unique_documents = document_unique_ids.unique().numel()
         num_collisions_documents = len(document_unique_ids) - num_unique_documents
@@ -523,14 +526,16 @@ class CustomTrainer(transformers.Trainer):
             "stats_unique_first_tokens_document": document_first_tokens.unique().numel(),
             "stats_unique_first_tokens_query": query_first_tokens.unique().numel(),
             "stats_num_ds_inputs": len(document_inputs["dataset_input_ids"]),
-            ###########################################################################
+            ###############################################################################
             "stats_unique_first_tokens_document": document_first_tokens.unique().numel(),
             "stats_unique_first_tokens_query": query_first_tokens.unique().numel(),
             "stats_query_first_token_mean": query_first_token_mean,
             "stats_query_first_token_value_mean": query_first_tokens.float().mean(),
             "stats_document_first_token_mean": document_first_token_mean,
             "stats_document_first_token_value_mean": document_first_tokens.float().mean(),
-            ###########################################################################
+            ###############################################################################
+            "stats_one_hot_labels_sum": one_hot_labels.long().sum().detach(),
+            "stats_smart_labels_sum": smart_labels.long().sum().detach(),
         }
         if self.is_in_train:
             for key, val in metrics.items():

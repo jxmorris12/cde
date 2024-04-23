@@ -114,5 +114,5 @@ def verify_ddp_weights_equal(model: torch.nn.Module, atol: float = 1e-5) -> None
         ###################################################################################################################
         
     
-    print0("Verified DDP parameter correctness ✅")
+    print0("[verify_ddp_weights_equal] Verified DDP parameter correctness ✅")
     

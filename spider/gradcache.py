@@ -393,7 +393,6 @@ class GradCache:
         :param loss_kwargs: Additional keyword arguments to the loss function.
         :return: The current's loss.
         """
-        print("cache_step_two_stage")
         # TODO: Pass these keys to constructor as
         # `first_stage_data_keys` and `second_stage_data_keys` or
         # something like that.

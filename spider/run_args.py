@@ -88,6 +88,13 @@ class ModelArguments:
             "help": "Whether to disable rotary embedding on the transductive part of that model"
         }
     )
+    embedding_output_dim: Optional[int] = field(
+        default=None,
+        metadata={
+            "help": "If set, sets bottleneck dim for contrastive outputs"
+        }
+    )
+
 
 @dataclass
 class DataArguments:
