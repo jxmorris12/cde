@@ -250,8 +250,10 @@ class DatasetConditionedEncoderDecoder(transformers.PreTrainedModel):
         del self.backbone.shared
         self.backbone.shared = None
 
-        # TODO: Optionally disable causal mask --
-        #    I think this would be possible by setting config.is_decoder to False.
+        # TODO: Verify that this properly disables causal masking.
+        self.backbone.config.use_cache = False
+        self.backbone.decoder.is_decoder = False
+        self.backbone.decoder.config.use_cache = False
 
         # Project biencoder word embeddings
         self.word_embeddings = word_embeddings
