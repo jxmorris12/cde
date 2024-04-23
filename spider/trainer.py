@@ -82,11 +82,11 @@ class CustomTrainer(transformers.Trainer):
         self._run_ddp_verify = True
 
         effective_batch_size = get_world_size() * self.args.per_device_train_batch_size
-        self._memory_reset_step_frequency = int(200 * effective_batch_size / 256)
+        self._memory_reset_step_frequency = int(2000 * effective_batch_size / 256)
         if get_rank() == 0:
             print(
                 "effective_batch_size", effective_batch_size, 
-                "--> memory_reset_step_frequency = ", self._memory_reset_step_frequency
+                "--> memory_reset_step_frequency =", self._memory_reset_step_frequency
             )
     
     def consider_gather(self, tensor: torch.Tensor) -> torch.Tensor:

@@ -293,9 +293,21 @@ class DatasetConditionedEncoderDecoder(transformers.PreTrainedModel):
             dtype=torch.long,
             device=soft_prompt.device,
         )
+        encoder_output = self.backbone.encoder(
+            inputs_embeds=soft_prompt,
+            attention_mask=encoder_attention_mask,
+        )
+        encoder_hidden_states = encoder_output.last_hidden_state
+
+        S = len(inputs_embeds)
+        soft_prompt = soft_prompt.expand((S, -1, -1))
+        encoder_attention_mask = encoder_attention_mask.expand((S, -1, -1))
+        encoder_hidden_states = encoder_hidden_states.expand((S, -1, -1))
+
         output = self.backbone(
             inputs_embeds=soft_prompt,
             attention_mask=encoder_attention_mask,
+            encoder_outputs=[encoder_hidden_states],
             ################################
             decoder_inputs_embeds=inputs_embeds,
             decoder_attention_mask=attention_mask,
