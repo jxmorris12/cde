@@ -233,8 +233,6 @@ class DatasetConditionedEncoderDecoder(transformers.PreTrainedModel):
         self.backbone = dataset_backbone
         self.embedding_dim = dataset_backbone.config.hidden_size
         self.hidden_size = self.backbone.config.hidden_size
-        self.n_soft_prompt = 8
-        self.hidden_size = dataset_backbone.config.hidden_size
 
         # Disable positional embeddings
         num_pos_emb_disabled_modules = 0
@@ -242,6 +240,7 @@ class DatasetConditionedEncoderDecoder(transformers.PreTrainedModel):
             if hasattr(module, "has_relative_attention_bias"):
                 if module.has_relative_attention_bias:
                     module.has_relative_attention_bias = False
+                    del module.relative_attention_bias
                     num_pos_emb_disabled_modules += 1
         print(f"[DatasetConditionedEncoderDecoder] disabled relative attention in {num_pos_emb_disabled_modules} modules")
 
@@ -257,7 +256,7 @@ class DatasetConditionedEncoderDecoder(transformers.PreTrainedModel):
             torch.nn.ReLU(),
             torch.nn.Linear(self.hidden_size, self.config.embedding_output_dim or self.hidden_size)
         )
-        self.randomize_dataset_sequence_order = True
+        self.randomize_dataset_sequence_order = False
     
     def forward(
             self, 
@@ -284,10 +283,6 @@ class DatasetConditionedEncoderDecoder(transformers.PreTrainedModel):
                 1, 
                 randomized_order[..., None].expand_as(soft_prompt)
             )
-        
-        inputs_embeds = self.word_embeddings(input_ids) # (b, s) -> (b, s, d)
-        inputs_embeds = self.word_embeddings_projection(inputs_embeds)
-
         encoder_attention_mask = torch.ones(
             soft_prompt.shape[0:2],
             dtype=torch.long,
@@ -299,14 +294,16 @@ class DatasetConditionedEncoderDecoder(transformers.PreTrainedModel):
         )
         encoder_hidden_states = encoder_output.last_hidden_state
 
-        S = len(inputs_embeds)
+        S = len(input_ids)
         soft_prompt = soft_prompt.expand((S, -1, -1))
         encoder_attention_mask = encoder_attention_mask.expand((S, -1, -1))
         encoder_hidden_states = encoder_hidden_states.expand((S, -1, -1))
 
+        inputs_embeds = self.word_embeddings(input_ids) # (b, s) -> (b, s, d)
+        inputs_embeds = self.word_embeddings_projection(inputs_embeds)
         output = self.backbone(
-            inputs_embeds=soft_prompt,
-            attention_mask=encoder_attention_mask,
+            inputs_embeds=None,
+            attention_mask=None,
             encoder_outputs=[encoder_hidden_states],
             ################################
             decoder_inputs_embeds=inputs_embeds,

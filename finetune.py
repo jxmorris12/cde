@@ -16,7 +16,12 @@ from spider.dataset import (
     load_synthetic_words_dataset, 
     BeirDataset, NomicSupervisedDataset, NomicUnsupervisedDataset
 )
-from spider.lib import get_rank, get_world_size, load_embedder_and_tokenizer, load_model_state_dict_from_path, ModelConfig
+from spider.lib import (
+    get_rank, get_world_size, 
+    load_embedder_and_tokenizer, load_model_state_dict_from_path, 
+    ModelConfig,
+    print0
+)
 from spider.model import get_model_class
 from spider.run_args import ModelArguments, DataArguments, TrainingArguments
 from spider.sampler import get_sampler
@@ -89,6 +94,10 @@ def main():
 
     os.environ["WANDB__SERVICE_WAIT"] = "30"
     os.environ["TOKENIZERS_PARALLELISM"] = "0"
+
+    # Higher DDP log level.
+    os.environ["TORCH_CPP_LOG_LEVEL"]="INFO"
+    os.environ["TORCH_DISTRIBUTED_DEBUG"] = "DETAIL"
 
     parser = transformers.HfArgumentParser((ModelArguments, DataArguments, TrainingArguments))
     model_args, data_args, training_args = parser.parse_args_into_dataclasses()
@@ -235,7 +244,7 @@ def main():
         load_result = model.load_state_dict(state_dict, strict=True)
         issue_warnings_after_load(load_result)
 
-    print("[main] creating collator")
+    print0("[main] creating collator")
     collator = collator_cls(
         tokenizer=embedder_tokenizer,
         padding='longest',
@@ -264,7 +273,7 @@ def main():
         wandb.watch(model)
     
 
-    print("[main] creating trainer")
+    print0("[main] creating trainer")
     trainer = CustomTrainer(
         data_collator=collator,
         model=model,
@@ -285,7 +294,7 @@ def main():
         torch.save(
             model_args, os.path.join(training_args.output_dir, "model_args.bin"),
         )
-    print("[main] trainer.train()")
+    print0("[main] trainer.train()")
     trainer.train(resume_from_checkpoint=checkpoint)
     trainer.evaluate_retrieval_datasets()
 
