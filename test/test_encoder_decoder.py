@@ -80,7 +80,8 @@ def test_dataset_transformer_invariance_real():
     t1 = tokenizer(
         [
             "One dataset example input",
-            "Seven Tyrannosaurus Rex Dinosaurs"
+            "Seven Tyrannosaurus Rex Dinosaurs",
+            "the third Input..."
         ],
         return_tensors="pt",
         padding=True,
@@ -88,8 +89,8 @@ def test_dataset_transformer_invariance_real():
     i1 = t1.input_ids
     a1 = t1.attention_mask
 
-    i1_reordered = i1[[1, 0], :]
-    a1_reordered = a1[[1, 0], :]
+    i1_reordered = i1[[2, 1, 0], :]
+    a1_reordered = a1[[2, 1, 0], :]
     
     t2 = tokenizer(
         [

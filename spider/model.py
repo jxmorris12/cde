@@ -254,10 +254,10 @@ class DatasetConditionedEncoderDecoder(transformers.PreTrainedModel):
         del self.backbone.decoder.embed_tokens
         self.backbone.decoder.embed_tokens = None
 
-        # TODO: Verify that this properly disables causal masking.
-        self.backbone.config.use_cache = False
-        self.backbone.decoder.is_decoder = False
-        self.backbone.decoder.config.use_cache = False
+        # TODO: Properly disable causal masking. This didn't seem to work.
+        # self.backbone.config.use_cache = False
+        # self.backbone.decoder.is_decoder = False
+        # self.backbone.decoder.config.use_cache = False
 
         # Project biencoder word embeddings
         self.word_embeddings = word_embeddings
@@ -316,6 +316,11 @@ class DatasetConditionedEncoderDecoder(transformers.PreTrainedModel):
 
         inputs_embeds = self.word_embeddings(input_ids) # (b, s) -> (b, s, d)
         inputs_embeds = self.word_embeddings_projection(inputs_embeds)
+        #######################################################################
+        # print("encoder_hidden_states.shape:", encoder_hidden_states.shape)
+        # print("inputs_embeds.shape:", inputs_embeds.shape)
+        # print("attention_mask.shape:", attention_mask.shape)
+        #######################################################################
         output = self.backbone(
             inputs_embeds=None,
             attention_mask=None,

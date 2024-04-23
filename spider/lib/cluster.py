@@ -16,6 +16,7 @@ from bm25_pt.bm25 import TokenizedBM25
 from .dist import (
     get_rank, 
     get_world_size, 
+    print0
 )
 from .embed import (
     DenseEncoder, 
@@ -421,7 +422,7 @@ def cluster_subdomains(
         model=model,
         query_to_doc=query_to_doc,
     )
-    print("[cluster_subdomains] checking for cluster at file", clustering_hash)
+    print0("[cluster_subdomains] checking for cluster at file", clustering_hash)
     if os.path.exists(clustering_hash):
         # print("[cluster_subdomains] opening cached cluster ... ", clustering_hash)
         return pickle.load(open(clustering_hash, "rb"))
