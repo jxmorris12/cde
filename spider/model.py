@@ -236,7 +236,16 @@ class DatasetConditionedEncoderDecoder(transformers.PreTrainedModel):
         self.n_soft_prompt = 8
         self.hidden_size = dataset_backbone.config.hidden_size
 
-        # TODO: Disable T5 Encoder positional encoding
+        # Disable positional embeddings
+        num_pos_emb_disabled_modules = 0
+        for module in self.backbone.encoder.modules():
+            if hasattr(module, "has_relative_attention_bias"):
+                if module.has_relative_attention_bias:
+                    module.has_relative_attention_bias = False
+                    num_pos_emb_disabled_modules += 1
+        print(f"[DatasetConditionedEncoderDecoder] disabled relative attention in {num_pos_emb_disabled_modules} modules")
+
+        # Project biencoder word embeddings
         self.word_embeddings = word_embeddings
         self.word_embeddings_projection = torch.nn.Sequential(
             torch.nn.Linear(self.embedding_dim, self.hidden_size),
@@ -299,7 +308,6 @@ class DatasetConditionedEncoderDecoder(transformers.PreTrainedModel):
         # output_vectors = torch.cat((soft_prompt_pooled, output_pooled), dim=1) # (b, d) + (b, d) -> (b, 2d)
         output_vectors = output_pooled
         output = self.output_projection(output_vectors) # (b, 2d) -> (b, d)
-        breakpoint()
         return output
 
 
@@ -475,6 +483,8 @@ def get_model_class(name: str):
         return TwoEmbeddersWithMLP
     elif name in ['query_independent_dt', 'transductive']: # first name is the old one
         return DatasetTransformer
+    elif name in ['transductive__encoder_decoder']: # first name is the old one
+        return DatasetTransformerEncoderDecoder
     elif name == 'biencoder':
         return BiEncoder
     else:
