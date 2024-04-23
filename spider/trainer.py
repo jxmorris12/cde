@@ -236,7 +236,7 @@ class CustomTrainer(transformers.Trainer):
         self.train_dataloader.dataset.reset_dataset_idx()
 
         # Reset memory every once in awhile to try to help CPU/GPU OOM
-        if self.state.global_step % self._memory_reset_step_frequency == 0:
+        if (self.state.global_step > 0) and (self.state.global_step % self._memory_reset_step_frequency == 0):
             if get_rank() == 0:
                 print("[rank 0] Resetting memory")
             reset_memory()

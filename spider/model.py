@@ -241,8 +241,17 @@ class DatasetConditionedEncoderDecoder(transformers.PreTrainedModel):
                 if module.has_relative_attention_bias:
                     module.has_relative_attention_bias = False
                     del module.relative_attention_bias
+                    module.has_relative_attention_bias = None
                     num_pos_emb_disabled_modules += 1
         print(f"[DatasetConditionedEncoderDecoder] disabled relative attention in {num_pos_emb_disabled_modules} modules")
+
+        # Remove shared embedding params. We don't use these and they will mess up DDP param
+        # reduction by just sitting around unused.
+        del self.backbone.shared
+        self.backbone.shared = None
+
+        # TODO: Optionally disable causal mask --
+        #    I think this would be possible by setting config.is_decoder to False.
 
         # Project biencoder word embeddings
         self.word_embeddings = word_embeddings
