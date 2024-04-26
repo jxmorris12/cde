@@ -81,7 +81,10 @@ class GradCache:
         :return: Current step loss.
         """
         model = kwargs["model"]
-        model_is_ddp = isinstance(model, nn.parallel.DistributedDataParallel)
+        # model_is_ddp = isinstance(model, nn.parallel.DistributedDataParallel)
+        # problem: it could also be this –
+        #       torch._dynamo.eval_frame.OptimizedModule
+        model_is_ddp = hasattr(model, "module")
         if model_is_ddp:
             model_has_two_stages = hasattr(model.module, "second_stage_model")
         else:
@@ -364,6 +367,7 @@ class GradCache:
             )
         else:
             model_inputs_tqdm = model_inputs
+        
         for x, state, gradient, sync_context in zip(
             model_inputs_tqdm, random_states, cached_gradients, sync_contexts
         ):

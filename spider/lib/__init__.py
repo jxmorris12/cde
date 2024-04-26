@@ -5,5 +5,4 @@ from .dist import *
 from .misc import *
 from .rerank import *
 from .tensor import *
-from .nomic_bert import NomicBertModel
 from . import utils

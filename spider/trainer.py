@@ -83,11 +83,11 @@ class CustomTrainer(transformers.Trainer):
 
         effective_batch_size = get_world_size() * self.args.per_device_train_batch_size
         self._memory_reset_step_frequency = int(2000 * effective_batch_size / 256)
-        if get_rank() == 0:
-            print(
-                "effective_batch_size", effective_batch_size, 
-                "--> memory_reset_step_frequency =", self._memory_reset_step_frequency
-            )
+        # if get_rank() == 0:
+        #     print(
+        #         "effective_batch_size", effective_batch_size, 
+        #         "--> memory_reset_step_frequency =", self._memory_reset_step_frequency
+        #     )
     
     def consider_gather(self, tensor: torch.Tensor) -> torch.Tensor:
         if self.args.ddp_share_negatives_between_gpus:
@@ -252,16 +252,7 @@ class CustomTrainer(transformers.Trainer):
         ##############################################
         if not self.use_gc:
             self.accelerator.backward(loss)
-
-            # mm = model.module if hasattr(model, "module") else model
-            # def npp(m):
-            #     np = list(m.named_parameters())[:12]
-            #     return [(n, p.norm(p=2).item()) for n, p in np]
-            # if (self.state.global_step > 200) and (get_rank() == 0):
-            #     breakpoint()
-            # print(f"Rank {get_rank()} -- first_stage --", npp(mm.first_stage_model))
-            # print(f"Rank {get_rank()} -- second_stage --", npp(mm.second_stage_model))
-        
+        self._log_grad_norm_metrics(model=model)
         if self._run_ddp_verify and (get_world_size() > 1) and self.state.global_step in [2, 2000, 20_000]:
             if get_rank() == 0: print("[verify_ddp_weights_equal] running at step", self.state.global_step)
             verify_ddp_weights_equal(model) # TODO: Only call this every once in a while
@@ -418,7 +409,8 @@ class CustomTrainer(transformers.Trainer):
         elif self._model_stages is None:
             # We have to create separate DDP instances so that we can call the forward() functions individually
             # from the two halves of our model and have gradients sync properly.
-            if isinstance(model, torch.nn.parallel.DistributedDataParallel):
+            # if isinstance(model, torch.nn.parallel.DistributedDataParallel):
+            if hasattr(model, "module"):
                 if self.use_gc:
                     self._model_stages = self.accelerator.prepare(
                         model.module.first_stage_model,
@@ -443,6 +435,8 @@ class CustomTrainer(transformers.Trainer):
         return self._model_stages
 
     def _log_grad_norm_metrics(self, model: torch.nn.Module) -> None:
+        if hasattr(model, "module"): 
+            model = model.module
         if self.is_in_train:
             if self.model_has_two_stages:
                 model_stages = self.get_model_stages(model=model)
@@ -560,8 +554,6 @@ class CustomTrainer(transformers.Trainer):
                 one_hot_labels=one_hot_labels,
                 duplicate_labels=duplicate_labels,
             )
-            self._log_grad_norm_metrics(model=model)
-
             return loss
         else:
             e1 = model(**query_inputs)
@@ -572,7 +564,6 @@ class CustomTrainer(transformers.Trainer):
                 one_hot_labels=one_hot_labels,
                 duplicate_labels=duplicate_labels,
             )
-            self._log_grad_norm_metrics(model=model)
             return loss
     
     # Custom retrieval evalution code

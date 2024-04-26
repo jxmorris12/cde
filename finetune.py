@@ -18,7 +18,8 @@ from spider.dataset import (
 )
 from spider.lib import (
     get_rank, get_world_size, 
-    load_embedder_and_tokenizer, load_model_state_dict_from_path, 
+    load_embedder_and_tokenizer, 
+    load_model_state_dict_from_path, 
     ModelConfig,
     print0
 )
@@ -81,7 +82,7 @@ def get_checkpoint(training_args) -> Optional[str]:
 
 def main():
     # Helps with debugging.
-    torch.autograd.set_detect_anomaly(True)
+    # torch.autograd.set_detect_anomaly(True)
     # torch.compile() settings.
     torch.compiler.reset()
     torch._dynamo.config.optimize_ddp = False
@@ -96,13 +97,17 @@ def main():
     os.environ["TOKENIZERS_PARALLELISM"] = "0"
 
     # Higher DDP log level.
-    os.environ["TORCH_CPP_LOG_LEVEL"]="INFO"
-    os.environ["TORCH_DISTRIBUTED_DEBUG"] = "DETAIL"
+    # os.environ["TORCH_CPP_LOG_LEVEL"] = "INFO"
+    # os.environ["TORCH_DISTRIBUTED_DEBUG"] = "DETAIL"
+
+    transformers.logging.set_verbosity_error()
+    datasets.logging.set_verbosity_error()
+
+    torch.set_float32_matmul_precision('high')
 
     parser = transformers.HfArgumentParser((ModelArguments, DataArguments, TrainingArguments))
     model_args, data_args, training_args = parser.parse_args_into_dataclasses()
     transformers.set_seed(training_args.seed)
-    datasets.logging.set_verbosity_error()
     logging.basicConfig(
         format='%(asctime)s - %(message)s',
         datefmt='%Y-%m-%d %H:%M:%S',
@@ -199,6 +204,7 @@ def main():
         shuffle=True,
         clustering_model=data_args.clustering_model,
         clustering_query_to_doc=data_args.clustering_query_to_doc,
+        seed=training_args.seed,
     )
     data_args_eval = copy.copy(data_args)
     data_args_eval.sampling_strategy = "domain" # always set this for eval
@@ -274,6 +280,9 @@ def main():
     
 
     print0("[main] creating trainer")
+    if get_rank() == 0:
+        # Print info stats for training on main worker
+        transformers.logging.set_verbosity_info()
     trainer = CustomTrainer(
         data_collator=collator,
         model=model,
@@ -287,14 +296,17 @@ def main():
         retrieval_datasets=retrieval_datasets,
     )
     logging.info("train() loaded checkpoint %s", checkpoint)
-    if trainer._is_main_worker:
+    print0("[main] trainer.train()")
+    
+    if get_rank() == 0:
+        # Save trainer data args and model args
         torch.save(
             data_args, os.path.join(training_args.output_dir, "data_args.bin")
         )
         torch.save(
             model_args, os.path.join(training_args.output_dir, "model_args.bin"),
         )
-    print0("[main] trainer.train()")
+
     trainer.train(resume_from_checkpoint=checkpoint)
     trainer.evaluate_retrieval_datasets()
 

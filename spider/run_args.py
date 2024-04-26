@@ -70,12 +70,6 @@ class ModelArguments:
             "help": "If set, will load backbone and embedders with limited number of layers"
         }
     )
-    gamma: float = field(
-        default=0.9,
-        metadata={
-            "help": "Weighting between document and dataset embedding for dataset transformer"
-        }
-    )
     logit_scale: float = field(
         default=20,
         metadata={
@@ -155,6 +149,7 @@ class DataArguments:
     )
     def __post_init__(self):
         pass
+
 
 @dataclass
 class TrainingArguments(transformers.TrainingArguments):
@@ -242,7 +237,7 @@ class TrainingArguments(transformers.TrainingArguments):
     )
     weight_decay: float = field(
         default=0.01, 
-        metadata={"help": "Weight decay for AdamW if we apply some."}
+        metadata={"help": "The weight decay to apply (if not zero) to all layers except all bias and LayerNorm weights in [`AdamW`] optimizer."}
     )
     automatically_deduplicate_documents: bool = field(
         default=True,
@@ -287,6 +282,7 @@ class TrainingArguments(transformers.TrainingArguments):
             "help": "If set, will load model from weights within a checkpoint in this folder"
         }
     )
+    # apparently this default is slightly more efficient:
     # https://github.com/pytorch/pytorch/issues/118421
     ddp_bucket_cap_mb: Optional[int] = field(
         default=100,
@@ -297,16 +293,6 @@ class TrainingArguments(transformers.TrainingArguments):
             )
         },
     )
-    # dataloader_prefetch_factor: Optional[int] = field(
-    #     default=4,
-    #     metadata={
-    #         "help": (
-    #             "Number of batches loaded in advance by each worker. "
-    #             "2 means there will be a total of 2 * num_workers batches prefetched across all workers. "
-    #             "Default is 2 for PyTorch < 2.0.0 and otherwise None."
-    #         )
-    #     },
-    # )
     def __setattr__(self, name, value):
         super(transformers.TrainingArguments, self).__setattr__(name, value)
 

@@ -96,8 +96,6 @@ class FlashAttention(nn.Module):
 
         past_key_value = (past_key_value, past_len + qkv.size(1)) if use_cache else None
 
-        # print("[1] input qkv:", qkv[0:4, ...])
-
         if self.rotary_start_pos > 0:
             ############## FIRST NEW PART ##############
             assert qkv.shape[1] == 3
@@ -115,18 +113,7 @@ class FlashAttention(nn.Module):
                 no_rotary_token_mask[:, None, None, None].expand_as(qkv),
                 qkv # TODO: Confirm this isn't backwards.
             )
-            # if cu_seqlens is not None:
-            #     cu_seqlens_offset = (
-            #         torch.arange(len(cu_seqlens), dtype=cu_seqlens.dtype, device=cu_seqlens.device) * self.rotary_start_pos
-            #     )
-            #     # breakpoint()
-            #     cu_seqlens = cu_seqlens - cu_seqlens_offset
-            # if max_seq_len is not None:
-            #     max_seq_len -= self.rotary_start_pos
-            # if past_len is not None:
-                # breakpoint()
 
-        # print("[2] pre-rotary qkv:", qkv.norm(p=2))
         if self.rotary_emb_dim > 0:
             if cu_seqlens is None and max_seq_len is None:
                 if self.rotary_head_dim:
@@ -151,14 +138,7 @@ class FlashAttention(nn.Module):
                 no_rotary_token_mask[:, None, None, None].expand_as(qkv), 
                 qkv
             )
-            # if cu_seqlens is not None:
-            #     cu_seqlens = cu_seqlens + cu_seqlens_offset
-            # if max_seq_len is not None:
-            #     max_seq_len += self.rotary_start_pos
-            # if past_len is not None:
-                # breakpoint()
 
-        # print("[4] pre-attention qkv:", qkv.norm(p=2))
         if attention_mask is not None:
             # varlen, ignore padding tokens, efficient for large batch with many paddings
             assert attention_mask is not None

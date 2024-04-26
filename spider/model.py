@@ -4,6 +4,7 @@ import copy
 import torch
 import transformers
 
+from spider.lib.dist import print0
 from spider.lib.tensor import mean_pool
 
 
@@ -23,7 +24,7 @@ def disable_dropout(model: torch.nn.Module):
     dropout_modules = [m for m in model.modules() if isinstance(m, torch.nn.Dropout)]
     for m in dropout_modules:
         m.p = 0.0
-    print(
+    print0(
         f"Disabled {len(dropout_modules)} dropout modules from model type {type(model)}"
     )
 
@@ -39,10 +40,9 @@ class TwoEmbeddersWithMLP(transformers.PreTrainedModel):
             dataset_backbone: transformers.PreTrainedModel,
         ):
         super().__init__(config=config)
-        # self.tokenizer = transformers.AutoTokenizer.from_pretrained('bert-base-uncased')
 
         if config.limit_layers:
-            print(f"Limiting layers to {config.limit_layers}")
+            print0(f"Limiting layers to {config.limit_layers}")
             limit_layers(embedder, config.limit_layers)
             limit_layers(dataset_backbone, config.limit_layers)
         self.embedder = embedder
@@ -143,7 +143,7 @@ class DatasetConditionedBiencoder(transformers.PreTrainedModel):
             for module in self.backbone.modules():
                 if hasattr(module, "rotary_emb_dim"):
                     module.rotary_start_pos = config.transductive_corpus_size
-            print(f"modified {rotary_disabled} rotary modules – set rotary_start_pos to {config.transductive_corpus_size}")
+            print0(f"modified {rotary_disabled} rotary modules – set rotary_start_pos to {config.transductive_corpus_size}")
 
         # TODO: Argparse, ablate, and potentially remove the soft prompt portion
         # of this model.
@@ -227,7 +227,6 @@ class DatasetConditionedEncoderDecoder(transformers.PreTrainedModel):
             self, 
             config,
             dataset_backbone: transformers.PreTrainedModel,
-            word_embeddings: torch.nn.Module,
         ):
         super().__init__(config=config)
         self.backbone = dataset_backbone
@@ -243,7 +242,21 @@ class DatasetConditionedEncoderDecoder(transformers.PreTrainedModel):
                     del module.relative_attention_bias
                     module.has_relative_attention_bias = None
                     num_pos_emb_disabled_modules += 1
-        print(f"[DatasetConditionedEncoderDecoder] disabled relative attention in {num_pos_emb_disabled_modules} modules")
+        print0(f"[DatasetConditionedEncoderDecoder] disabled relative attention in {num_pos_emb_disabled_modules} modules")
+        
+        num_causal_mask_disabled_modules = 0
+        # TODO: Disable causal masking...
+        # for module in self.backbone.decoder.modules():
+        #     if 'SelfAttention' in module.__class__.__name__:
+        #         # disable causal mask
+        #         # see code:
+        #         # github.com/huggingface/transformers
+        #         #       /blob/main/src/transformers
+        #         #       /models/t5/modeling_t5.py#440
+        #         if module.SelfAttention.is_decoder:
+        #             module.SelfAttention.is_decoder = False
+        #             num_causal_mask_disabled_modules += 1
+        print0(f"[DatasetConditionedEncoderDecoder] disabled causal mask in {num_causal_mask_disabled_modules} modules")
 
         # Remove shared embedding params. We don't use these and they will mess up DDP param
         # reduction by just sitting around unused.
@@ -251,21 +264,21 @@ class DatasetConditionedEncoderDecoder(transformers.PreTrainedModel):
         self.backbone.shared = None
         del self.backbone.encoder.embed_tokens
         self.backbone.encoder.embed_tokens = None
-        del self.backbone.decoder.embed_tokens
-        self.backbone.decoder.embed_tokens = None
 
-        # TODO: Properly disable causal masking. This didn't seem to work.
-        # self.backbone.config.use_cache = False
-        # self.backbone.decoder.is_decoder = False
-        # self.backbone.decoder.config.use_cache = False
+        # TODO: Verify causal masking is properly disabled.
+        self.backbone.config.use_cache = False
+        self.backbone.decoder.is_decoder = False
+        self.backbone.decoder.config.use_cache = False
 
         # Project biencoder word embeddings
-        self.word_embeddings = word_embeddings
-        self.word_embeddings_projection = torch.nn.Sequential(
-            torch.nn.Linear(self.embedding_dim, self.hidden_size),
-            torch.nn.ReLU(),
-            torch.nn.Linear(self.hidden_size, self.hidden_size)
-        )
+        # self.word_embeddings = word_embeddings
+        vocab_bottleneck_dim = 768
+        vocab_size = self.backbone.decoder.embed_tokens.weight.shape[0]
+        # self.word_embeddings_projection = torch.nn.Sequential(
+        #     torch.nn.Linear(self.embedding_dim, vocab_bottleneck_dim),
+        #     torch.nn.ReLU(),
+        #     torch.nn.Linear(vocab_bottleneck_dim, vocab_size)
+        # )
         self.output_projection = torch.nn.Sequential(
             torch.nn.Linear(self.hidden_size, self.hidden_size),
             torch.nn.ReLU(),
@@ -277,7 +290,8 @@ class DatasetConditionedEncoderDecoder(transformers.PreTrainedModel):
             self, 
             input_ids: torch.Tensor,
             attention_mask: torch.Tensor,
-            dataset_embeddings: torch.Tensor) -> torch.Tensor:
+            dataset_embeddings: torch.Tensor
+        ) -> torch.Tensor:
         dataset_embeddings = dataset_embeddings[None, :, :] # (b, d) -> (1, b, d)
 
         if dataset_embeddings.shape[1] > self.config.transductive_corpus_size:
@@ -303,35 +317,37 @@ class DatasetConditionedEncoderDecoder(transformers.PreTrainedModel):
             dtype=torch.long,
             device=soft_prompt.device,
         )
-        encoder_output = self.backbone.encoder(
-            inputs_embeds=soft_prompt,
-            attention_mask=encoder_attention_mask,
-        )
-        encoder_hidden_states = encoder_output.last_hidden_state
+        # encoder_output = self.backbone.encoder(
+        #     inputs_embeds=soft_prompt,
+        #     attention_mask=encoder_attention_mask,
+        # )
+        # encoder_hidden_states = encoder_output.last_hidden_state
 
         S = len(input_ids)
         soft_prompt = soft_prompt.expand((S, -1, -1))
         encoder_attention_mask = encoder_attention_mask.expand((S, -1, -1))
-        encoder_hidden_states = encoder_hidden_states.expand((S, -1, -1))
+        # encoder_hidden_states = encoder_hidden_states.expand((S, -1, -1))
 
-        inputs_embeds = self.word_embeddings(input_ids) # (b, s) -> (b, s, d)
-        inputs_embeds = self.word_embeddings_projection(inputs_embeds)
-        #######################################################################
-        # print("encoder_hidden_states.shape:", encoder_hidden_states.shape)
-        # print("inputs_embeds.shape:", inputs_embeds.shape)
-        # print("attention_mask.shape:", attention_mask.shape)
-        #######################################################################
+        # ########    T5
+        # output = self.backbone(
+        #     inputs_embeds=None,
+        #     attention_mask=None,
+        #     encoder_outputs=[encoder_hidden_states],
+        #     ################################
+        #     decoder_inputs_embeds=inputs_embeds,
+        #     decoder_attention_mask=attention_mask,
+        # )
+        ########    MT5 
         output = self.backbone(
-            inputs_embeds=None,
-            attention_mask=None,
-            encoder_outputs=[encoder_hidden_states],
-            ################################
-            decoder_inputs_embeds=inputs_embeds,
-            decoder_attention_mask=attention_mask,
+            inputs_embeds=soft_prompt,              # Encoder
+            attention_mask=encoder_attention_mask,  # Encoder
+            decoder_input_ids=input_ids,            # Decoder
+            decoder_attention_mask=attention_mask,  # Decoder
         ) 
         output_vectors = output.last_hidden_state
-        output_pooled = mean_pool(output.last_hidden_state, attention_mask)
-
+        last_token_idxs = attention_mask.sum(1) - 1
+        output_pooled = output_vectors[torch.arange(S), last_token_idxs]
+        # output_pooled = mean_pool(output.last_hidden_state, attention_mask)
         # average with original vectors
         # TODO: Argparse for pooling strategy.
         # output_vectors = torch.cat((soft_prompt_pooled, output_pooled), dim=1) # (b, d) + (b, d) -> (b, 2d)
@@ -415,17 +431,19 @@ class DatasetTransformerEncoderDecoder(transformers.PreTrainedModel):
             embedder=embedder
         )
         del dataset_backbone
-        dataset_backbone = transformers.AutoModel.from_pretrained(
-            "EleutherAI/pile-t5-base"
-        )
+        # dataset_backbone = transformers.AutoModel.from_pretrained("t5-base")
+        dataset_backbone = transformers.AutoModel.from_pretrained("EleutherAI/pile-t5-base")
         self.second_stage_model = DatasetConditionedEncoderDecoder(
             config=config,
             dataset_backbone=dataset_backbone,
-            word_embeddings=embedder.embeddings.word_embeddings
         )
         self.temp = config.logit_scale
         if config.disable_dropout:
             disable_dropout(self)
+
+        # Compile modules separately.
+        self.first_stage_model = torch.compile(self.first_stage_model)
+        self.second_stage_model = torch.compile(self.second_stage_model)
         
     def forward(
             self, 
@@ -457,13 +475,15 @@ class BiEncoder(transformers.PreTrainedModel):
             embedder: transformers.PreTrainedModel, 
         ):
         super().__init__(config=config)
-        self.tokenizer = transformers.AutoTokenizer.from_pretrained('bert-base-uncased')
 
         if config.limit_layers:
             print(f"Limiting layers to {config.limit_layers}")
             limit_layers(embedder, config.limit_layers)
     
         self.embedder = embedder
+        # if ("t5" in embedder.config.model_type):
+        #     print(f"using torch.compile() on embedder of type `{embedder.config.model_type}`")
+        #     self.embedder = torch.compile(self.embedder) 
         self.hidden_size = self.embedder.config.hidden_size
         self.mlp = torch.nn.Sequential(
             torch.nn.Linear(self.hidden_size, self.hidden_size),

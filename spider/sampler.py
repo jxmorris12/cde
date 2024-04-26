@@ -125,6 +125,7 @@ class FixedSubdomainSampler(RandomSampler):
             batch_size: int, 
             shuffle: bool, 
             num_samples: Optional[int] = None,
+            seed: int = 42,
         ):
         super().__init__(
             dataset=dataset, 
@@ -132,6 +133,7 @@ class FixedSubdomainSampler(RandomSampler):
             shuffle=shuffle,
             max_num_batches=None,
             num_samples=num_samples,
+            seed=seed,
         )
         assert hasattr(self.dataset, 'subdomain_idxs')
         self.batch_assignments = self.dataset.subdomain_idxs
@@ -232,6 +234,7 @@ class AutoClusterWithinDomainSampler(FixedSubdomainSampler):
             shuffle: bool,
             model: str,
             num_samples: Optional[int] = None,
+            seed: int = 42,
         ):
         # TODO: shuffle?
         super().__init__(
@@ -239,6 +242,7 @@ class AutoClusterWithinDomainSampler(FixedSubdomainSampler):
             batch_size=batch_size, 
             shuffle=False,
             num_samples=num_samples,
+            seed=seed,
         )
         self.query_to_doc = query_to_doc
         self.batch_size = batch_size
@@ -280,6 +284,7 @@ def get_sampler(
     clustering_model: str,
     clustering_query_to_doc: bool = True,
     num_samples: Optional[int] = None,
+    seed: int = 42,
 ) -> Sampler:
     if sampling_strategy == "random":
         return RandomSampler(
@@ -287,6 +292,7 @@ def get_sampler(
             batch_size=batch_size,
             shuffle=shuffle,
             num_samples=num_samples,
+            seed=seed,
         )
     elif sampling_strategy == "domain":
         return FixedSubdomainSampler(
@@ -294,6 +300,7 @@ def get_sampler(
             batch_size=batch_size,
             shuffle=shuffle,
             num_samples=num_samples,
+            seed=seed,
         )
     elif sampling_strategy == "cluster":
         return AutoClusterSampler(
@@ -304,6 +311,7 @@ def get_sampler(
             query_to_doc=clustering_query_to_doc, 
             model=clustering_model,
             num_samples=num_samples,
+            seed=seed,
         )
     elif sampling_strategy == "cluster_within_domain":
         return AutoClusterWithinDomainSampler(
@@ -314,6 +322,7 @@ def get_sampler(
             query_to_doc=clustering_query_to_doc, 
             model=clustering_model,
             num_samples=num_samples,
+            seed=seed,
         )
     else:
         raise ValueError(f"unknown sampling strategy {sampling_strategy}")
