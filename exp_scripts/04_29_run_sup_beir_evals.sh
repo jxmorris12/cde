@@ -4,6 +4,8 @@ MODELS=("biencoder-scratch-02-cluster224" "biencoder-16cluster-4kbatch-1epoch" "
 for model in "${MODELS[@]}"; do
     echo "testing model ${model}";
     CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun --nproc_per_node 4 \
-        --master_port 1337 evaluate_beir.py "${model}" --total 10000 \
-        --batch_size 4096;
+        --master_port 1337 evaluate_beir.py "${model}" \
+        --total 1024 \
+        --top_k 1024 \
+        --batch_size 512;
 done

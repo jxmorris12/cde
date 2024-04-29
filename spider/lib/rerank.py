@@ -16,6 +16,24 @@ from spider.lib.tensor import forward_batched
 from spider.lib.misc import tqdm_if_main_worker
 
 
+def tokenize_transform(
+        examples: Dict[str, List],
+        tokenizer,
+        prefix: str,
+        col: str,
+        max_length: int,
+    ) -> Dict[str, torch.Tensor]:
+    texts = examples[col]
+    batch_dict = tokenizer(
+        [prefix + t for t in texts],
+        max_length=max_length,
+        padding="max_length",
+        truncation=True,
+        return_tensors="pt"
+    )
+    return batch_dict
+    
+
 class RerankHelper:
     """Wraps our model and does reranking.
     
@@ -48,36 +66,25 @@ class RerankHelper:
             **kwargs,
         )
 
-    def tokenize_transform(
-            self,
-            examples: Dict[str, List],
-            prefix: str,
-            col: str,
-        ) -> Dict[str, torch.Tensor]:
-        texts = examples[col]
-        batch_dict = self.tokenizer(
-            [prefix + t for t in texts],
-            max_length=self.max_seq_length,
-            padding=True,
-            truncation=True,
-            return_tensors="pt"
-        )
-        return batch_dict
-    
+
     @torch.no_grad
     def rerank(self, dataset, top_k: int) -> Dict[str, Dict[str, float]]:
         tokenize_corpus_func = functools.partial(
-            self.tokenize_transform, 
+            tokenize_transform, 
             col="text",
-            prefix=dataset.prefix_document
+            prefix=dataset.prefix_document,
+            tokenizer=self.tokenizer,
+            max_length=self.max_seq_length,
         )
         corpus: datasets.Dataset = dataset.corpus.map(tokenize_corpus_func, batched=True)
         corpus.set_format("pt")
 
         tokenize_queries_func = functools.partial(
-            self.tokenize_transform, 
+            tokenize_transform, 
             col="text",
-            prefix=dataset.prefix_query
+            prefix=dataset.prefix_query,
+            tokenizer=self.tokenizer,
+            max_length=self.max_seq_length,
         )
         queries: datasets.Dataset = dataset.queries.map(tokenize_queries_func, batched=True)
         queries.set_format("pt")
@@ -126,11 +133,13 @@ class RerankHelper:
 
             documents_input_ids = []
             documents_attention_mask = []
+
+            pad = lambda t: torch.nn.functional.pad(t, pad=[0, self.max_seq_length - t.shape[-1]], value=self.tokenizer.pad_token_id)
             for doc_j, (doc_id, _) in enumerate(topk_docs):
                 pair_ids.append([(j, doc_j)])
                 doc_j += 1
-                documents_input_ids.append(corpus[corpus_idx_dict[doc_id]]["input_ids"])
-                documents_attention_mask.append(corpus[corpus_idx_dict[doc_id]]["attention_mask"])
+                documents_input_ids.append(pad(corpus[corpus_idx_dict[doc_id]]["input_ids"]))
+                documents_attention_mask.append(pad(corpus[corpus_idx_dict[doc_id]]["attention_mask"]))
             document_inputs = transformers.BatchEncoding(data={
                 "input_ids": torch.stack(documents_input_ids),
                 "attention_mask": torch.stack(documents_attention_mask)

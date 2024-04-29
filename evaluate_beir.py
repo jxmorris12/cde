@@ -1,6 +1,7 @@
 import argparse
 import json
 import os
+import pandas as pd
 
 from spider.lib.misc import md5_hash_kwargs
 from spider.lib.utils import analyze_utils
@@ -69,23 +70,31 @@ MODEL_FOLDER_DICT = {
 
 beir_dataset_names = [ 
     'arguana',
-    # 'fiqa',
-    # 'msmarco',
-    # 'nfcorpus',
-    # 'nq',
-    # 'quora',
-    # 'scidocs', 
-    # 'scifact',
-    # 'signal1m',
-    # 'trec-covid',
-    # 'trec-news',  
-    # 'webis-touche2020',
+    'fiqa',
+    'msmarco',
+    'nfcorpus',
+    'nq',
+    'quora',
+    'scidocs', 
+    'scifact',
+    'signal1m',
+    'trec-covid',
+    'trec-news',  
+    'webis-touche2020',
 ]
 
+cwd = os.path.normpath(
+    os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        os.pardir,
+    )
+)
+save_folder = os.path.join(
+    cwd, "results_beir", args.model_key
+)
 
-def parse_args() -> argparse.ArgumentParser:
-    # TODO: Cache results so we don't re-run eval for the same model.
-    parser = argparse.ArgumentParser(description="Process model key")
+
+def setup_eval_cmd_parser(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
     parser.add_argument(
         "model_key", 
         help="The key for the model", 
@@ -107,22 +116,11 @@ def parse_args() -> argparse.ArgumentParser:
         type=int, 
         default=512,
     )
-    return parser.parse_args()
 
-def main():
+def evaluate_model(args):
     args = parse_args()
     model_folder = MODEL_FOLDER_DICT[args.model_key]
     args_str = ARGS_STR_DICT.get(args.model_key)
-
-    cwd = os.path.normpath(
-        os.path.join(
-            os.path.dirname(os.path.abspath(__file__)),
-            os.pardir,
-        )
-    )
-    save_folder = os.path.join(
-        cwd, "results_beir", args.model_key
-    )
     os.makedirs(save_folder, exist_ok=True)
     args_dict = vars(args)
     args_dict["datasets"] = tuple(beir_dataset_names)
@@ -148,6 +146,37 @@ def main():
         with open(save_path, "w") as json_file:
             json.dump(results_dict, json_file, indent=4)
         print(f"[rank 0] saved {len(results_dict)} results to {save_path}")
+
+def print_results():
+    print("printing :D")
+    results_jsons = glob.glob(os.path.join(save_folder, "*", "*".json))
+    all_jsons = [json.loads(f) for f in results_jsons]
+    df = pd.DataFrame(all_jsons)
+    print(df)
+    breakpoint()
+
+
+def run_command(args):
+    print("Running something...")
+    print("Argument passed to run command:", args.task)
+    parser = argparse.ArgumentParser(description="A program with subcommands")
+
+    # Creating subparsers
+    subparsers = parser.add_subparsers(title="subcommands", dest="command", required=True)
+
+    # Subparser for print command
+    print_parser = subparsers.add_parser("print", help="Print results df")
+    print_parser.set_defaults(func=print_results)
+
+    # Subparser for run command
+    eval_parser = subparsers.add_parser("run", help="Run a task")
+    eval_parser.add_argument("eval", help="Evaluate a model")
+    eval_parser.set_defaults(func=evaluate_model)
+    setup_eval_cmd_parser(eval_parser)
+
+    args = parser.parse_args()
+    args.func(args)
+
     
 if __name__ == '__main__':
     main()
