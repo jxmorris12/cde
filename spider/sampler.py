@@ -138,7 +138,7 @@ class FixedSubdomainSampler(RandomSampler):
         assert hasattr(self.dataset, 'subdomain_idxs')
         self.batch_assignments = self.dataset.subdomain_idxs
         g = torch.Generator()
-        g.manual_seed(self.seed)
+        g.manual_seed(self.seed + self.epoch)
         if shuffle:
             np_gen = np.random.default_rng(self.seed)
             for k in tqdm_if_main_worker(self.batch_assignments.keys(), desc="Shuffling clusters", colour="red"):
@@ -192,12 +192,14 @@ class AutoClusterSampler(FixedSubdomainSampler):
             shuffle: bool,
             model: str,
             num_samples: Optional[int] = None,
+            seed: int = 42,
         ):
         super().__init__(
             dataset=dataset, 
             batch_size=batch_size, 
             shuffle=False,
             num_samples=num_samples,
+            seed=seed,
         )
         self.dataset = dataset
         self.model = model

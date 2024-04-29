@@ -1,6 +1,7 @@
-from typing import Dict
+from typing import Dict, List
 
 import collections
+import functools
 import heapq
 import logging
 import math
@@ -46,11 +47,41 @@ class RerankHelper:
             batch_size=self.batch_size,
             **kwargs,
         )
+
+    def tokenize_transform(
+            self,
+            examples: Dict[str, List],
+            prefix: str,
+            col: str,
+        ) -> Dict[str, torch.Tensor]:
+        texts = examples[col]
+        batch_dict = self.tokenizer(
+            [prefix + t for t in texts],
+            max_length=self.max_seq_length,
+            padding=True,
+            truncation=True,
+            return_tensors="pt"
+        )
+        return batch_dict
     
     @torch.no_grad
     def rerank(self, dataset, top_k: int) -> Dict[str, Dict[str, float]]:
-        corpus: Dict[str, Dict[str, str]] = dataset.corpus
-        queries: Dict[str, str] = dataset.queries
+        tokenize_corpus_func = functools.partial(
+            self.tokenize_transform, 
+            col="text",
+            prefix=dataset.prefix_document
+        )
+        corpus: datasets.Dataset = dataset.corpus.map(tokenize_corpus_func, batched=True)
+        corpus.set_format("pt")
+
+        tokenize_queries_func = functools.partial(
+            self.tokenize_transform, 
+            col="text",
+            prefix=dataset.prefix_query
+        )
+        queries: datasets.Dataset = dataset.queries.map(tokenize_queries_func, batched=True)
+        queries.set_format("pt")
+
         results: Dict[str, Dict[str, float]] = dataset.rerank_results
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         pair_ids = []
@@ -84,27 +115,26 @@ class RerankHelper:
             if (j % world_size) != rank:
                 # poor man's distributed sampler
                 continue
-            query_text = queries[query_idx_dict[query_id]]["text"]
-            documents_text = []
-            for doc_j, (doc_id, _) in enumerate(topk_docs):
-                # pair_ids.append([int(query_id), int(doc_id)])
-                pair_ids.append([(j, doc_j)])
-                doc_j += 1
-                documents_text.append(corpus[corpus_idx_dict[doc_id]]["text"])
-            
-            query_text_inputs = [dataset.prefix_query + query_text]
-            document_text_inputs = [dataset.prefix_document + t for t in documents_text]
 
-            all_tokenized_inputs = self.tokenizer(
-                query_text_inputs + document_text_inputs,
-                padding=True,
-                truncation=True,
-                max_length=self.max_seq_length,
-                return_tensors="pt",
+            query_batch = queries[query_idx_dict[query_id]]
+            query_inputs = transformers.BatchEncoding(
+                data={
+                    "input_ids": query_batch["input_ids"],
+                    "attention_mask": query_batch["attention_mask"],
+                }
             ).to(device)
 
-            query_inputs = transformers.BatchEncoding(data={ k: v[:len(query_text_inputs)] for k,v in all_tokenized_inputs.items() })
-            document_inputs = transformers.BatchEncoding(data={ k: v[len(query_text_inputs):] for k,v in all_tokenized_inputs.items() })
+            documents_input_ids = []
+            documents_attention_mask = []
+            for doc_j, (doc_id, _) in enumerate(topk_docs):
+                pair_ids.append([(j, doc_j)])
+                doc_j += 1
+                documents_input_ids.append(corpus[corpus_idx_dict[doc_id]]["input_ids"])
+                documents_attention_mask.append(corpus[corpus_idx_dict[doc_id]]["attention_mask"])
+            document_inputs = transformers.BatchEncoding(data={
+                "input_ids": torch.stack(documents_input_ids),
+                "attention_mask": torch.stack(documents_attention_mask)
+            }).to(device)
 
             if self.fake_dataset_info:
                 batch_size = document_inputs["input_ids"].shape[0]
@@ -130,8 +160,8 @@ class RerankHelper:
             
             # TODO: Cache first-stage outputs here so that things are ~30% faster.
             query_embedding = self._forward_batched(
-                input_ids=query_inputs.input_ids,
-                attention_mask=query_inputs.attention_mask,
+                input_ids=query_inputs.input_ids[None],
+                attention_mask=query_inputs.attention_mask[None],
                 dataset_input_ids=dataset_input_ids,
                 dataset_attention_mask=dataset_attention_mask,
             ).flatten()
@@ -151,7 +181,7 @@ class RerankHelper:
         pair_ids = torch.tensor(pair_ids, device=device)
         rerank_scores_biencoder = torch.tensor(rerank_scores_biencoder, device=device)
 
-        true_top_k = len(documents_text)
+        true_top_k = len(document_inputs.input_ids)
         max_length = int(math.ceil(true_top_k * num_eval_queries / world_size)) * 2
 
         # add dummy elements to make same shapes for gather.

@@ -29,6 +29,66 @@ def disable_dropout(model: torch.nn.Module):
     )
 
 
+class BiEncoder(transformers.PreTrainedModel):
+    embedder: transformers.PreTrainedModel
+    def __init__(
+            self, 
+            config, #: transformers.PreTrainedConfig, 
+            embedder: transformers.PreTrainedModel, 
+        ):
+        super().__init__(config=config)
+
+        if config.limit_layers:
+            print(f"Limiting layers to {config.limit_layers}")
+            limit_layers(embedder, config.limit_layers)
+    
+        self.embedder = embedder
+        # if ("t5" in embedder.config.model_type):
+        #     print(f"using torch.compile() on embedder of type `{embedder.config.model_type}`")
+        #     self.embedder = torch.compile(self.embedder) 
+        self.hidden_size = self.embedder.config.hidden_size
+        self.mlp = torch.nn.Sequential(
+            torch.nn.Linear(self.hidden_size, self.hidden_size),
+            torch.nn.GELU(),
+            torch.nn.Linear(self.hidden_size, self.config.embedding_output_dim or self.hidden_size),
+        )
+        self.temp = config.logit_scale
+
+        if config.disable_dropout:
+            disable_dropout(self)
+
+        self.embedding_dim = self.embedder.config.hidden_size
+
+    def forward(
+            self, 
+            input_ids: torch.Tensor,
+            attention_mask: torch.Tensor,
+            dataset_input_ids: Optional[torch.Tensor] = None,
+            dataset_attention_mask: Optional[torch.Tensor] = None,
+            token_type_ids = None,
+        ) -> torch.Tensor:
+        """
+        query_embedding (float torch.Tensor) - shape (batch_size, embedding_dim)
+        document_embeddings (float torch.Tensor) - shape (corpus_size, embedding_dim)
+            where the corpus_size >= batch_size and is structured like this:
+                [d1, d2, d3, hn1_1, hn1_2, hn2_1, hn2_2, hn3_1, hn3_2]
+                for a corpus with three documents and two hard negatives per document
+        """
+        del dataset_input_ids
+        del dataset_attention_mask
+        del token_type_ids
+
+        outputs = (
+            self.embedder(
+                input_ids=input_ids,
+                attention_mask=attention_mask).last_hidden_state
+        )
+        document_embeddings = mean_pool(outputs, attention_mask)
+        # return
+        output = self.mlp(document_embeddings)
+        return output
+
+
 class TwoEmbeddersWithMLP(transformers.PreTrainedModel):
     embedder: transformers.PreTrainedModel
     embedder: transformers.PreTrainedModel
@@ -155,7 +215,7 @@ class DatasetConditionedBiencoder(transformers.PreTrainedModel):
         self.output_projection = torch.nn.Sequential(
             torch.nn.Linear(self.hidden_size, self.hidden_size),
             torch.nn.ReLU(),
-            torch.nn.Linear(self.hidden_size, self.config.embedding_output_dim or self.config.self.hidden_size)
+            torch.nn.Linear(self.hidden_size, self.config.embedding_output_dim or self.hidden_size)
         )
         self.randomize_dataset_sequence_order = True
     
@@ -227,6 +287,7 @@ class DatasetConditionedEncoderDecoder(transformers.PreTrainedModel):
             self, 
             config,
             dataset_backbone: transformers.PreTrainedModel,
+            biencoder: BiEncoder,
         ):
         super().__init__(config=config)
         self.backbone = dataset_backbone
@@ -285,6 +346,7 @@ class DatasetConditionedEncoderDecoder(transformers.PreTrainedModel):
             torch.nn.Linear(self.hidden_size, self.config.embedding_output_dim or self.hidden_size)
         )
         self.randomize_dataset_sequence_order = False
+        # self.biencoder = biencoder
     
     def forward(
             self, 
@@ -306,12 +368,6 @@ class DatasetConditionedEncoderDecoder(transformers.PreTrainedModel):
         # backbone_max_seq_length = self.backbone.config.max_trained_positions
         # assert batch_size + (2 * self.n_soft_prompt + corpus_size) <= backbone_max_seq_length, "too many hard negatives for backbone model"
         soft_prompt = dataset_embeddings
-        if self.training and self.randomize_dataset_sequence_order:
-            randomized_order = torch.randperm(corpus_size, device=soft_prompt.device)
-            soft_prompt = soft_prompt.gather(
-                1, 
-                randomized_order[..., None].expand_as(soft_prompt)
-            )
         encoder_attention_mask = torch.ones(
             soft_prompt.shape[0:2],
             dtype=torch.long,
@@ -326,34 +382,37 @@ class DatasetConditionedEncoderDecoder(transformers.PreTrainedModel):
         S = len(input_ids)
         soft_prompt = soft_prompt.expand((S, -1, -1))
         encoder_attention_mask = encoder_attention_mask.expand((S, -1, -1))
-        # encoder_hidden_states = encoder_hidden_states.expand((S, -1, -1))
 
-        # ########    T5
-        # output = self.backbone(
-        #     inputs_embeds=None,
-        #     attention_mask=None,
-        #     encoder_outputs=[encoder_hidden_states],
-        #     ################################
-        #     decoder_inputs_embeds=inputs_embeds,
-        #     decoder_attention_mask=attention_mask,
-        # )
-        ########    MT5 
+        if self.training and self.randomize_dataset_sequence_order:
+            randomized_order = torch.randperm(corpus_size, device=soft_prompt.device)
+            soft_prompt = soft_prompt.gather(
+                1, 
+                randomized_order[..., None].expand_as(soft_prompt)
+            )
+
         output = self.backbone(
-            inputs_embeds=soft_prompt,              # Encoder
-            attention_mask=encoder_attention_mask,  # Encoder
-            decoder_input_ids=input_ids,            # Decoder
-            decoder_attention_mask=attention_mask,  # Decoder
+            inputs_embeds=soft_prompt,               
+            attention_mask=encoder_attention_mask,   
+            decoder_input_ids=input_ids,             
+            decoder_attention_mask=attention_mask,
         ) 
         output_vectors = output.last_hidden_state
-        last_token_idxs = attention_mask.sum(1) - 1
-        output_pooled = output_vectors[torch.arange(S), last_token_idxs]
-        # output_pooled = mean_pool(output.last_hidden_state, attention_mask)
+        # use last token as output vector
+        # last_token_idxs = attention_mask.sum(1) - 1
+        # output_pooled = output_vectors[torch.arange(S), last_token_idxs]
+        output_pooled = mean_pool(output.last_hidden_state, attention_mask)
         # average with original vectors
-        # TODO: Argparse for pooling strategy.
+        # TODO: Argparse for pooling strategy...
         # output_vectors = torch.cat((soft_prompt_pooled, output_pooled), dim=1) # (b, d) + (b, d) -> (b, 2d)
-        output_vectors = output_pooled
-        output = self.output_projection(output_vectors) # (b, 2d) -> (b, d)
+        output = self.output_projection(output_pooled) # (b, d) -> (b, d)
+        
+        # biencoder_output
         return output
+        # biencoder_output = self.biencoder(
+        #     input_ids=input_ids,
+        #     attention_mask=attention_mask,
+        # )
+        # return (output + biencoder_output) / 2
 
 
 class DatasetTransformer(transformers.PreTrainedModel):
@@ -372,7 +431,7 @@ class DatasetTransformer(transformers.PreTrainedModel):
             limit_layers(embedder, config.limit_layers)
             limit_layers(dataset_backbone, config.limit_layers)
         
-        biencoder_config = copy.copy(config)
+        biencoder_config = copy.deepcopy(config)
         biencoder_config.embedding_output_dim = None
         self.first_stage_model = BiEncoder(
             config=biencoder_config,
@@ -424,18 +483,24 @@ class DatasetTransformerEncoderDecoder(transformers.PreTrainedModel):
             limit_layers(embedder, config.limit_layers)
             limit_layers(dataset_backbone, config.limit_layers)
         
-        biencoder_config = copy.copy(config)
+        biencoder_config = copy.deepcopy(config)
         biencoder_config.embedding_output_dim = None
         self.first_stage_model = BiEncoder(
             config=biencoder_config,
             embedder=embedder
         )
         del dataset_backbone
-        # dataset_backbone = transformers.AutoModel.from_pretrained("t5-base")
-        dataset_backbone = transformers.AutoModel.from_pretrained("EleutherAI/pile-t5-base")
+        dataset_backbone = transformers.AutoModel.from_pretrained("t5-base")
+        # dataset_backbone = transformers.AutoModel.from_pretrained("EleutherAI/pile-t5-base")
+        # embedder_copied = transformers.AutoModel.from_pretrained("EleutherAI/pile-t5-base").encoder
+        embedder_copied = copy.deepcopy(embedder)
         self.second_stage_model = DatasetConditionedEncoderDecoder(
             config=config,
             dataset_backbone=dataset_backbone,
+            biencoder=BiEncoder(
+                config=copy.deepcopy(config),
+                embedder=embedder_copied
+            ),
         )
         self.temp = config.logit_scale
         if config.disable_dropout:
@@ -465,66 +530,6 @@ class DatasetTransformerEncoderDecoder(transformers.PreTrainedModel):
             attention_mask=attention_mask,
             dataset_embeddings=dataset_embeddings,
         )
-
-
-class BiEncoder(transformers.PreTrainedModel):
-    embedder: transformers.PreTrainedModel
-    def __init__(
-            self, 
-            config, #: transformers.PreTrainedConfig, 
-            embedder: transformers.PreTrainedModel, 
-        ):
-        super().__init__(config=config)
-
-        if config.limit_layers:
-            print(f"Limiting layers to {config.limit_layers}")
-            limit_layers(embedder, config.limit_layers)
-    
-        self.embedder = embedder
-        # if ("t5" in embedder.config.model_type):
-        #     print(f"using torch.compile() on embedder of type `{embedder.config.model_type}`")
-        #     self.embedder = torch.compile(self.embedder) 
-        self.hidden_size = self.embedder.config.hidden_size
-        self.mlp = torch.nn.Sequential(
-            torch.nn.Linear(self.hidden_size, self.hidden_size),
-            torch.nn.GELU(),
-            torch.nn.Linear(self.hidden_size, self.config.embedding_output_dim or self.hidden_size),
-        )
-        self.temp = config.logit_scale
-
-        if config.disable_dropout:
-            disable_dropout(self)
-
-        self.embedding_dim = self.embedder.config.hidden_size
-
-    def forward(
-            self, 
-            input_ids: torch.Tensor,
-            attention_mask: torch.Tensor,
-            dataset_input_ids: Optional[torch.Tensor] = None,
-            dataset_attention_mask: Optional[torch.Tensor] = None,
-            token_type_ids = None,
-        ) -> torch.Tensor:
-        """
-        query_embedding (float torch.Tensor) - shape (batch_size, embedding_dim)
-        document_embeddings (float torch.Tensor) - shape (corpus_size, embedding_dim)
-            where the corpus_size >= batch_size and is structured like this:
-                [d1, d2, d3, hn1_1, hn1_2, hn2_1, hn2_2, hn3_1, hn3_2]
-                for a corpus with three documents and two hard negatives per document
-        """
-        del dataset_input_ids
-        del dataset_attention_mask
-        del token_type_ids
-
-        outputs = (
-            self.embedder(
-                input_ids=input_ids,
-                attention_mask=attention_mask).last_hidden_state
-        )
-        document_embeddings = mean_pool(outputs, attention_mask)
-        # return
-        output = self.mlp(document_embeddings)
-        return output
 
 
 def get_model_class(name: str):

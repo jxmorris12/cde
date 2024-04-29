@@ -85,13 +85,16 @@ def main():
     # torch.autograd.set_detect_anomaly(True)
     # torch.compile() settings.
     torch.compiler.reset()
-    torch._dynamo.config.optimize_ddp = False
     # Following things are taken from 
     # https://github.com/pytorch/benchmark
     # to hopefully increase speed.
     # torch._dynamo.config.automatic_dynamic_shapes = False
     # torch._dynamo.config.force_parameter_static_shapes = False
-    torch._dynamo.config.cache_size_limit = 10_000
+    torch._dynamo.config.cache_size_limit = 32
+    torch.backends.cuda.matmul.allow_tf32 = True  # allow tf32 on matmul
+    torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = True
+    torch.backends.cudnn.allow_tf32 = True  # allow tf32 on cudnn
+    torch._dynamo.config.optimize_ddp = False
 
     os.environ["WANDB__SERVICE_WAIT"] = "30"
     os.environ["TOKENIZERS_PARALLELISM"] = "0"
@@ -100,7 +103,7 @@ def main():
     # os.environ["TORCH_CPP_LOG_LEVEL"] = "INFO"
     # os.environ["TORCH_DISTRIBUTED_DEBUG"] = "DETAIL"
 
-    transformers.logging.set_verbosity_error()
+    # transformers.logging.set_verbosity_error()
     datasets.logging.set_verbosity_error()
 
     torch.set_float32_matmul_precision('high')
@@ -247,7 +250,9 @@ def main():
         state_dict = load_model_state_dict_from_path(
             training_args.model_state_dict_from_path
         )
-        load_result = model.load_state_dict(state_dict, strict=True)
+        # del state_dict["second_stage_model._orig_mod.output_projection.2.weight"]
+        # del state_dict["second_stage_model._orig_mod.output_projection.2.bias"]
+        load_result = model.load_state_dict(state_dict, strict=False)
         issue_warnings_after_load(load_result)
 
     print0("[main] creating collator")
