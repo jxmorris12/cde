@@ -1,0 +1,32 @@
+{
+    "eval_BeIR/arguana_NDCG@1": 0.30273,
+    "eval_BeIR/arguana_NDCG@5": 0.49908,
+    "eval_BeIR/arguana_NDCG@10": 0.5376,
+    "eval_BeIR/arguana_NDCG@100": 0.57638,
+    "eval_BeIR/arguana_MAP@1": 0.30273,
+    "eval_BeIR/arguana_MAP@5": 0.44077,
+    "eval_BeIR/arguana_MAP@10": 0.45667,
+    "eval_BeIR/arguana_MAP@100": 0.46555,
+    "eval_BeIR/arguana_Recall@1": 0.30273,
+    "eval_BeIR/arguana_Recall@5": 0.6748,
+    "eval_BeIR/arguana_Recall@10": 0.79395,
+    "eval_BeIR/arguana_Recall@100": 0.96582,
+    "eval_BeIR/arguana_P@1": 0.30273,
+    "eval_BeIR/arguana_P@5": 0.13496,
+    "eval_BeIR/arguana_P@10": 0.07939,
+    "eval_BeIR/arguana_P@100": 0.00966,
+    "eval_BeIR/arguana_score_weighted_qrels/mean": 0.5682381303049624,
+    "eval_BeIR/arguana_score_weighted_qrels/sum": 581.8758454322815,
+    "eval_BeIR/arguana_score_weighted_qrels/total": 1024,
+    "NDCG@10/sum": 0.5376,
+    "NDCG@10/mean": 0.5376,
+    "_args": {
+        "model_key": "biencoder-scratch-02-cluster224",
+        "top_k": 512,
+        "batch_size": 4096,
+        "total": 1024,
+        "datasets": [
+            "arguana"
+        ]
+    }
+}

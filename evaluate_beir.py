@@ -1,7 +1,9 @@
 import argparse
+import glob
 import json
 import os
 import pandas as pd
+import tqdm
 
 from spider.lib.misc import md5_hash_kwargs
 from spider.lib.utils import analyze_utils
@@ -84,13 +86,10 @@ beir_dataset_names = [
 ]
 
 cwd = os.path.normpath(
-    os.path.join(
-        os.path.dirname(os.path.abspath(__file__)),
-        os.pardir,
-    )
+    os.path.dirname(os.path.abspath(__file__)),
 )
-save_folder = os.path.join(
-    cwd, "results_beir", args.model_key
+root_save_folder = os.path.join(
+    cwd, "results_beir"
 )
 
 
@@ -121,6 +120,8 @@ def evaluate_model(args):
     args = parse_args()
     model_folder = MODEL_FOLDER_DICT[args.model_key]
     args_str = ARGS_STR_DICT.get(args.model_key)
+
+    save_folder = os.path.join(root_save_folder, args.model_key)
     os.makedirs(save_folder, exist_ok=True)
     args_dict = vars(args)
     args_dict["datasets"] = tuple(beir_dataset_names)
@@ -147,19 +148,29 @@ def evaluate_model(args):
             json.dump(results_dict, json_file, indent=4)
         print(f"[rank 0] saved {len(results_dict)} results to {save_path}")
 
-def print_results():
+def print_results(args):
     print("printing :D")
-    results_jsons = glob.glob(os.path.join(save_folder, "*", "*".json))
-    all_jsons = [json.loads(f) for f in results_jsons]
+    results_jsons = glob.glob(os.path.join(root_save_folder, "*", "*.json"))
+    all_jsons = [json.load(open(j, "r")) for j in tqdm.tqdm(results_jsons, desc="Reading *.json", leave=False)]
+    # add args to outer dict
+    for i in range(len(all_jsons)):
+        for k, v in all_jsons[i]["_args"].items():
+            all_jsons[i][k] = v
     df = pd.DataFrame(all_jsons)
+    df = df[df["top_k"] == 1024].reset_index()
+    df = df[df["total"] == 1024].reset_index()
+    df = df.set_index("model_key")
+    df = df[[c for c in df.columns if c.endswith("NDCG@10")]]
+    df.columns = [c.replace("eval_BeIR/", "") for c in df.columns]
+    df["NDCG@10__mean"] = df.mean(axis=1)
+    pd.set_option('display.max_columns', None)
     print(df)
     breakpoint()
 
 
-def run_command(args):
+def main():
     print("Running something...")
-    print("Argument passed to run command:", args.task)
-    parser = argparse.ArgumentParser(description="A program with subcommands")
+    parser = argparse.ArgumentParser(description="Run and examine BEIR evaluation results")
 
     # Creating subparsers
     subparsers = parser.add_subparsers(title="subcommands", dest="command", required=True)
