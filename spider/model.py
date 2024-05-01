@@ -398,21 +398,14 @@ class DatasetConditionedEncoderDecoder(transformers.PreTrainedModel):
         ) 
         output_vectors = output.last_hidden_state
         # use last token as output vector
-        # last_token_idxs = attention_mask.sum(1) - 1
-        # output_pooled = output_vectors[torch.arange(S), last_token_idxs]
-        output_pooled = mean_pool(output.last_hidden_state, attention_mask)
+        last_token_idxs = attention_mask.sum(1) - 1
+        output_pooled = output_vectors[torch.arange(S), last_token_idxs]
+        # output_pooled = mean_pool(output.last_hidden_state, attention_mask)
         # average with original vectors
         # TODO: Argparse for pooling strategy...
         # output_vectors = torch.cat((soft_prompt_pooled, output_pooled), dim=1) # (b, d) + (b, d) -> (b, 2d)
         output = self.output_projection(output_pooled) # (b, d) -> (b, d)
-        
-        # biencoder_output
         return output
-        # biencoder_output = self.biencoder(
-        #     input_ids=input_ids,
-        #     attention_mask=attention_mask,
-        # )
-        # return (output + biencoder_output) / 2
 
 
 class DatasetTransformer(transformers.PreTrainedModel):

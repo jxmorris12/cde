@@ -39,6 +39,8 @@ ARGS_STR_DICT = {
     "supervised-baseline-cluster224-1epoch": "--per_device_train_batch_size 256 --per_device_eval_batch_size 256 --bf16 1 --use_wandb 1 --dataset nomic_supervised --sampling_strategy cluster_within_domain --num_train_epochs 1 --learning_rate 2e-5 --embedder nomic-ai/nomic-embed-text-v1-unsupervised --clustering_model gtr_base --clustering_query_to_doc 1 --automatically_deduplicate_documents 1 --automatically_deduplicate_queries 1 --arch biencoder --dataset_info batch --eval_rerank_topk 512 --use_prefix 1 --exp_name baseline-supervised-cluster224 --num_hard_negatives 7 --lr_scheduler_type linear --ddp_share_negatives_between_gpus 0 --use_gc 1 --max_batch_size_fits_in_memory 512 --warmup_steps 400 --logging_steps 40 --train_cluster_size 224",
     "supervised-baseline-cluster224-1epoch--nodedup": "--per_device_train_batch_size 256 --per_device_eval_batch_size 256 --bf16 1 --use_wandb 1 --dataset nomic_supervised --sampling_strategy cluster_within_domain --num_train_epochs 1 --learning_rate 2e-5 --embedder nomic-ai/nomic-embed-text-v1-unsupervised --clustering_model gtr_base --clustering_query_to_doc 1 --automatically_deduplicate_documents 0 --automatically_deduplicate_queries 0 --arch biencoder --dataset_info batch --eval_rerank_topk 512 --use_prefix 1 --exp_name baseline-supervised-cluster224--no-dedup --num_hard_negatives 7 --lr_scheduler_type linear --ddp_share_negatives_between_gpus 0 --use_gc 1 --max_batch_size_fits_in_memory 256 --warmup_steps 400 --logging_steps 40 --train_cluster_size 224 --save_steps 1000",
     "supervised-baseline-cluster224-1epoch--fixdedup": "--per_device_train_batch_size 256 --per_device_eval_batch_size 256 --bf16 1 --use_wandb 1 --dataset nomic_supervised --sampling_strategy cluster_within_domain --num_train_epochs 1 --learning_rate 2e-5 --embedder nomic-ai/nomic-embed-text-v1-unsupervised --clustering_model gtr_base --clustering_query_to_doc 1 --automatically_deduplicate_documents 1 --automatically_deduplicate_queries 1 --arch biencoder --dataset_info batch --eval_rerank_topk 512 --use_prefix 1 --exp_name baseline-supervised-cluster224--no-combined-dedup --num_hard_negatives 7 --lr_scheduler_type linear --ddp_share_negatives_between_gpus 0 --use_gc 1 --max_batch_size_fits_in_memory 256 --warmup_steps 400 --logging_steps 40 --train_cluster_size 224 --save_steps 1000",
+
+    "transductive-1epoch-supervised-cluster224": "--per_device_train_batch_size 256 --per_device_eval_batch_size 256 --bf16 1 --use_wandb 1 --dataset nomic_supervised --sampling_strategy cluster_within_domain --num_train_epochs 1 --learning_rate 2e-5 --embedder nomic-ai/nomic-embed-text-v1-unsupervised --clustering_model gtr_base --clustering_query_to_doc 1 --automatically_deduplicate_documents 1 --automatically_deduplicate_queries 1 --arch transductive --dataset_info batch --eval_rerank_topk 512 --use_prefix 1 --exp_name transductive-unsupervised-cluster224-1epoch-supervised-cluster224 --num_hard_negatives 7 --lr_scheduler_type linear --ddp_share_negatives_between_gpus 0 --use_gc 1 --max_batch_size_fits_in_memory 128 --warmup_steps 400 --logging_steps 50 --train_cluster_size 224 --save_steps 1000 --model_state_dict_from_path /data/saves/tti3/backup/2024-04-17-transductive-pretrain-16",
 }
 
 MODEL_FOLDER_DICT = {
@@ -117,7 +119,6 @@ def setup_eval_cmd_parser(parser: argparse.ArgumentParser) -> argparse.ArgumentP
     )
 
 def evaluate_model(args):
-    args = parse_args()
     model_folder = MODEL_FOLDER_DICT[args.model_key]
     args_str = ARGS_STR_DICT.get(args.model_key)
 
@@ -144,6 +145,7 @@ def evaluate_model(args):
     results_dict["_args"] = args_dict
 
     if trainer._is_main_worker:
+        breakpoint()
         with open(save_path, "w") as json_file:
             json.dump(results_dict, json_file, indent=4)
         print(f"[rank 0] saved {len(results_dict)} results to {save_path}")
@@ -181,7 +183,7 @@ def main():
 
     # Subparser for run command
     eval_parser = subparsers.add_parser("run", help="Run a task")
-    eval_parser.add_argument("eval", help="Evaluate a model")
+    # eval_parser.add_argument("eval", help="Evaluate a model")
     eval_parser.set_defaults(func=evaluate_model)
     setup_eval_cmd_parser(eval_parser)
 

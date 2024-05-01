@@ -1,6 +1,7 @@
 from typing import Optional, List
 
 import logging
+import os
 import shlex
 
 import torch
@@ -20,7 +21,7 @@ from spider.trainer import CustomTrainer
 # Helps with debugging.
 def load_trainer_from_checkpoint_and_args(
         model_folder: str, 
-        args_str: str, 
+        args_str: str = "", 
         beir_dataset_names: Optional[List[str]] = None,
         load_from_checkpoint: bool = True
     ):
@@ -28,12 +29,32 @@ def load_trainer_from_checkpoint_and_args(
     torch._dynamo.config.optimize_ddp = False
     torch._dynamo.config.cache_size_limit = 10_000
 
-    parser = transformers.HfArgumentParser((ModelArguments, DataArguments, TrainingArguments))
-    model_args, data_args, training_args = (
-        parser.parse_args_into_dataclasses(
-            shlex.split(args_str))
+    # First, try reading from model folder.
+    checkpoint_path = transformers.trainer_utils.get_last_checkpoint(
+        model_folder
     )
-    training_args.use_wandb = 0
+    if len(args_str) > 0:
+        parser = transformers.HfArgumentParser((ModelArguments, DataArguments, TrainingArguments))
+        model_args, data_args, training_args = (
+            parser.parse_args_into_dataclasses(
+                shlex.split(args_str))
+        )
+    elif os.path.exists(os.path.join(model_folder, "data_args.bin")):
+        data_args = torch.load(open(os.path.join(model_folder, "data_args.bin"), "rb"))
+        model_args = torch.load(open(os.path.join(model_folder, "model_args.bin"), "rb"))
+        training_args = torch.load(open(os.path.join(checkpoint_path, "training_args.bin"), "rb"))
+        model_args.embedding_output_dim = None # backwards compatibility :-)
+        training_args.accelerator_config.gradient_accumulation_kwargs = None # backwards compatibility :-)
+        training_args.use_wandb = 0
+        training_args._n_gpu =  1 if torch.cuda.is_available() else 0  # Don't load in DDP
+        training_args.local_rank = -1  # Don't load in DDP
+        from accelerate.state import PartialState
+        training_args.distributed_state = PartialState()
+        # print("got device:", training_args.device, "//", training_args._setup_devices, training_args._n_gpu)
+        # print("//", training_args.distributed_state.device)
+        # TODO: Make this work proprly with DDP.
+    else:
+        raise RuntimeError("must pass args_str or have data_args.bin and model_args.bin available to load from disk")
     transformers.set_seed(training_args.seed)
     logging.basicConfig(
         format='%(asctime)s - %(message)s',
@@ -100,9 +121,6 @@ def load_trainer_from_checkpoint_and_args(
         train_sampler_fn=None,
         eval_sampler_fns={},
         retrieval_datasets=retrieval_datasets,
-    )
-    checkpoint_path = transformers.trainer_utils.get_last_checkpoint(
-        model_folder
     )
     if load_from_checkpoint:
         trainer._load_from_checkpoint(checkpoint_path)
