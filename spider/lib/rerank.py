@@ -190,7 +190,7 @@ class RerankHelper:
 
             agreement.append(biencoder_score.argmax() == 0)
         
-        print("agreement perc:", torch.tensor(agreement).float().mean())
+        # print("agreement perc:", torch.tensor(agreement).float().mean())
         pair_ids = torch.tensor(pair_ids, device=device)
         rerank_scores_biencoder = torch.tensor(rerank_scores_biencoder, device=device)
 

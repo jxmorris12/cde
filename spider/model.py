@@ -220,11 +220,10 @@ class DatasetConditionedBiencoder(transformers.PreTrainedModel):
         self.randomize_dataset_sequence_order = True
         self.sequence_dropout_prob = vars(config).get("transductive_sequence_dropout_prob", 0.0)
         if self.sequence_dropout_prob > 0.0:
-            self.sequence_dropout_null_embedding = nn.Parmeter(
-                torch.randn(self.hidden_size),
+            self.sequence_dropout_null_embedding = torch.nn.Parameter(
+                torch.randn(self.embedding_dim) * 0.01,
                 requires_grad = True
             )
-            torch.nn.init.xavier_uniform(self.null_sequence)
     
     def forward(
             self, 
@@ -243,12 +242,13 @@ class DatasetConditionedBiencoder(transformers.PreTrainedModel):
         assert _ == 1
 
         dataset_embeddings = dataset_embeddings.expand((batch_size, -1, -1)) # -> (b, 4+b, d) # soft_prompt.repeat((len(input_ids), 1, 1))  
-
         if self.sequence_dropout_prob > 0.0:
-            sequence_dropout_mask = torch.rand(batch_size, corpus_size) < self.sequence_dropout_mask
-            null_embeddings = self.sequence_dropout_null_embedding[None, None].expand(batch_size, corpus_size)
+            sequence_dropout_mask = (
+                torch.rand((batch_size, corpus_size), device=dataset_embeddings.device) < self.sequence_dropout_prob
+            )
+            null_embeddings = self.sequence_dropout_null_embedding[None, None].expand(batch_size, corpus_size, -1)
             dataset_embeddings = torch.where(
-                sequence_dropout_mask, null_embeddings, dataset_embeddings
+                sequence_dropout_mask[..., None], null_embeddings, dataset_embeddings
             )
         
         # backbone_max_seq_length = self.backbone.config.max_trained_positions

@@ -88,6 +88,12 @@ class ModelArguments:
             "help": "If set, sets bottleneck dim for contrastive outputs"
         }
     )
+    transductive_sequence_dropout_prob: float = field(
+        default=0.0,
+        metadata={
+            "help": "Sequence dropout val for transductive model"
+        }
+    )
 
 
 @dataclass
