@@ -87,6 +87,8 @@ beir_dataset_names = [
     'webis-touche2020',
 ]
 
+beir_dataset_names = [ 'msmarco' ]
+
 cwd = os.path.normpath(
     os.path.dirname(os.path.abspath(__file__)),
 )
@@ -145,7 +147,7 @@ def evaluate_model(args):
     results_dict["_args"] = args_dict
 
     if trainer._is_main_worker:
-        breakpoint()
+        del results_dict["_args"]["func"]
         with open(save_path, "w") as json_file:
             json.dump(results_dict, json_file, indent=4)
         print(f"[rank 0] saved {len(results_dict)} results to {save_path}")
@@ -153,6 +155,7 @@ def evaluate_model(args):
 def print_results(args):
     print("printing :D")
     results_jsons = glob.glob(os.path.join(root_save_folder, "*", "*.json"))
+    print(results_jsons)
     all_jsons = [json.load(open(j, "r")) for j in tqdm.tqdm(results_jsons, desc="Reading *.json", leave=False)]
     # add args to outer dict
     for i in range(len(all_jsons)):

@@ -366,6 +366,17 @@ class CustomTrainer(transformers.Trainer):
         elif self.args.dataset_info == "batch":
             dataset_inputs["input_ids"] = document_inputs["input_ids"]
             dataset_inputs["attention_mask"] = document_inputs["attention_mask"]
+
+            if len(negative_document_inputs) and len(negative_document_inputs["input_ids"]):
+                dataset_inputs["input_ids"] = torch.cat(
+                    (document_inputs["input_ids"], negative_document_inputs["input_ids"]),
+                    dim=0
+                )
+                dataset_inputs["attention_mask"] = torch.cat(
+                    (document_inputs["attention_mask"], negative_document_inputs["attention_mask"]),
+                    dim=0
+                )
+
         elif self.args.dataset_info == "random":
             dataset_inputs["input_ids"] = random_document_inputs["input_ids"]
             dataset_inputs["attention_mask"] = random_document_inputs["attention_mask"]

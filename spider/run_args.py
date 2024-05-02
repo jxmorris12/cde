@@ -217,9 +217,14 @@ class TrainingArguments(transformers.TrainingArguments):
         default=128,
          metadata={"help": "Number of reranked examples during eval"}
     )
-    save_strategy: str = "steps"
+    save_strategy: str = field(
+        default="steps",
+    )
     save_steps: int = 4_000
-    save_total_limit: int = 1  # Maximum number of checkpoints to save.
+    save_total_limit: int = field(
+        default=1,
+        metadata={"help": "Max number of checkpoints to save"}
+    )
 
     exp_name: str = field(
         default=None,

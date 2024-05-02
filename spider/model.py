@@ -241,6 +241,7 @@ class DatasetConditionedBiencoder(transformers.PreTrainedModel):
         soft_prompt = self.prompt_projection(soft_prompt).reshape((1, self.n_soft_prompt, self.hidden_size))
         soft_prompt = torch.cat((dataset_embeddings, soft_prompt), dim=1)
         soft_prompt = soft_prompt.expand((len(input_ids), -1, -1)) # -> (b, 4+b, d) # soft_prompt.repeat((len(input_ids), 1, 1))  
+
         if self.training and self.randomize_dataset_sequence_order:
             randomized_order = torch.stack(
                 [

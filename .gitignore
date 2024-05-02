@@ -14,3 +14,5 @@ wandb/
 spider.egg-info/
 
 profile*.txt
+
+.ipynb_checkpoints/

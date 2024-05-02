@@ -107,6 +107,7 @@ class RerankHelper:
         query_keys = sorted(list(results.keys()))
         doc_id_to_key = collections.defaultdict(dict)
         num_eval_queries = min(self.max_reranking_queries, len(query_keys))
+        agreement = []
         for j, query_id in tqdm_if_main_worker(enumerate(query_keys), total=num_eval_queries, desc=f"[{self.name}]"):
             topk_docs = sorted(results[query_id].items(), key=lambda item: item[1], reverse=True)[:top_k]
 
@@ -186,7 +187,10 @@ class RerankHelper:
                 document_embeddings
             ).flatten().cpu()
             rerank_scores_biencoder.extend(biencoder_score.tolist())
+
+            agreement.append(biencoder_score.argmax() == 0)
         
+        print("agreement perc:", torch.tensor(agreement).float().mean())
         pair_ids = torch.tensor(pair_ids, device=device)
         rerank_scores_biencoder = torch.tensor(rerank_scores_biencoder, device=device)
 
