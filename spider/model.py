@@ -218,6 +218,13 @@ class DatasetConditionedBiencoder(transformers.PreTrainedModel):
             torch.nn.Linear(self.hidden_size, self.config.embedding_output_dim or self.hidden_size)
         )
         self.randomize_dataset_sequence_order = True
+        self.sequence_dropout_prob = vars(config).get("transductive_sequence_dropout_prob", 0.0)
+        if self.sequence_dropout_prob > 0.0:
+            self.sequence_dropout_null_embedding = nn.Parmeter(
+                torch.randn(self.hidden_size),
+                requires_grad = True
+            )
+            torch.nn.init.xavier_uniform(self.null_sequence)
     
     def forward(
             self, 
@@ -234,13 +241,22 @@ class DatasetConditionedBiencoder(transformers.PreTrainedModel):
         batch_size = input_ids.shape[0]
         _, corpus_size, _hidden_dim = dataset_embeddings.shape
         assert _ == 1
+
+        dataset_embeddings = dataset_embeddings.expand((batch_size, -1, -1)) # -> (b, 4+b, d) # soft_prompt.repeat((len(input_ids), 1, 1))  
+
+        if self.sequence_dropout_prob > 0.0:
+            sequence_dropout_mask = torch.rand(batch_size, corpus_size) < self.sequence_dropout_mask
+            null_embeddings = self.sequence_dropout_null_embedding[None, None].expand(batch_size, corpus_size)
+            dataset_embeddings = torch.where(
+                sequence_dropout_mask, null_embeddings, dataset_embeddings
+            )
         
         # backbone_max_seq_length = self.backbone.config.max_trained_positions
         # assert batch_size + (2 * self.n_soft_prompt + corpus_size) <= backbone_max_seq_length, "too many hard negatives for backbone model"
         soft_prompt = torch.ones((1, self.embedding_dim), device=dataset_embeddings.device, dtype=torch.float32)
         soft_prompt = self.prompt_projection(soft_prompt).reshape((1, self.n_soft_prompt, self.hidden_size))
+        soft_prompt = soft_prompt.expand((batch_size, -1, -1)) # -> (b, 4+b, d) # soft_prompt.repeat((len(input_ids), 1, 1))  
         soft_prompt = torch.cat((dataset_embeddings, soft_prompt), dim=1)
-        soft_prompt = soft_prompt.expand((len(input_ids), -1, -1)) # -> (b, 4+b, d) # soft_prompt.repeat((len(input_ids), 1, 1))  
 
         if self.training and self.randomize_dataset_sequence_order:
             randomized_order = torch.stack(
