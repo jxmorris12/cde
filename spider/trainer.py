@@ -286,6 +286,7 @@ class CustomTrainer(transformers.Trainer):
         loss_unscaled = torch.nn.functional.cross_entropy(
             logits, labels, label_smoothing=0.0
         ) 
+
         if self.args.ddp_share_negatives_between_gpus:
             # traditionally people multiply the contrastive loss by the number of gpus.
             # so we do it too here.
@@ -368,6 +369,7 @@ class CustomTrainer(transformers.Trainer):
             dataset_inputs["attention_mask"] = document_inputs["attention_mask"]
 
             if len(negative_document_inputs) and len(negative_document_inputs["input_ids"]):
+                # Also consider negative documents in the transductive selection step
                 dataset_inputs["input_ids"] = torch.cat(
                     (document_inputs["input_ids"], negative_document_inputs["input_ids"]),
                     dim=0
@@ -469,9 +471,12 @@ class CustomTrainer(transformers.Trainer):
         return_outputs: bool = False,
     ) -> Union[Tuple[torch.Tensor, Dict[str, torch.Tensor]], torch.Tensor]:
         query_inputs, document_inputs, negative_document_inputs = self._split_inputs(inputs=inputs)
+
+        seq_len = document_inputs["input_ids"].shape[1]
+        random_integers = torch.randint(0, 2, (seq_len,))
+        seq_len_hash = torch.where(random_integers == 0, torch.tensor(-1), torch.tensor(1)).long()
         
-        idx = self.consider_gather(inputs["idx"])
-        original_doc_input_ids = self.consider_gather(document_inputs["input_ids"].sum(dim=1))
+        non_neg_doc_unique_ids = self.consider_gather(document_inputs["input_ids"]).cpu() @ seq_len_hash
         if len(negative_document_inputs):
             document_inputs["input_ids"] = torch.cat(
                 (document_inputs["input_ids"], negative_document_inputs["input_ids"]), dim=0
@@ -486,23 +491,30 @@ class CustomTrainer(transformers.Trainer):
         query_first_tokens = self.consider_gather(query_inputs["input_ids"][:, 1].contiguous())
 
         # Create labels based on document IDs.
-        document_unique_ids = self.consider_gather(document_inputs["input_ids"].sum(dim=1))
-        original_doc_idx = torch.arange(len(idx), device=document_unique_ids.device)
+        document_input_ids = self.consider_gather(document_inputs["input_ids"]).cpu()
+        document_unique_ids = document_input_ids @ seq_len_hash
 
-        doc_idx = torch.arange(len(document_inputs["input_ids"]), device=document_unique_ids.device)
-        one_hot_labels = (original_doc_idx[:, None] == doc_idx[None, :]).float()
+        # We have to stack the hard negatives within device (before the gather) to mimic
+        # the way that embeddings are computed and gathered.
+        all_idx = inputs["idx"]
+        num_hn = len(document_inputs["input_ids"]) - len(inputs["idx"])
+        if num_hn > 0:
+            hn_idx = torch.zeros((num_hn,), dtype=torch.long, device=self.args.device) - 1
+            all_idx = torch.cat((all_idx, hn_idx), dim=0)
+        one_hot_labels = self.consider_gather(inputs["idx"])[:, None] == self.consider_gather(all_idx)[None, :]
+
         if self.args.automatically_deduplicate_documents:
             smart_labels_doc = (
-                original_doc_input_ids[:, None] == document_unique_ids[None, :])
+                non_neg_doc_unique_ids[:, None] == document_unique_ids[None, :])
         else:
-            smart_labels_doc = one_hot_labels.clone()
+            smart_labels_doc = one_hot_labels.cpu().clone()
         
         # Aggregate labels for duplicate queries.
-        query_unique_ids = self.consider_gather(query_inputs["input_ids"].sum(dim=1))
+        query_unique_ids = self.consider_gather(query_inputs["input_ids"]).cpu() @ seq_len_hash
         if self.args.automatically_deduplicate_queries:
-            smart_labels_query = (
-                (query_unique_ids[:, None] == query_unique_ids[None, :]).float() @ one_hot_labels.float())
-            smart_labels = (smart_labels_doc | smart_labels_query.bool())
+            query_collisions = (query_unique_ids[:, None] == query_unique_ids[None, :])
+            smart_labels = (
+                query_collisions.float() @ smart_labels_doc.float()).bool()
         else:
             smart_labels = smart_labels_doc
 
@@ -511,8 +523,8 @@ class CustomTrainer(transformers.Trainer):
         num_unique_queries = query_unique_ids.unique().numel()
         num_collisions_queries = len(smart_labels) - num_unique_queries
 
+        smart_labels = smart_labels.to(self.args.device)
         duplicate_labels = (smart_labels.long() - one_hot_labels.long())
-
         # Dataset input stats
         ds_input_document_unique_tokens = document_inputs["dataset_input_ids"].unique().numel()
 

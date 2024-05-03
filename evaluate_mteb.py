@@ -5,31 +5,11 @@ import os
 import torch
 
 from spider.lib.embed import DenseEncoder
+from spider.lib.model_configs import MODEL_FOLDER_DICT, ARGS_STR_DICT
 from spider.lib.utils import analyze_utils
 
 from mteb import MTEB
 from mteb.evaluation.evaluators import cos_sim
-
-
-# TODO: Save configs or push to hub. Make this nicer.
-ARGS_STR_DICT = {
-    # "biencoder-scratch-01-cluster16k": "--per_device_train_batch_size 2048 --per_device_eval_batch_size 2048 --use_wandb 1 --bf16 1 --dataset nomic_unsupervised --sampling_strategy cluster_within_domain --num_train_epochs 1 --learning_rate 2e-5 --embedder nomic-ai/nomic-bert-2048 --dataset_embedder nomic-ai/nomic-bert-2048 --clustering_model gtr_base --clustering_query_to_doc 1 --automatically_deduplicate_documents 1 --automatically_deduplicate_queries 1 --arch biencoder --dataset_info batch --ddp_find_unused_parameters 0 --torch_compile 0 --eval_rerank_topk 2048 --lr_scheduler_type inverse_sqrt --warmup_steps 5600 --disable_dropout 1 --eval_steps 10000 --max_seq_length 512 --max_batch_size_fits_in_memory 128 --use_gc 1 --logging_steps 20 --train_cluster_size 16384 --eval_cluster_size 224 --use_prefix 1 --transductive_corpus_size 1024 --save_steps 1000 --logit_scale 50 --max_eval_batches 4 --exp_name 2024-04-14-biencoder-scratch-01-cluster16k",
-
-    "biencoder-scratch-01-cluster224": "--per_device_train_batch_size 2048 --per_device_eval_batch_size 2048 --use_wandb 1 --bf16 1 --dataset nomic_unsupervised --sampling_strategy cluster_within_domain --num_train_epochs 1 --learning_rate 2e-5 --embedder nomic-ai/nomic-bert-2048 --dataset_embedder nomic-ai/nomic-bert-2048 --clustering_model gtr_base --clustering_query_to_doc 1 --automatically_deduplicate_documents 1 --automatically_deduplicate_queries 1 --arch biencoder --dataset_info batch --ddp_find_unused_parameters 0 --torch_compile 0 --eval_rerank_topk 2048 --lr_scheduler_type inverse_sqrt --warmup_steps 5600 --disable_dropout 1 --eval_steps 10000 --max_seq_length 512 --max_batch_size_fits_in_memory 128 --use_gc 1 --logging_steps 20 --train_cluster_size 224 --eval_cluster_size 224 --use_prefix 1 --transductive_corpus_size 1024 --save_steps 1000 --logit_scale 50 --max_eval_batches 4 --exp_name 2024-04-14-biencoder-scratch-01-cluster224",
-
-    "biencoder-scratch-02-cluster224": "--per_device_train_batch_size 224 --per_device_eval_batch_size 224 --use_wandb 1 --bf16 1 --dataset nomic_unsupervised --sampling_strategy cluster_within_domain --num_train_epochs 1 --learning_rate 2e-5 --embedder nomic-ai/nomic-bert-2048 --clustering_model gtr_base --clustering_query_to_doc 1 --automatically_deduplicate_documents 1 --automatically_deduplicate_queries 1 --arch biencoder --dataset_info batch --ddp_find_unused_parameters 0 --eval_rerank_topk 128 --lr_scheduler_type constant_with_warmup --warmup_steps 5600 --disable_dropout 1 --eval_steps 1200000000000 --max_seq_length 512 --use_gc 1 --logging_steps 200 --train_cluster_size 224 --eval_cluster_size 224 --use_prefix 1 --transductive_corpus_size 224 --save_steps 16000 --logit_scale 50 --max_eval_batches 4 --exp_name 2024-04-17-biencoder-pretrain-16 --ddp_share_negatives_between_gpus 0 --max_batch_size_fits_in_memory 128",
-
-    # this is my reimplementation of the nomic biencoder. only difference i know of is that
-    # i didn't decay the learning rate.
-    "biencoder-domain-1": "--per_device_train_batch_size 4096 --per_device_eval_batch_size 512 --use_wandb 1 --bf16 1 --dataset nomic_unsupervised --sampling_strategy domain --num_train_epochs 1 --learning_rate 2e-5 --embedder nomic-ai/nomic-bert-2048 --clustering_model gtr_base --clustering_query_to_doc 1 --automatically_deduplicate_documents 1 --automatically_deduplicate_queries 1 --arch biencoder --dataset_info batch --ddp_find_unused_parameters 0 --eval_rerank_topk 512 --lr_scheduler_type inverse_sqrt --warmup_steps 5600 --disable_dropout 1 --eval_steps 12000 --max_seq_length 512 --max_batch_size_fits_in_memory 256 --use_gc 1 --logging_steps 100 --train_cluster_size 16384 --eval_cluster_size 224 --use_prefix 1 --transductive_corpus_size 512 --save_steps 1000 --logit_scale 50 --max_eval_batches 4 --exp_name 2024-04-19-biencoder-scratch-06-domain --ddp_share_negatives_between_gpus=1",
-}
-
-MODEL_FOLDER_DICT = {
-    "biencoder-scratch-01-cluster224": "/home/paperspace/tti3/saves/2024-04-14-biencoder-scratch-01-cluster224/",
-    "biencoder-scratch-02-cluster224": "/data/saves/tti3/2024-04-17-biencoder-pretrain-16",
-    "biencoder-domain-1": "/data/saves/tti3/2024-04-19-biencoder-scratch-06-domain/",
-}
-assert ARGS_STR_DICT.keys() == MODEL_FOLDER_DICT.keys(), f"keys not equal: {ARGS_STR_DICT.keys()} != {MODEL_FOLDER_DICT.keys()}"
 
 TASK_LIST_RETRIEVAL = [
     "ArguAna",
@@ -59,6 +39,10 @@ TASK_LIST_RETRIEVAL = [
     "HotpotQA",
     "FEVER",
 ]
+
+TASK_LIST_RETRIEVAL = ["SCIDOCS", "SciFact", "NFCorpus", "TRECCOVID", "Touche2020"] # Small datasets.
+
+TASK_LIST_RETRIEVAL = ["QuoraRetrieval"]
 
 
 # TODO: Support two-stage models.
@@ -120,12 +104,16 @@ def main():
         #evaluation.score_functions["cos_sim"] = functools.partial(
         #    batched_cos_sim, batch_size=50_000
         #)
-        evaluation.run(
+        results = evaluation.run(
             mteb_encoder, 
             output_folder=os.path.join("results_mteb", args.model_key),
             batch_size=1024, 
-            corpus_chunk_size=100_000
+            corpus_chunk_size=100_000,
+            verbosity=2
         )
+        print(task)
+        print("\t", results)
+        print()
     
 
 if __name__ == '__main__':

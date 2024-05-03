@@ -203,6 +203,7 @@ class DatasetConditionedBiencoder(transformers.PreTrainedModel):
             for module in self.backbone.modules():
                 if hasattr(module, "rotary_emb_dim"):
                     module.rotary_start_pos = config.transductive_corpus_size
+                    rotary_disabled += 1
             print0(f"modified {rotary_disabled} rotary modules – set rotary_start_pos to {config.transductive_corpus_size}")
 
         # TODO: Argparse, ablate, and potentially remove the soft prompt portion
@@ -242,7 +243,7 @@ class DatasetConditionedBiencoder(transformers.PreTrainedModel):
         assert _ == 1
 
         dataset_embeddings = dataset_embeddings.expand((batch_size, -1, -1)) # -> (b, 4+b, d) # soft_prompt.repeat((len(input_ids), 1, 1))  
-        if self.sequence_dropout_prob > 0.0:
+        if self.training and self.sequence_dropout_prob > 0.0:
             sequence_dropout_mask = (
                 torch.rand((batch_size, corpus_size), device=dataset_embeddings.device) < self.sequence_dropout_prob
             )
