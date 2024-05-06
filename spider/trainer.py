@@ -485,14 +485,16 @@ class CustomTrainer(transformers.Trainer):
                 (document_inputs["attention_mask"], negative_document_inputs["attention_mask"]), dim=0
             )
             negative_document_inputs["dataset_attention_mask"] = document_inputs["dataset_attention_mask"]
+        
+        all_document_input_ids = self.consider_gather(document_inputs["input_ids"])
+        all_query_input_ids = self.consider_gather(query_inputs["input_ids"])
         # Uncomment next line to log text on every GPU.
         # print(f"[rank {get_rank()}] query 0 =", self.embedder_tokenizer.decode(document_inputs["input_ids"][0], skip_special_tokens=True))
-        document_first_tokens = self.consider_gather(document_inputs["input_ids"][:, 1].contiguous())
-        query_first_tokens = self.consider_gather(query_inputs["input_ids"][:, 1].contiguous())
+        document_first_tokens = all_document_input_ids[:, 1].contiguous()
+        query_first_tokens = all_query_input_ids[:, 1].contiguous()
 
         # Create labels based on document IDs.
-        document_input_ids = self.consider_gather(document_inputs["input_ids"]).cpu()
-        document_unique_ids = document_input_ids @ seq_len_hash
+        document_unique_ids = all_document_input_ids.cpu() @ seq_len_hash
 
         # We have to stack the hard negatives within device (before the gather) to mimic
         # the way that embeddings are computed and gathered.
@@ -509,8 +511,7 @@ class CustomTrainer(transformers.Trainer):
         else:
             smart_labels_doc = one_hot_labels.cpu().clone()
         
-        # Aggregate labels for duplicate queries.
-        query_unique_ids = self.consider_gather(query_inputs["input_ids"]).cpu() @ seq_len_hash
+        query_unique_ids = all_query_input_ids.cpu() @ seq_len_hash
         if self.args.automatically_deduplicate_queries:
             query_collisions = (query_unique_ids[:, None] == query_unique_ids[None, :])
             smart_labels = (
@@ -518,6 +519,7 @@ class CustomTrainer(transformers.Trainer):
         else:
             smart_labels = smart_labels_doc
 
+        # Aggregate labels for duplicate queries.
         num_unique_documents = document_unique_ids.unique().numel()
         num_collisions_documents = len(document_unique_ids) - num_unique_documents
         num_unique_queries = query_unique_ids.unique().numel()
@@ -525,6 +527,7 @@ class CustomTrainer(transformers.Trainer):
 
         smart_labels = smart_labels.to(self.args.device)
         duplicate_labels = (smart_labels.long() - one_hot_labels.long())
+
         # Dataset input stats
         ds_input_document_unique_tokens = document_inputs["dataset_input_ids"].unique().numel()
 
