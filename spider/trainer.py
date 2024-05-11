@@ -475,7 +475,7 @@ class CustomTrainer(transformers.Trainer):
         seq_len = document_inputs["input_ids"].shape[1]
         random_integers = torch.randint(0, 2, (seq_len,))
         seq_len_hash = torch.where(random_integers == 0, torch.tensor(-1), torch.tensor(1)).long()
-        
+
         non_neg_doc_unique_ids = self.consider_gather(document_inputs["input_ids"]).cpu() @ seq_len_hash
         if len(negative_document_inputs):
             document_inputs["input_ids"] = torch.cat(
@@ -503,7 +503,11 @@ class CustomTrainer(transformers.Trainer):
         if num_hn > 0:
             hn_idx = torch.zeros((num_hn,), dtype=torch.long, device=self.args.device) - 1
             all_idx = torch.cat((all_idx, hn_idx), dim=0)
-        one_hot_labels = self.consider_gather(inputs["idx"])[:, None] == self.consider_gather(all_idx)[None, :]
+            one_hot_labels = self.consider_gather(inputs["idx"])[:, None] == self.consider_gather(all_idx)[None, :]
+        else:
+            # doing this without a gather because that gather takes forever with large batches for some reason.
+            batch_size = document_first_tokens.shape[0]
+            one_hot_labels = torch.eye(batch_size, device=self.args.device, dtype=torch.bool)
 
         if self.args.automatically_deduplicate_documents:
             smart_labels_doc = (
@@ -514,8 +518,7 @@ class CustomTrainer(transformers.Trainer):
         query_unique_ids = all_query_input_ids.cpu() @ seq_len_hash
         if self.args.automatically_deduplicate_queries:
             query_collisions = (query_unique_ids[:, None] == query_unique_ids[None, :])
-            smart_labels = (
-                query_collisions.float() @ smart_labels_doc.float()).bool()
+            smart_labels = query_collisions | smart_labels_doc
         else:
             smart_labels = smart_labels_doc
 
