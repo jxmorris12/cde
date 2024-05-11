@@ -40,9 +40,9 @@ TASK_LIST_RETRIEVAL = [
     "FEVER",
 ]
 
-TASK_LIST_RETRIEVAL = ["SCIDOCS", "SciFact", "NFCorpus", "TRECCOVID", "Touche2020"] # Small datasets.
+# TASK_LIST_RETRIEVAL = ["SCIDOCS", "SciFact", "NFCorpus", "TRECCOVID", "Touche2020"] # Small datasets.
 
-TASK_LIST_RETRIEVAL = ["QuoraRetrieval"]
+# TASK_LIST_RETRIEVAL = ["QuoraRetrieval"]
 
 
 # TODO: Support two-stage models.

@@ -202,7 +202,7 @@ def main():
         get_sampler,
         dataset=train_dataset,
         sampling_strategy=data_args.sampling_strategy,
-        batch_size=effective_train_batch_size,
+        batch_size=training_args.per_device_train_batch_size,
         cluster_size=data_args.train_cluster_size,
         shuffle=True,
         clustering_model=data_args.clustering_model,

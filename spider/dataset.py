@@ -320,7 +320,9 @@ class NomicSupervisedDataset:
         document = document_prefix + ex["document"]
         random_idx = random.choice(range(len(self.dataset)))
         random_document = document_prefix + document
-        negative_documents = [document_prefix + d for d in ex["negative"][:self.num_hard_negatives]]
+
+        num_hard_negatives = min(self.num_hard_negatives, len(ex["negative"]))
+        negative_documents = [document_prefix + d for d in random.sample(ex["negative"], num_hard_negatives)]
         return {
                 'idx': query_id,
                 ######################################################################

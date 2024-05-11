@@ -158,7 +158,7 @@ class FixedSubdomainSampler(RandomSampler):
         all_assignments = torch.tensor(
             [v for L in tqdm_if_main_worker(batch_lists, desc="Sampler tensorizing clusters") for v in L])
         
-        effective_batch_size = self.batch_size
+        effective_batch_size = self.batch_size * self.world_size
         effective_length = len(self.dataset) - (len(self.dataset) % effective_batch_size)
         # 2. Trim off the end (effectively drop_last=True)
         all_assignments = all_assignments[:effective_length]
@@ -179,6 +179,17 @@ class FixedSubdomainSampler(RandomSampler):
             batch_list = batch_tensor[rand_perm].tolist()
             all_indices.extend(batch_list)
         return all_indices
+        
+    def __iter__(self):  
+        idxs = self._get_indices()
+        num_chunks_per_rank = self.total_size // self.batch_size // self.world_size
+
+        global_chunk_offset = self.batch_size * self.rank
+        for chunk_idx in range(num_chunks_per_rank):
+            local_chunk_offset = (chunk_idx * self.world_size * self.batch_size)
+            chunk_start = global_chunk_offset + local_chunk_offset
+            for i in idxs[chunk_start:chunk_start+self.batch_size]:
+                yield i
 
 
 class AutoClusterSampler(FixedSubdomainSampler):

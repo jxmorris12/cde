@@ -1,0 +1,33 @@
+{
+    "eval_BeIR/msmarco_NDCG@1": 0.67054,
+    "eval_BeIR/msmarco_NDCG@5": 0.70342,
+    "eval_BeIR/msmarco_NDCG@10": 0.68791,
+    "eval_BeIR/msmarco_NDCG@100": 0.63003,
+    "eval_BeIR/msmarco_MAP@1": 0.02125,
+    "eval_BeIR/msmarco_MAP@5": 0.09782,
+    "eval_BeIR/msmarco_MAP@10": 0.16126,
+    "eval_BeIR/msmarco_MAP@100": 0.38684,
+    "eval_BeIR/msmarco_Recall@1": 0.02125,
+    "eval_BeIR/msmarco_Recall@5": 0.10412,
+    "eval_BeIR/msmarco_Recall@10": 0.17622,
+    "eval_BeIR/msmarco_Recall@100": 0.51034,
+    "eval_BeIR/msmarco_P@1": 0.83721,
+    "eval_BeIR/msmarco_P@5": 0.82791,
+    "eval_BeIR/msmarco_P@10": 0.77907,
+    "eval_BeIR/msmarco_P@100": 0.36884,
+    "eval_BeIR/msmarco_score_weighted_qrels/mean": 0.20821085808714188,
+    "eval_BeIR/msmarco_score_weighted_qrels/sum": 1928.0325458869338,
+    "eval_BeIR/msmarco_score_weighted_qrels/total": 9260,
+    "NDCG@10/sum": 0.68791,
+    "NDCG@10/mean": 0.68791,
+    "_args": {
+        "command": "run",
+        "model_key": "transductive-1epoch-supervised-cluster224-fixed",
+        "top_k": 256,
+        "batch_size": 512,
+        "total": 1024,
+        "datasets": [
+            "msmarco"
+        ]
+    }
+}
