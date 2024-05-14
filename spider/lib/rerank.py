@@ -6,10 +6,12 @@ import heapq
 import logging
 import math
 
+import datasets
 import torch
 import tqdm
 import transformers
 
+from spider.dataset import BeirDataset
 from spider.lib.dist import gather, get_rank, get_world_size
 from spider.lib.embed import embed_with_cache
 from spider.lib.tensor import forward_batched
@@ -68,7 +70,7 @@ class RerankHelper:
 
 
     @torch.no_grad
-    def rerank(self, dataset, top_k: int) -> Dict[str, Dict[str, float]]:
+    def rerank(self, dataset: BeirDataset, top_k: int) -> Dict[str, Dict[str, float]]:
         tokenize_corpus_func = functools.partial(
             tokenize_transform, 
             col="text",
