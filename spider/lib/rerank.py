@@ -1,4 +1,4 @@
-from typing import Dict, List
+from typing import Any, Dict, List
 
 import collections
 import functools
@@ -11,11 +11,13 @@ import torch
 import tqdm
 import transformers
 
-from spider.dataset import BeirDataset
 from spider.lib.dist import gather, get_rank, get_world_size
 from spider.lib.embed import embed_with_cache
 from spider.lib.tensor import forward_batched
 from spider.lib.misc import tqdm_if_main_worker
+
+
+BeirDataset = Any # Weird import error so we fake the class name for typing.
 
 
 def tokenize_transform(
