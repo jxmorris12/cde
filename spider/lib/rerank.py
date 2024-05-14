@@ -55,6 +55,7 @@ class RerankHelper:
             fake_dataset_info: bool,
             pooling_factor: int = 1,
             n_outputs_ensemble: int = 1,
+            default_dtype = torch.bfloat16,
         ):
         self.model = model
         self.tokenizer = tokenizer
@@ -69,6 +70,8 @@ class RerankHelper:
         self.pooling_factor = pooling_factor
         self.n_outputs_ensemble = n_outputs_ensemble
         self._pad = lambda t: torch.nn.functional.pad(t, pad=[0, self.max_seq_length - t.shape[-1]], value=self.tokenizer.pad_token_id)
+        self.default_dtype = torch.float16
+        # self.default_dtype = torch.bfloat16
     
     def _forward_batched(
             self, 
@@ -77,6 +80,8 @@ class RerankHelper:
             dataset_input_ids: torch.Tensor,
             dataset_attention_mask: torch.Tensor
         ) -> torch.Tensor:
+        rerank_device = ("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
+        # with torch.autocast(rerank_device, dtype=self.default_dtype):
         return forward_batched(
             model=self.model,
             batch_size=self.batch_size,
@@ -179,25 +184,25 @@ class RerankHelper:
         num_eval_queries = min(self.max_reranking_queries, len(query_keys))
         agreement = []
 
-        ensemble_query_embedding = []
-        ensemble_document_embeddings = []
-        for j, query_id in tqdm_if_main_worker(enumerate(query_keys), total=num_eval_queries, desc=f"[{self.name}]"):
+        for j, query_id in tqdm_if_main_worker(
+            enumerate(query_keys), total=num_eval_queries, desc=f"[{self.name}]"):
             all_topk_docs = sorted(results[query_id].items(), key=lambda item: item[1], reverse=True)
-            for j in range(self.n_outputs_ensemble):
-                topk_docs = all_topk_docs[:top_k]
+            for doc_j, (doc_id, _) in enumerate(all_topk_docs):
+                doc_id_to_key[query_id][doc_j] = doc_id
+
+            if j >= self.max_reranking_queries:
+                break
+
+            if (j % world_size) != rank:
+                # poor man's distributed sampler
+                continue
+            ensemble_query_embedding = []
+            ensemble_document_embeddings = []
+            for k in range(self.n_outputs_ensemble):
+                topk_docs = all_topk_docs[k*top_k:(k+1)*top_k]
 
                 # TODO: Enable assertion...
                 # assert len(topk_docs) == topk_docs, f"fewer than {top_k} docs available in dataset {self.name}"
-
-                for doc_j, (doc_id, _) in enumerate(topk_docs):
-                    doc_id_to_key[query_id][doc_j] = doc_id
-
-                if j >= self.max_reranking_queries:
-                    break
-
-                if (j % world_size) != rank:
-                    # poor man's distributed sampler
-                    continue
 
                 query_batch = queries[query_idx_dict[query_id]]
                 query_inputs = transformers.BatchEncoding(
@@ -246,8 +251,8 @@ class RerankHelper:
                 )
                 ensemble_document_embeddings.append(document_embeddings)
             
-            ensemble_query_embedding = torch.cat(ensemble_query_embedding, dim=0).mean(0)
-            ensemble_document_embeddings = torch.cat(ensemble_document_embeddings, dim=0).mean(0)
+            ensemble_query_embedding = torch.stack(ensemble_query_embedding, dim=0).mean(0)
+            ensemble_document_embeddings = torch.stack(ensemble_document_embeddings, dim=0).mean(0)
             biencoder_score = torch.nn.functional.cosine_similarity(
                 ensemble_query_embedding, 
                 ensemble_document_embeddings

@@ -17,21 +17,31 @@ from spider.trainer import CustomTrainer
 class FakeConfig:
     hidden_size = 32
     model_type = "fake"
+    transductive_corpus_size = 20
 
 class FakeModelOutput:
     def __init__(self, last_hidden_state: torch.Tensor):
         self.last_hidden_state = last_hidden_state
 
 class FakeEmbedder(torch.nn.Module):
-     def __init__(self, *args, **kwargs):
-          import argparse
+    def __init__(self, *args, **kwargs):
           self.config = FakeConfig()
           super().__init__()
 
-     def forward(self, input_ids: torch.Tensor, attention_mask: torch.Tensor) -> FakeModelOutput:
+    def embeddings(self, input_ids: torch.Tensor) -> torch.Tensor:
         batch_size, seq_length = input_ids.shape
-        last_hidden_state = torch.randn(
+        return torch.randn(
             batch_size, seq_length, self.config.hidden_size, device=input_ids.device)
+
+    def forward(self, input_ids: torch.Tensor = None, attention_mask: torch.Tensor = None, inputs_embeds: torch.Tensor = None) -> FakeModelOutput:
+        if input_ids is not None:
+            batch_size, seq_length = input_ids.shape
+            device = input_ids.device
+        else:
+            batch_size, seq_length = inputs_embeds.shape[0:2]
+            device = inputs_embeds.device
+        last_hidden_state = torch.randn(
+            batch_size, seq_length, self.config.hidden_size, device=device)
         return FakeModelOutput(
             last_hidden_state=last_hidden_state
         )
@@ -49,6 +59,7 @@ def fake_trainer():
         parser.parse_args_into_dataclasses(
             shlex.split(args_str))
     )
+    model_args.transductive_corpus_size = 20
     model_config = ModelConfig(**vars(model_args))
     model_cls = get_model_class(model_args.architecture)
     embedder, tokenizer = load_fake_embedder_and_tokenizer()
@@ -87,6 +98,7 @@ def fake_trainer():
         retrieval_datasets=retrieval_datasets,
     )
     trainer.model.eval()
+    trainer.model = trainer.model.cpu()
     return trainer
 
 def test_rerank_beir_default(fake_trainer):
