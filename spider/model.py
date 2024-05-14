@@ -230,7 +230,9 @@ class DatasetConditionedBiencoder(transformers.PreTrainedModel):
             self, 
             input_ids: torch.Tensor,
             attention_mask: torch.Tensor,
-            dataset_embeddings: torch.Tensor) -> torch.Tensor:
+            dataset_embeddings: torch.Tensor,
+            null_dataset_embedding: bool = False
+        ) -> torch.Tensor:
         dataset_embeddings = dataset_embeddings[None, :, :] # (b, d) -> (1, b, d)
 
         if dataset_embeddings.shape[1] > self.config.transductive_corpus_size:
@@ -251,6 +253,9 @@ class DatasetConditionedBiencoder(transformers.PreTrainedModel):
             dataset_embeddings = torch.where(
                 sequence_dropout_mask[..., None], null_embeddings, dataset_embeddings
             )
+        elif null_dataset_embedding:
+            null_embeddings = self.sequence_dropout_null_embedding[None, None].expand(batch_size, corpus_size, -1)
+            dataset_embeddings = null_embeddings
         
         # backbone_max_seq_length = self.backbone.config.max_trained_positions
         # assert batch_size + (2 * self.n_soft_prompt + corpus_size) <= backbone_max_seq_length, "too many hard negatives for backbone model"

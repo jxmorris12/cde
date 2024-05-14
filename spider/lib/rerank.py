@@ -1,4 +1,4 @@
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Union, Tuple
 
 import collections
 import functools
@@ -7,6 +7,7 @@ import logging
 import math
 
 import datasets
+import random
 import torch
 import tqdm
 import transformers
@@ -17,6 +18,7 @@ from spider.lib.tensor import forward_batched
 from spider.lib.misc import tqdm_if_main_worker
 
 
+MtebDataset = Any # Weird import error so we fake the class name for typing.
 BeirDataset = Any # Weird import error so we fake the class name for typing.
 
 
@@ -50,29 +52,93 @@ class RerankHelper:
             max_reranking_queries: int, 
             max_seq_length: int, 
             name: str, 
-            fake_dataset_info: bool
+            fake_dataset_info: bool,
+            pooling_factor: int = 1,
+            n_outputs_ensemble: int = 1,
         ):
         self.model = model
         self.tokenizer = tokenizer
         self.batch_size = batch_size
         self.max_seq_length = max_seq_length
         self.name = name
-        self.fake_dataset_info = fake_dataset_info
+        self.transductive_input_strategy = ("fake" if fake_dataset_info else "topk")
         # Subsample queries from large sets so that we can evaluate
         # in a reasonable amount of time. Also remember this will be
         # distributed across GPUs. So it's not that bad.
         self.max_reranking_queries = max_reranking_queries
+        self.pooling_factor = pooling_factor
+        self.n_outputs_ensemble = n_outputs_ensemble
+        self._pad = lambda t: torch.nn.functional.pad(t, pad=[0, self.max_seq_length - t.shape[-1]], value=self.tokenizer.pad_token_id)
     
-    def _forward_batched(self, **kwargs) -> torch.Tensor:
+    def _forward_batched(
+            self, 
+            input_ids: torch.Tensor, 
+            attention_mask: torch.Tensor,
+            dataset_input_ids: torch.Tensor,
+            dataset_attention_mask: torch.Tensor
+        ) -> torch.Tensor:
         return forward_batched(
             model=self.model,
             batch_size=self.batch_size,
-            **kwargs,
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            dataset_input_ids=dataset_input_ids,
+            dataset_attention_mask=dataset_attention_mask,
         )
 
+    def _get_dataset_inputs(
+            self, 
+            corpus_idx_dict: Dict[str, int], 
+            corpus: datasets.Dataset, 
+            all_topk_docs: List[Tuple[int, torch.Tensor]], 
+            document_inputs: Dict[str, torch.Tensor], 
+            top_k: int
+        ) -> Tuple[torch.Tensor, torch.Tensor]:
+        if self.transductive_input_strategy == "fake":
+            batch_size = document_inputs["input_ids"].shape[0]
+            fake_seq_length = top_k
+            fake_dataset_input_ids = torch.ones(
+                (batch_size, fake_seq_length), device=document_inputs["input_ids"].device,
+                dtype=torch.long
+            )
+            fake_dataset_attention_mask = torch.ones(
+                (batch_size, fake_seq_length), device=document_inputs["input_ids"].device,
+                dtype=torch.long
+            )
+            dataset_input_ids = fake_dataset_input_ids
+            dataset_attention_mask = fake_dataset_attention_mask
+        elif self.transductive_input_strategy == "random_corpus":
+            corpus_ids = random.choices(range(len(corpus)), k=top_k)
+            dataset_input_ids = torch.stack([
+                self._pad(ids) for ids in corpus[corpus_ids]["input_ids"]])
+            dataset_attention_mask = torch.stack([
+                self._pad(ids) for ids in corpus[corpus_ids]["attention_mask"]])
+        elif self.transductive_input_strategy == "topk_pool":
+            num_docs_to_pool = self.pooling_factor * top_k
+            topk_docs = all_topk_docs[:num_docs_to_pool]
+            dataset_input_ids = []
+            dataset_attention_mask = []
+            for _, (doc_id, _) in enumerate(topk_docs):
+                dataset_input_ids.append(self._pad(corpus[corpus_idx_dict[doc_id]]["input_ids"]))
+                dataset_attention_mask.append(self._pad(corpus[corpus_idx_dict[doc_id]]["attention_mask"]))
+            dataset_input_ids = dataset_input_ids.reshape(
+                (self.pooling_factor, top_k, self.max_seq_length)
+            )
+            dataset_attention_mask = dataset_attention_mask.reshape(
+                (self.pooling_factor, top_k, self.max_seq_length)
+            )
+        else:
+            dataset_input_ids = document_inputs.input_ids
+            dataset_attention_mask = document_inputs.attention_mask
+
+        if len(dataset_input_ids) < top_k:
+            # TODO: Fix so we always have this and don't need to hack like this
+            dataset_input_ids = torch.cat([dataset_input_ids, dataset_input_ids], dim=0)[:top_k]
+            dataset_attention_mask = torch.cat([dataset_attention_mask, dataset_attention_mask], dim=0)[:top_k]
+        return dataset_input_ids, dataset_attention_mask
 
     @torch.no_grad
-    def rerank(self, dataset: BeirDataset, top_k: int) -> Dict[str, Dict[str, float]]:
+    def rerank(self, dataset: Union[MtebDataset, BeirDataset], top_k: int) -> Dict[str, Dict[str, float]]:
         tokenize_corpus_func = functools.partial(
             tokenize_transform, 
             col="text",
@@ -112,83 +178,79 @@ class RerankHelper:
         doc_id_to_key = collections.defaultdict(dict)
         num_eval_queries = min(self.max_reranking_queries, len(query_keys))
         agreement = []
+
+        ensemble_query_embedding = []
+        ensemble_document_embeddings = []
         for j, query_id in tqdm_if_main_worker(enumerate(query_keys), total=num_eval_queries, desc=f"[{self.name}]"):
-            topk_docs = sorted(results[query_id].items(), key=lambda item: item[1], reverse=True)[:top_k]
+            all_topk_docs = sorted(results[query_id].items(), key=lambda item: item[1], reverse=True)
+            for j in range(self.n_outputs_ensemble):
+                topk_docs = all_topk_docs[:top_k]
 
-            # TODO: Enable assertion...
-            # assert len(topk_docs) == topk_docs, f"fewer than {top_k} docs available in dataset {self.name}"
+                # TODO: Enable assertion...
+                # assert len(topk_docs) == topk_docs, f"fewer than {top_k} docs available in dataset {self.name}"
 
-            for doc_j, (doc_id, _) in enumerate(topk_docs):
-                doc_id_to_key[query_id][doc_j] = doc_id
+                for doc_j, (doc_id, _) in enumerate(topk_docs):
+                    doc_id_to_key[query_id][doc_j] = doc_id
 
-            if j >= self.max_reranking_queries:
-                break
+                if j >= self.max_reranking_queries:
+                    break
 
-            if (j % world_size) != rank:
-                # poor man's distributed sampler
-                continue
+                if (j % world_size) != rank:
+                    # poor man's distributed sampler
+                    continue
 
-            query_batch = queries[query_idx_dict[query_id]]
-            query_inputs = transformers.BatchEncoding(
-                data={
-                    "input_ids": query_batch["input_ids"],
-                    "attention_mask": query_batch["attention_mask"],
-                }
-            ).to(device)
+                query_batch = queries[query_idx_dict[query_id]]
+                query_inputs = transformers.BatchEncoding(
+                    data={
+                        "input_ids": query_batch["input_ids"],
+                        "attention_mask": query_batch["attention_mask"],
+                    }
+                ).to(device)
 
-            documents_input_ids = []
-            documents_attention_mask = []
+                documents_input_ids = []
+                documents_attention_mask = []
+                for doc_j, (doc_id, _) in enumerate(topk_docs):
+                    pair_ids.append([(j, doc_j)])
+                    doc_j += 1
+                    documents_input_ids.append(self._pad(corpus[corpus_idx_dict[doc_id]]["input_ids"]))
+                    documents_attention_mask.append(self._pad(corpus[corpus_idx_dict[doc_id]]["attention_mask"]))
+                
+                document_inputs = transformers.BatchEncoding(data={
+                    "input_ids": torch.stack(documents_input_ids),
+                    "attention_mask": torch.stack(documents_attention_mask)
+                }).to(device)
 
-            pad = lambda t: torch.nn.functional.pad(t, pad=[0, self.max_seq_length - t.shape[-1]], value=self.tokenizer.pad_token_id)
-            for doc_j, (doc_id, _) in enumerate(topk_docs):
-                pair_ids.append([(j, doc_j)])
-                doc_j += 1
-                documents_input_ids.append(pad(corpus[corpus_idx_dict[doc_id]]["input_ids"]))
-                documents_attention_mask.append(pad(corpus[corpus_idx_dict[doc_id]]["attention_mask"]))
-            document_inputs = transformers.BatchEncoding(data={
-                "input_ids": torch.stack(documents_input_ids),
-                "attention_mask": torch.stack(documents_attention_mask)
-            }).to(device)
-
-            if self.fake_dataset_info:
-                batch_size = document_inputs["input_ids"].shape[0]
-                fake_seq_length = 128
-                fake_dataset_input_ids = torch.ones(
-                    (batch_size, fake_seq_length), device=document_inputs["input_ids"].device,
-                    dtype=torch.long
+                dataset_input_ids, dataset_attention_mask = (
+                    self._get_dataset_inputs(
+                        corpus_idx_dict=corpus_idx_dict,
+                        corpus=corpus,
+                        all_topk_docs=all_topk_docs,
+                        document_inputs=document_inputs,
+                        top_k=top_k,
+                    )
                 )
-                fake_dataset_attention_mask = torch.ones(
-                    (batch_size, fake_seq_length), device=document_inputs["input_ids"].device,
-                    dtype=torch.long
+                # TODO: Cache first-stage outputs here so that things are ~30% faster.
+                query_embedding = self._forward_batched(
+                    input_ids=query_inputs.input_ids[None],
+                    attention_mask=query_inputs.attention_mask[None],
+                    dataset_input_ids=dataset_input_ids,
+                    dataset_attention_mask=dataset_attention_mask,
+                ).flatten()
+                ensemble_query_embedding.append(query_embedding)
+                
+                document_embeddings = self._forward_batched(
+                    input_ids=document_inputs.input_ids,
+                    attention_mask=document_inputs.attention_mask,
+                    dataset_input_ids=dataset_input_ids,
+                    dataset_attention_mask=dataset_attention_mask,
                 )
-                dataset_input_ids = fake_dataset_input_ids
-                dataset_attention_mask = fake_dataset_attention_mask
-            else:
-                dataset_input_ids = document_inputs.input_ids
-                dataset_attention_mask = document_inputs.attention_mask
-
-            if len(dataset_input_ids) < top_k:
-                # TODO: Fix so we always have this and don't need to hack like this
-                dataset_input_ids = torch.cat([dataset_input_ids, dataset_input_ids], dim=0)[:top_k]
-                dataset_attention_mask = torch.cat([dataset_attention_mask, dataset_attention_mask], dim=0)[:top_k]
+                ensemble_document_embeddings.append(document_embeddings)
             
-            # TODO: Cache first-stage outputs here so that things are ~30% faster.
-            query_embedding = self._forward_batched(
-                input_ids=query_inputs.input_ids[None],
-                attention_mask=query_inputs.attention_mask[None],
-                dataset_input_ids=dataset_input_ids,
-                dataset_attention_mask=dataset_attention_mask,
-            ).flatten()
-            document_embeddings = self._forward_batched(
-                input_ids=document_inputs.input_ids,
-                attention_mask=document_inputs.attention_mask,
-                dataset_input_ids=dataset_input_ids,
-                dataset_attention_mask=dataset_attention_mask,
-            )
-            
+            ensemble_query_embedding = torch.cat(ensemble_query_embedding, dim=0).mean(0)
+            ensemble_document_embeddings = torch.cat(ensemble_document_embeddings, dim=0).mean(0)
             biencoder_score = torch.nn.functional.cosine_similarity(
-                query_embedding, 
-                document_embeddings
+                ensemble_query_embedding, 
+                ensemble_document_embeddings
             ).flatten().cpu()
             rerank_scores_biencoder.extend(biencoder_score.tolist())
 
@@ -246,7 +308,7 @@ def get_reranking_results(data_path: str, split: str, model_name: str) -> Dict:
     # https://github.com/embeddings-benchmark/mteb/blob/0c67d969b8e34ccf94286c3e2758c7a8d0943e81/mteb/evaluation/evaluators/RetrievalEvaluator.py#L189
     from mteb import HFDataLoader, RetrievalEvaluator
 
-    print("[get_reranking_results Loading:", data_path)
+    print("[get_reranking_results] Loading:", data_path)
     corpus, queries, _qrels = HFDataLoader(data_folder=data_path, streaming=False, keep_in_memory=False).load(split=split)
     retriever = RetrievalEvaluator(
         None,

@@ -208,11 +208,12 @@ def embed_with_cache(
     cache_path = os.path.join(cache_folder, cache_name) #  + "_small")
 
     if os.path.exists(cache_path):
-        # print("[embed_with_cache] Loading embeddings at path:", cache_path)
+        print("[embed_with_cache] Loading embeddings at path:", cache_path)
         d = datasets_fast_load_from_disk(cache_path)
         d.set_format("pt")
         return d
     
+    print("[embed_with_cache] Will save embeddings to path:", cache_path)
     d.set_format(type=None, columns=[col]) # get python objects (strings!)
     all_other_colums = [c for c in d.column_names if c != col]
     d_subset = d.remove_columns(all_other_colums)

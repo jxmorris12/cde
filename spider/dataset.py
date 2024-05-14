@@ -144,8 +144,8 @@ def load_beir(dataset: str, split: str, embedder_rerank: str) -> Tuple[datasets.
     corpus_path = os.path.join(cache_path, f'tti_beir_local_{dataset}_corpus_{split}')
     queries_path = os.path.join(cache_path, f'tti_beir_local_{dataset}_queries_{split}')
     qrels_path = os.path.join(cache_path, f'tti_beir_local_{dataset}_qrels_{split}.p')
-    embedder_rerank_pathsafe_name = embedder_rerank.replace("/", "__")
-    rerank_path = os.path.join(cache_path, f'tti_beir_local_{dataset}_rerank_results_{embedder_rerank_pathsafe_name}')
+    embedder_rerank_path_safe_name = embedder_rerank.replace("/", "__")
+    rerank_path = os.path.join(cache_path, f'tti_beir_local_{dataset}_rerank_results_{embedder_rerank_path_safe_name}')
 
     if os.path.exists(corpus_path) and os.path.exists(queries_path) and os.path.exists(qrels_path) and os.path.exists(rerank_path):
         logging.info(f"Loading {dataset} split %s corpus from path %s", split, corpus_path)

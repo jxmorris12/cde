@@ -6,6 +6,7 @@ import json
 import hashlib
 import itertools
 import logging
+import multiprocessing
 import os
 import pickle
 import random
@@ -430,3 +431,9 @@ def load_model_state_dict_from_path(folder: str) -> Dict:
     if not os.path.exists(weights_path):
         raise FileNotFoundError(f"no model weights found at {weights_path}")
     return safetensors.torch.load_file(weights_path, device="cpu")
+
+def count_cpus() -> int:
+    try:
+        return len(os.sched_getaffinity(0)) 
+    except AttributeError:
+        return multiprocessing.cpu_count()

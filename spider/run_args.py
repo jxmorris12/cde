@@ -10,7 +10,7 @@ import torch
 import transformers
 
 
-from spider.lib import get_rank, get_world_size
+from spider.lib import get_rank, get_world_size, count_cpus
 
 
 @dataclass
@@ -318,7 +318,7 @@ class TrainingArguments(transformers.TrainingArguments):
             os.environ["WANDB_MODE"] = "disabled"
         ############################################################################
         num_devices = max(1, torch.cuda.device_count())
-        num_cpus = min(32, num_devices * 4, len(os.sched_getaffinity(0)))
+        num_cpus = min(32, num_devices * 4, count_cpus())
         num_workers = int(num_cpus / num_devices)
         if self.tiny_debug:
             print("[tiny_debug] Setting num workers to 0")

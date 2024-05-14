@@ -9,9 +9,7 @@ import transformers
 import wandb
 
 from spider.collate import TokenizerCollator
-from spider.dataset import (
-    BeirDataset
-)
+from spider.dataset import BeirDataset
 from spider.lib import load_embedder_and_tokenizer, ModelConfig
 from spider.model import get_model_class
 from spider.run_args import ModelArguments, DataArguments, TrainingArguments
@@ -48,6 +46,7 @@ def load_trainer_from_checkpoint_and_args(
         training_args.use_wandb = 0
         training_args._n_gpu =  1 if torch.cuda.is_available() else 0  # Don't load in DDP
         training_args.local_rank = -1  # Don't load in DDP
+        
         from accelerate.state import PartialState
         training_args.distributed_state = PartialState()
         # print("got device:", training_args.device, "//", training_args._setup_devices, training_args._n_gpu)

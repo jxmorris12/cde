@@ -9,6 +9,7 @@ def mean_pool(
     hidden_states: torch.Tensor, attention_mask: torch.Tensor
 ) -> torch.Tensor:
     B, _S, D = hidden_states.shape
+    breakpoint()
     unmasked_outputs = hidden_states * attention_mask[..., None]
     pooled_outputs = unmasked_outputs.sum(dim=1) / attention_mask.sum(dim=1)[:, None]
     assert pooled_outputs.shape == (B, D)
@@ -100,15 +101,26 @@ def forward_batched(
     if hasattr(model, "first_stage_model"):
         i = 0
         dataset_embeddings = []
-        while i < len(dataset_input_ids):
-            dataset_embeddings.append(
-                model.first_stage_model(
-                    input_ids=dataset_input_ids[i:i+batch_size],
-                    attention_mask=dataset_attention_mask[i:i+batch_size],
+
+        # Support pooling over 3D dataset_input_ids inputs.
+        if len(dataset_input_ids.shape) == 2:
+            dataset_input_ids = dataset_input_ids[None]
+            dataset_attention_mask = dataset_attention_mask[None]
+
+        for j in range(len(dataset_input_ids)):
+            dataset_embeddings_batch = []
+            while i < len(dataset_input_ids):
+                dataset_embeddings_batch.append(
+                    model.first_stage_model(
+                        input_ids=dataset_input_ids[j][i:i+batch_size],
+                        attention_mask=dataset_attention_mask[j][i:i+batch_size],
+                    )
                 )
-            )
-            i += batch_size
-        dataset_embeddings = torch.cat(dataset_embeddings, dim=0)
+                i += batch_size
+            dataset_embeddings_batch = torch.cat(dataset_embeddings_batch, dim=0)
+       
+        # Automatically pool over 3D dataset_input_ids.
+        dataset_embeddings = torch.stack(dataset_embeddings, dim=0).mean(dim=0)
 
         j = 0
         outputs = []
