@@ -57,6 +57,7 @@ class DenseRetrievalExactSearch:
         self,
         corpus: dict[str, dict[str, str]],
         queries: dict[str, str],
+        rerank_results,
         top_k: int,
         score_function: str,
         return_sorted: bool = False,
@@ -78,6 +79,8 @@ class DenseRetrievalExactSearch:
         queries = [queries[qid] for qid in queries]
         query_embeddings = self.model.encode_queries(
             queries,
+            corpus,
+            rerank_results,
             batch_size=self.batch_size,
             show_progress_bar=self.show_progress_bar,
             convert_to_tensor=self.convert_to_tensor,
@@ -121,6 +124,8 @@ class DenseRetrievalExactSearch:
                 # Encode chunk of corpus
                 sub_corpus_embeddings = self.model.encode_corpus(
                     corpus[corpus_start_idx:corpus_end_idx],
+                    corpus,
+                    rerank_results,
                     batch_size=self.batch_size,
                     show_progress_bar=self.show_progress_bar,
                     convert_to_tensor=self.convert_to_tensor,
@@ -289,7 +294,14 @@ class DRESModel:
         self.save_corpus_embeddings = kwargs.get("save_corpus_embeddings", False)
         self.corpus_embeddings = {}
 
-    def encode_queries(self, queries: List[str], batch_size: int, **kwargs):
+    def encode_queries(
+            self, 
+            queries: List[str], 
+            full_corpus,
+            rerank_results,
+            batch_size: int, 
+            **kwargs
+        ):
         if self.use_sbert_model:
             if isinstance(self.model._first_module(), Transformer):
                 logger.info(
@@ -313,9 +325,28 @@ class DRESModel:
             # can't just delete, cuz assign by reference on kwargs
             new_kwargs = kwargs
 
-        return self.model.encode(queries, batch_size=batch_size, **new_kwargs)
+        neighbor_topk = 256
+        neighbor_sentence_ids = [rerank_results[id][:neighbor_topk] for id in corpus.keys()]
+        neighbor_sentences = [full_corpus[id] for id in neighbor_sentence_ids]
 
-    def encode_corpus(self, corpus: List[Dict[str, str]], batch_size: int, **kwargs):
+        first_stage_embeddings = self.model.encode_first_stage(
+            sentences=neighbor_sentences,
+            batch_size=batch_size,
+        )
+        query_embeddings = self.model.encode_second_stage(
+            queries, 
+            first_stage_embeddings=first_stage_embeddings, 
+            batch_size=batch_size, **new_kwargs
+        )
+        return query_embeddings
+
+    def encode_corpus(self, 
+            corpus: List[Dict[str, str]], 
+            full_corpus: List[Dict[str, str]],
+            rerank_results, 
+            batch_size: int, 
+            **kwargs
+        ):
         if (
             "qid" in kwargs
             and self.save_corpus_embeddings
@@ -345,9 +376,19 @@ class DRESModel:
         else:
             # can't just delete, cuz assign by reference on kwargs
             new_kwargs = kwargs
-
-        corpus_embeddings = self.model.encode(
-            sentences, batch_size=batch_size, **new_kwargs
+        
+        # TODO: Argparse for topk
+        neighbor_topk = 256
+        neighbor_sentence_ids = [rerank_results[id][:neighbor_topk] for id in corpus.keys()]
+        neighbor_sentences = [full_corpus[id] for id in neighbor_sentence_ids]
+        first_stage_embeddings = self.model.encode_first_stage(
+            sentences=neighbor_sentences,
+            batch_size=batch_size,
+        )
+        corpus_embeddings = self.model.encode_second_stage(
+            sentences, 
+            first_stage_embeddings=first_stage_embeddings, 
+            batch_size=batch_size, **new_kwargs
         )
         if self.save_corpus_embeddings and "qid" in kwargs:
             if isinstance(corpus_embeddings, torch.tensor):
@@ -405,7 +446,7 @@ class RetrievalEvaluator(Evaluator):
         self.score_function = score_function
 
     def __call__(
-        self, corpus: dict[str, dict[str, str]], queries: dict[str, str]
+        self, corpus: dict[str, dict[str, str]], queries: dict[str, str], rerank_results,
     ) -> dict[str, dict[str, float]]:
         if not self.retriever:
             raise ValueError("Model/Technique has not been provided!")
@@ -414,7 +455,7 @@ class RetrievalEvaluator(Evaluator):
             return self.retriever.search_cross_encoder(corpus, queries, self.top_k)
         else:
             return self.retriever.search(
-                corpus, queries, self.top_k, self.score_function
+                corpus, queries, rerank_results, self.top_k, self.score_function
             )
 
     @staticmethod

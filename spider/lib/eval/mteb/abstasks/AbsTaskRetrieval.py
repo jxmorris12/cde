@@ -7,7 +7,12 @@ from collections import defaultdict
 from time import time
 from typing import Dict, Tuple
 
+
+import datasets
 from datasets import Features, Value, load_dataset
+import torch
+
+from spider.lib import get_reranking_results
 
 from ..evaluation.evaluators import RetrievalEvaluator
 from .AbsTask import AbsTask
@@ -33,6 +38,7 @@ class HFDataLoader:
         self.corpus = {}
         self.queries = {}
         self.qrels = {}
+
         self.hf_repo = hf_repo
         if hf_repo:
             # By default fetch qrels from same repo not a second repo with "-qrels" like in original
@@ -103,7 +109,23 @@ class HFDataLoader:
         logger.info("Loaded %d %s Queries.", len(self.queries), split.upper())
         logger.info("Query Example: %s", self.queries[0])
 
-        return self.corpus, self.queries, self.qrels
+        self.rerank_results = get_reranking_results(
+            data_path=self.hf_repo, 
+            split=split,
+            model_name=self.embedder_rerank
+        )
+        return self.corpus, self.queries, self.rerank_results, self.qrels
+
+    def _embed(self, dataset: datasets.Dataset) -> torch.Tensor:
+        # TODO implement true embedding & caching
+        # TODO determine the best data structure for this? maybe use faiss?
+        return torch.randn(len(dataset), 32)
+
+    def _embed_corpus(self, dataset: datasets.Dataset) -> torch.Tensor:
+        return self._embed(dataset=dataset)
+    
+    def _embed_queries(self, dataset: datasets.Dataset) -> torch.Tensor:
+        return self._embed(dataset=dataset)
 
     def load_corpus(self) -> dict[str, dict[str, str]]:
         if not self.hf_repo:
@@ -143,6 +165,7 @@ class HFDataLoader:
             ]
         )
         self.corpus = corpus_ds
+        self.corpus_embeddings = self._embed_corpus(self.corpus)
 
     def _load_queries(self):
         if self.hf_repo:
@@ -222,7 +245,7 @@ class AbsTaskRetrieval(AbsTask):
             dataset_path + "-qrels" if "clarin-knext" in dataset_path else None
         )
         for split in kwargs.get("eval_splits", self.metadata_dict["eval_splits"]):
-            corpus, queries, qrels = HFDataLoader(
+            corpus, queries, rerank_results, qrels = HFDataLoader(
                 hf_repo=dataset_path,
                 hf_repo_qrels=hf_repo_qrels,
                 streaming=False,
@@ -234,9 +257,10 @@ class AbsTaskRetrieval(AbsTask):
                 doc["id"]: {"title": doc["title"], "text": doc["text"]}
                 for doc in corpus
             }
-            self.corpus[split], self.queries[split], self.relevant_docs[split] = (
+            self.corpus[split], self.queries[split], self.rerank_results[split], self.relevant_docs[split] = (
                 corpus,
                 queries,
+                rerank_results,
                 qrels,
             )
 
@@ -264,15 +288,15 @@ class AbsTaskRetrieval(AbsTask):
                 self.relevant_docs[split],
             )
             scores = self._evaluate_split(
-                retriever, corpus, queries, relevant_docs, None, **kwargs
+                retriever, corpus, queries, self.rerank_results[split], relevant_docs, None, **kwargs
             )
         return scores
 
     def _evaluate_split(
-        self, retriever, corpus, queries, relevant_docs, lang=None, **kwargs
+        self, retriever, corpus, corpus_embeddings, queries, query_embeddings, relevant_docs, lang=None, **kwargs
     ):
         start_time = time()
-        results = retriever(corpus, queries)
+        results = retriever(corpus, corpus_embeddings, queries, query_embeddings)
         end_time = time()
         logger.info(
             "Time taken to retrieve: {:.2f} seconds".format(end_time - start_time)
