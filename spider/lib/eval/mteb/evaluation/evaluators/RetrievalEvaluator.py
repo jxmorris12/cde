@@ -76,9 +76,10 @@ class DenseRetrievalExactSearch:
         logger.info("Encoding Queries...")
         query_ids = list(queries.keys())
         self.results = {qid: {} for qid in query_ids}
-        queries = [queries[qid] for qid in queries]
+        queries = [queries[qid] for qid in query_ids]
         query_embeddings = self.model.encode_queries(
             queries,
+            query_ids,
             corpus,
             rerank_results,
             batch_size=self.batch_size,
@@ -122,8 +123,11 @@ class DenseRetrievalExactSearch:
                 )
             else:
                 # Encode chunk of corpus
+                sub_corpus = corpus[corpus_start_idx:corpus_end_idx]
+                sub_corpus_ids = corpus_ids[corpus_start_idx:corpus_end_idx]
                 sub_corpus_embeddings = self.model.encode_corpus(
-                    corpus[corpus_start_idx:corpus_end_idx],
+                    sub_corpus,
+                    sub_corpus_ids,
                     corpus,
                     rerank_results,
                     batch_size=self.batch_size,
@@ -326,7 +330,7 @@ class DRESModel:
             new_kwargs = kwargs
 
         neighbor_topk = 256
-        neighbor_sentence_ids = [rerank_results[id][:neighbor_topk] for id in corpus.keys()]
+        neighbor_sentence_ids = [rerank_results[id][:neighbor_topk] for id in full_corpus.keys()]
         neighbor_sentences = [full_corpus[id] for id in neighbor_sentence_ids]
 
         first_stage_embeddings = self.model.encode_first_stage(

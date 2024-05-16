@@ -4,7 +4,7 @@ from typing import Any
 
 import datasets
 
-from mteb.abstasks.TaskMetadata import TaskMetadata
+from spider.lib.eval.mteb.abstasks.TaskMetadata import TaskMetadata
 
 from ....abstasks import AbsTaskBitextMining, CrosslingualTask
 

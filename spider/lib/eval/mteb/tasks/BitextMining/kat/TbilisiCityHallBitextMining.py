@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datasets import DatasetDict, load_dataset
 
-from mteb.abstasks.TaskMetadata import TaskMetadata
+from spider.lib.eval.mteb.abstasks.TaskMetadata import TaskMetadata
 
 from ....abstasks import AbsTaskBitextMining, CrosslingualTask
 

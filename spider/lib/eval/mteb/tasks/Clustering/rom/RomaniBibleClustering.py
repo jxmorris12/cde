@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from mteb.abstasks import AbsTaskClustering, TaskMetadata
+from spider.lib.eval.mteb.abstasks import AbsTaskClustering, TaskMetadata
 
 
 class RomaniBibleClustering(AbsTaskClustering):

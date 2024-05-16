@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from mteb.abstasks import MultilingualTask
-from mteb.abstasks.AbsTaskPairClassification import AbsTaskPairClassification
-from mteb.abstasks.TaskMetadata import TaskMetadata
+from spider.lib.eval.mteb.abstasks import MultilingualTask
+from spider.lib.eval.mteb.abstasks.AbsTaskPairClassification import AbsTaskPairClassification
+from spider.lib.eval.mteb.abstasks.TaskMetadata import TaskMetadata
 
 _LANGS = {
     "ar": ["ara-Arab"],

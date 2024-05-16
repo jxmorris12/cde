@@ -1,5 +1,5 @@
-from mteb.abstasks.AbsTaskClassification import AbsTaskClassification
-from mteb.abstasks.TaskMetadata import TaskMetadata
+from spider.lib.eval.mteb.abstasks.AbsTaskClassification import AbsTaskClassification
+from spider.lib.eval.mteb.abstasks.TaskMetadata import TaskMetadata
 
 
 class FilipinoShopeeReviewsClassification(AbsTaskClassification):

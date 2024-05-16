@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import logging
 import os
+import pickle
+
 from collections import defaultdict
 from time import time
 from typing import Dict, Tuple
@@ -28,6 +30,7 @@ class HFDataLoader:
         hf_repo_qrels: str = None,
         data_folder: str = None,
         prefix: str = None,
+        embedder_rerank: str = None,
         corpus_file: str = "corpus.jsonl",
         query_file: str = "queries.jsonl",
         qrels_folder: str = "qrels",
@@ -64,6 +67,7 @@ class HFDataLoader:
             self.qrels_file = qrels_file
         self.streaming = streaming
         self.keep_in_memory = keep_in_memory
+        self.embedder_rerank = embedder_rerank
 
     @staticmethod
     def check(fIn: str, ext: str):
@@ -76,9 +80,34 @@ class HFDataLoader:
             raise ValueError(
                 "File {} must be present with extension {}".format(fIn, ext)
             )
+    
+    def _get_reranking_results_cached(self, split: str):
+        cache_path = datasets.config.HF_DATASETS_CACHE # something like /home/jxm3/.cache/huggingface/datasets
+        rerank_folder = os.path.join(
+            cache_path,
+            "mteb_rerank", 
+            self.corpus._fingerprint, 
+        )
+        os.makedirs(rerank_folder, exist_ok=True)
+        rerank_path = os.path.join(
+            rerank_folder,
+            self.embedder_rerank.replace("/", "__")
+        )
+        print("searching for rerank results at path", rerank_path)
+        if os.path.exists(rerank_path):
+            rerank_results = pickle.load(open(rerank_path, 'rb'))
+        else:
+            rerank_results = get_reranking_results(
+                data_path="",
+                split=split,
+                model_name=self.embedder_rerank,
+                hf_data_loader=self,
+            )
+            pickle.dump(rerank_results, open(rerank_path, 'wb'))
+        return rerank_results
 
     def load(
-        self, split="test"
+        self, split="test", do_reranking: bool = False
     ) -> Tuple[Dict[str, dict[str, str]], dict[str, str], dict[str, dict[str, int]]]:
         if not self.hf_repo:
             self.qrels_file = os.path.join(self.qrels_folder, split + ".tsv")
@@ -109,16 +138,19 @@ class HFDataLoader:
         logger.info("Loaded %d %s Queries.", len(self.queries), split.upper())
         logger.info("Query Example: %s", self.queries[0])
 
-        self.rerank_results = get_reranking_results(
-            data_path=self.hf_repo, 
-            split=split,
-            model_name=self.embedder_rerank
-        )
-        return self.corpus, self.queries, self.rerank_results, self.qrels
+        if do_reranking:
+            self.rerank_results = self._get_reranking_results_cached(
+                split=split,
+            )
+            return self.corpus, self.queries, self.rerank_results, self.qrels
+        else:
+            self.rerank_results = {}
+            return self.corpus, self.queries, self.qrels
 
     def _embed(self, dataset: datasets.Dataset) -> torch.Tensor:
         # TODO implement true embedding & caching
         # TODO determine the best data structure for this? maybe use faiss?
+        print(f"fake-embedding ds of len {len(dataset)} with embedder_rerank = {self.embedder_rerank}")
         return torch.randn(len(dataset), 32)
 
     def _embed_corpus(self, dataset: datasets.Dataset) -> torch.Tensor:
@@ -239,7 +271,7 @@ class AbsTaskRetrieval(AbsTask):
     def load_data(self, **kwargs):
         if self.data_loaded:
             return
-        self.corpus, self.queries, self.relevant_docs = {}, {}, {}
+        self.corpus, self.queries, self.rerank_results, self.relevant_docs = {}, {}, {}, {}
         dataset_path = self.metadata_dict["dataset"]["path"]
         hf_repo_qrels = (
             dataset_path + "-qrels" if "clarin-knext" in dataset_path else None
@@ -250,7 +282,8 @@ class AbsTaskRetrieval(AbsTask):
                 hf_repo_qrels=hf_repo_qrels,
                 streaming=False,
                 keep_in_memory=False,
-            ).load(split=split)
+                embedder_rerank=self.embedder_rerank,
+            ).load(split=split, do_reranking=True)
             # Conversion from DataSet
             queries = {query["id"]: query["text"] for query in queries}
             corpus = {
@@ -271,6 +304,7 @@ class AbsTaskRetrieval(AbsTask):
 
         scores = {}
         if self.is_crosslingual or self.is_multilingual:
+            assert False # disabling for our purposes :-)
             for lang in self.hf_subsets:
                 logger.info(f"Language: {lang}")
                 corpus, queries, relevant_docs = (
@@ -282,21 +316,22 @@ class AbsTaskRetrieval(AbsTask):
                     retriever, corpus, queries, relevant_docs, lang, **kwargs
                 )
         else:
-            corpus, queries, relevant_docs = (
+            corpus, queries, relevant_docs, rerank_results = (
                 self.corpus[split],
                 self.queries[split],
                 self.relevant_docs[split],
+                self.rerank_results[split]
             )
             scores = self._evaluate_split(
-                retriever, corpus, queries, self.rerank_results[split], relevant_docs, None, **kwargs
+                retriever, corpus, queries, rerank_results, relevant_docs, None, **kwargs
             )
         return scores
 
     def _evaluate_split(
-        self, retriever, corpus, corpus_embeddings, queries, query_embeddings, relevant_docs, lang=None, **kwargs
+        self, retriever, corpus, queries, relevant_docs, rerank_results, lang=None, **kwargs
     ):
         start_time = time()
-        results = retriever(corpus, corpus_embeddings, queries, query_embeddings)
+        results = retriever(corpus, queries, rerank_results)
         end_time = time()
         logger.info(
             "Time taken to retrieve: {:.2f} seconds".format(end_time - start_time)

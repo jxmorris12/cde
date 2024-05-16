@@ -3,7 +3,7 @@ from __future__ import annotations
 import datasets
 import numpy as np
 
-from mteb.abstasks import AbsTaskClustering, MultilingualTask, TaskMetadata
+from spider.lib.eval.mteb.abstasks import AbsTaskClustering, MultilingualTask, TaskMetadata
 
 _LANGUAGES = {
     "de": ["deu-Latn"],

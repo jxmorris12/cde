@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from mteb.abstasks.AbsTaskSTS import AbsTaskSTS
-from mteb.abstasks.TaskMetadata import TaskMetadata
+from spider.lib.eval.mteb.abstasks.AbsTaskSTS import AbsTaskSTS
+from spider.lib.eval.mteb.abstasks.TaskMetadata import TaskMetadata
 
 
 class SickrPLSTS(AbsTaskSTS):

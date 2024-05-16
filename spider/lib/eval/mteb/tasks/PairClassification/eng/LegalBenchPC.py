@@ -4,8 +4,8 @@ from typing import Any
 
 import datasets
 
-from mteb.abstasks.AbsTaskPairClassification import AbsTaskPairClassification
-from mteb.abstasks.TaskMetadata import TaskMetadata
+from spider.lib.eval.mteb.abstasks.AbsTaskPairClassification import AbsTaskPairClassification
+from spider.lib.eval.mteb.abstasks.TaskMetadata import TaskMetadata
 
 _DATASET_COLUMN_MAP = [
     {"name": "contract_qa", "sent1": "question", "sent2": "text", "labels": "answer"},

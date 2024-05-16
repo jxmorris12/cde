@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datasets import load_dataset
 
-from mteb.abstasks import AbsTaskRetrieval, TaskMetadata
+from spider.lib.eval.mteb.abstasks import AbsTaskRetrieval, TaskMetadata
 
 
 class JaQuADRetrieval(AbsTaskRetrieval):

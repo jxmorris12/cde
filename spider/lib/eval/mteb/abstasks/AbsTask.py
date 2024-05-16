@@ -9,9 +9,9 @@ import datasets
 import numpy as np
 import torch
 
-from mteb.abstasks.languages import LanguageScripts
-from mteb.abstasks.TaskMetadata import TaskMetadata
-from mteb.encoder_interface import Encoder, EncoderWithQueryCorpusEncode
+from spider.lib.eval.mteb.abstasks.languages import LanguageScripts
+from spider.lib.eval.mteb.abstasks.TaskMetadata import TaskMetadata
+from spider.lib.eval.mteb.encoder_interface import Encoder, EncoderWithQueryCorpusEncode
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +26,7 @@ class AbsTask(ABC):
         self.is_multilingual = False
         self.is_crosslingual = False
         self.save_suffix = kwargs.get("save_suffix", "")
+        self.embedder_rerank = kwargs.get("embedder_rerank", None)
 
         self.seed = seed
         random.seed(self.seed)

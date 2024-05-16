@@ -9,9 +9,9 @@ from typing import Any, Callable, Dict
 import numpy as np
 from pydantic import BaseModel, field_validator
 
-from mteb.abstasks import AbsTask
-from mteb.abstasks.languages import LanguageScripts
-from mteb.abstasks.TaskMetadata import (
+from spider.lib.eval.mteb.abstasks import AbsTask
+from spider.lib.eval.mteb.abstasks.languages import LanguageScripts
+from spider.lib.eval.mteb.abstasks.TaskMetadata import (
     ISO_LANGUAGE,
     ISO_LANGUAGE_SCRIPT,
     HFSubset,
@@ -86,7 +86,7 @@ class MTEBResults(BaseModel):
         return MTEBResults(
             dataset_revision=task.metadata.dataset["revision"],
             task_name=task.metadata.name,
-            mteb_version=version("mteb"),
+            mteb_version="1.10.3",
             scores=flat_scores,
         )
 

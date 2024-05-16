@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from mteb.abstasks.AbsTaskClusteringFast import AbsTaskClusteringFast, convert_to_fast
-from mteb.abstasks.TaskMetadata import TaskMetadata
+from spider.lib.eval.mteb.abstasks.AbsTaskClusteringFast import AbsTaskClusteringFast, convert_to_fast
+from spider.lib.eval.mteb.abstasks.TaskMetadata import TaskMetadata
 
 
 class TenKGnadClusteringS2S(AbsTaskClusteringFast):

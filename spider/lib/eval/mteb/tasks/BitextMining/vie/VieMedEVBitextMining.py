@@ -4,8 +4,8 @@ import random
 
 import datasets
 
-from mteb.abstasks import AbsTaskBitextMining
-from mteb.abstasks.TaskMetadata import TaskMetadata
+from spider.lib.eval.mteb.abstasks import AbsTaskBitextMining
+from spider.lib.eval.mteb.abstasks.TaskMetadata import TaskMetadata
 
 TEST_SAMPLES = 2048
 

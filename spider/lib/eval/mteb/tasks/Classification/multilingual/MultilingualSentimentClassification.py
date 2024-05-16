@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from mteb.abstasks import AbsTaskClassification, MultilingualTask, TaskMetadata
+from spider.lib.eval.mteb.abstasks import AbsTaskClassification, MultilingualTask, TaskMetadata
 
 _LANGUAGES = {
     "urd": ["urd-Arab"],

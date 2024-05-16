@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from mteb.abstasks.AbsTaskPairClassification import AbsTaskPairClassification
-from mteb.abstasks.TaskMetadata import TaskMetadata
+from spider.lib.eval.mteb.abstasks.AbsTaskPairClassification import AbsTaskPairClassification
+from spider.lib.eval.mteb.abstasks.TaskMetadata import TaskMetadata
 
 
 class KlueNLI(AbsTaskPairClassification):

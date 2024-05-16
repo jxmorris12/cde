@@ -1,8 +1,8 @@
 # SuperLIM tasks
 from __future__ import annotations
 
-from mteb.abstasks import AbsTaskClassification
-from mteb.abstasks.TaskMetadata import TaskMetadata
+from spider.lib.eval.mteb.abstasks import AbsTaskClassification
+from spider.lib.eval.mteb.abstasks.TaskMetadata import TaskMetadata
 
 
 class DalajClassification(AbsTaskClassification):

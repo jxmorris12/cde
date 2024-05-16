@@ -2,7 +2,7 @@ from typing import Dict, List
 
 import datasets
 
-from mteb.abstasks import AbsTaskRetrieval, CrosslingualTask, TaskMetadata
+from spider.lib.eval.mteb.abstasks import AbsTaskRetrieval, CrosslingualTask, TaskMetadata
 
 _LANGUAGES = {
     "wmt19.de.fr": ["deu-Latn", "fra-Latn"],

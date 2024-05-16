@@ -14,8 +14,8 @@ import transformers
 
 from spider.lib.dist import gather, get_rank, get_world_size
 from spider.lib.embed import embed_with_cache
-from spider.lib.tensor import forward_batched
 from spider.lib.misc import tqdm_if_main_worker
+from spider.lib.tensor import forward_batched
 
 
 MtebDataset = Any # Weird import error so we fake the class name for typing.
@@ -187,6 +187,7 @@ class RerankHelper:
         for j, query_id in tqdm_if_main_worker(
             enumerate(query_keys), total=num_eval_queries, desc=f"[{self.name}]"):
             all_topk_docs = sorted(results[query_id].items(), key=lambda item: item[1], reverse=True)
+            breakpoint() # TODO (Jxm) : Check that all-topk-docs looks right...
             for doc_j, (doc_id, _) in enumerate(all_topk_docs):
                 doc_id_to_key[query_id][doc_j] = doc_id
 
@@ -307,14 +308,17 @@ class RerankHelper:
         return rerank_results_biencoder
     
 
-def get_reranking_results(data_path: str, split: str, model_name: str) -> Dict:
+def get_reranking_results(data_path: str, split: str, model_name: str,
+                            hf_data_loader = None) -> Dict:
     """Reranks dataset at `data_path` using model with name `model_name`."""
+    from spider.lib.eval.mteb import HFDataLoader, RetrievalEvaluator
     # Reranking adapted from here.
     # https://github.com/embeddings-benchmark/mteb/blob/0c67d969b8e34ccf94286c3e2758c7a8d0943e81/mteb/evaluation/evaluators/RetrievalEvaluator.py#L189
-    from mteb import HFDataLoader, RetrievalEvaluator
 
     print("[get_reranking_results] Loading:", data_path)
-    corpus, queries, _qrels = HFDataLoader(data_folder=data_path, streaming=False, keep_in_memory=False).load(split=split)
+    if hf_data_loader is None:
+        hf_data_loader = HFDataLoader(data_folder=data_path, streaming=False, keep_in_memory=False)
+    corpus, queries, _qrels = hf_data_loader.load(split=split)
     retriever = RetrievalEvaluator(
         None,
         score_function="dot",

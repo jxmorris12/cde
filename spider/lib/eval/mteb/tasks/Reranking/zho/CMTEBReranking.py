@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from mteb.abstasks.AbsTaskReranking import AbsTaskReranking
-from mteb.abstasks.TaskMetadata import TaskMetadata
+from spider.lib.eval.mteb.abstasks.AbsTaskReranking import AbsTaskReranking
+from spider.lib.eval.mteb.abstasks.TaskMetadata import TaskMetadata
 
 
 class T2Reranking(AbsTaskReranking):

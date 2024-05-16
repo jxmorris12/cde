@@ -4,8 +4,6 @@ import json
 import logging
 import os
 import pathlib
-import traceback
-from datetime import datetime
 from importlib.metadata import version
 from time import time
 from typing import List, Union
@@ -279,60 +277,60 @@ class MTEB:
                     del self.tasks[0]
                     continue
 
-            try:
-                task_eval_splits = (
-                    eval_splits
-                    if eval_splits is not None
-                    else task.metadata_dict.get("eval_splits", [])
+            # try:
+            task_eval_splits = (
+                eval_splits
+                if eval_splits is not None
+                else task.metadata_dict.get("eval_splits", [])
+            )
+
+            # load data
+            logger.info(f"Loading dataset for {task.metadata_dict['name']}")
+            task.check_if_dataset_is_superseeded()
+            task.load_data(eval_splits=task_eval_splits, **kwargs)
+
+            # run evaluation
+            task_results = {
+                "mteb_version": "1.10.3",  # noqa: F405
+                "dataset_revision": task.metadata_dict["dataset"].get(
+                    "revision", None
+                ),
+                "mteb_dataset_name": task.metadata_dict["name"],
+            }
+            for split in task_eval_splits:
+                tick = time()
+                results = task.evaluate(
+                    model, split, output_folder=output_folder, **kwargs
                 )
-
-                # load data
-                logger.info(f"Loading dataset for {task.metadata_dict['name']}")
-                task.check_if_dataset_is_superseeded()
-                task.load_data(eval_splits=task_eval_splits, **kwargs)
-
-                # run evaluation
-                task_results = {
-                    "mteb_version": version("mteb"),  # noqa: F405
-                    "dataset_revision": task.metadata_dict["dataset"].get(
-                        "revision", None
-                    ),
-                    "mteb_dataset_name": task.metadata_dict["name"],
-                }
-                for split in task_eval_splits:
-                    tick = time()
-                    results = task.evaluate(
-                        model, split, output_folder=output_folder, **kwargs
-                    )
-                    tock = time()
-                    logger.info(
-                        f"Evaluation for {task.metadata_dict['name']} on {split} took {tock - tick:.2f} seconds"
-                    )
-                    results["evaluation_time"] = round(tock - tick, 2)
-                    task_results[split] = results
-                    if verbosity >= 1:
-                        logger.info(f"Scores: {results}")
-
-                # save results
-                if output_folder is not None:
-                    with open(save_path, "w") as f_out:
-                        json.dump(task_results, f_out, indent=2, sort_keys=True)
-
-                evaluation_results[task.metadata_dict["name"]] = task_results
-
-            except Exception as e:
-                logger.error(
-                    f"Error while evaluating {task.metadata_dict['name']}: {e}"
+                tock = time()
+                logger.info(
+                    f"Evaluation for {task.metadata_dict['name']} on {split} took {tock - tick:.2f} seconds"
                 )
-                if raise_error:
-                    raise e
-                logger.error(
-                    f"Please check all the error logs at: {self.err_logs_path}"
-                )
-                with open(self.err_logs_path, "a") as f_out:
-                    f_out.write(f"{datetime.now()} >>> {task.metadata_dict['name']}\n")
-                    f_out.write(traceback.format_exc())
-                    f_out.write("\n\n")
+                results["evaluation_time"] = round(tock - tick, 2)
+                task_results[split] = results
+                if verbosity >= 1:
+                    logger.info(f"Scores: {results}")
+
+            # save results
+            if output_folder is not None:
+                with open(save_path, "w") as f_out:
+                    json.dump(task_results, f_out, indent=2, sort_keys=True)
+
+            evaluation_results[task.metadata_dict["name"]] = task_results
+
+            # except Exception as e:
+            #     logger.error(
+            #         f"Error while evaluating {task.metadata_dict['name']}: {e}"
+            #     )
+            #     if raise_error:
+            #         raise e
+            #     logger.error(
+            #         f"Please check all the error logs at: {self.err_logs_path}"
+            #     )
+            #     with open(self.err_logs_path, "a") as f_out:
+            #         f_out.write(f"{datetime.now()} >>> {task.metadata_dict['name']}\n")
+            #         f_out.write(traceback.format_exc())
+            #         f_out.write("\n\n")
 
             # empty memory
             del self.tasks[0]

@@ -1,4 +1,4 @@
-from mteb.abstasks import AbsTaskRetrieval, TaskMetadata
+from spider.lib.eval.mteb.abstasks import AbsTaskRetrieval, TaskMetadata
 
 
 class DanFever(AbsTaskRetrieval):

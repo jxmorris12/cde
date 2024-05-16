@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from mteb.abstasks.AbsTaskClustering import AbsTaskClustering
-from mteb.abstasks.AbsTaskClusteringFast import clustering_downsample
-from mteb.abstasks.TaskMetadata import TaskMetadata
+from spider.lib.eval.mteb.abstasks.AbsTaskClustering import AbsTaskClustering
+from spider.lib.eval.mteb.abstasks.AbsTaskClusteringFast import clustering_downsample
+from spider.lib.eval.mteb.abstasks.TaskMetadata import TaskMetadata
 
 
 class BlurbsClusteringS2S(AbsTaskClustering):

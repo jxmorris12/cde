@@ -17,7 +17,7 @@ from pathlib import Path
 
 from sentence_transformers import SentenceTransformer
 
-from mteb import MTEB
+from spider.lib.eval.mteb import MTEB
 
 logging.basicConfig(level=logging.WARNING)
 logger = logging.getLogger(__name__)

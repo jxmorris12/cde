@@ -8,8 +8,8 @@ from spider.lib.embed import DenseEncoder
 from spider.lib.model_configs import MODEL_FOLDER_DICT, ARGS_STR_DICT
 from spider.lib.utils import analyze_utils
 
-from mteb import MTEB
-from mteb.evaluation.evaluators import cos_sim
+from spider.lib.eval.mteb import MTEB
+from spider.lib.eval.mteb.evaluation.evaluators import cos_sim
 
 TASK_LIST_RETRIEVAL = [
     "ArguAna",
@@ -44,23 +44,6 @@ TASK_LIST_RETRIEVAL = [
 
 # TASK_LIST_RETRIEVAL = ["QuoraRetrieval"]
 
-
-# TODO: Support two-stage models.
-
-# class TwoStageModel():
-#     def __init__(self, first_stage_model, second_stage_model):
-#         self.first
-#     def encode_queries(self, sentences: list[str], **kwargs) -> torch.Tensor:
-#         ??
-#     def encode_corpus(self, sentences: list[str], **kwargs) -> torch.Tensor:
-#         """
-#         Returns a list of embeddings for the given sentences.
-#         Args:
-#             sentences: List of sentences to encode
-#         Returns:
-#             List of embeddings for the given sentences
-#         """
-#         pass
 
 def parse_args() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Process model key")

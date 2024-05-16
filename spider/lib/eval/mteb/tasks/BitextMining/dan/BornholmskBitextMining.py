@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from mteb.abstasks import AbsTaskBitextMining
-from mteb.abstasks.TaskMetadata import TaskMetadata
+from spider.lib.eval.mteb.abstasks import AbsTaskBitextMining
+from spider.lib.eval.mteb.abstasks.TaskMetadata import TaskMetadata
 
 
 class BornholmBitextMining(AbsTaskBitextMining):

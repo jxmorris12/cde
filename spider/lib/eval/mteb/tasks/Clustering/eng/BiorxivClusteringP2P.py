@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from mteb.abstasks.AbsTaskClustering import AbsTaskClustering
-from mteb.abstasks.TaskMetadata import TaskMetadata
+from spider.lib.eval.mteb.abstasks.AbsTaskClustering import AbsTaskClustering
+from spider.lib.eval.mteb.abstasks.TaskMetadata import TaskMetadata
 
 
 class BiorxivClusteringP2P(AbsTaskClustering):

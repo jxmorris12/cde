@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from mteb.abstasks import AbsTaskSummarization
-from mteb.abstasks.TaskMetadata import TaskMetadata
+from spider.lib.eval.mteb.abstasks import AbsTaskSummarization
+from spider.lib.eval.mteb.abstasks.TaskMetadata import TaskMetadata
 
 
 class SummEvalFrSummarization(AbsTaskSummarization):

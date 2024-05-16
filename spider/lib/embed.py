@@ -19,6 +19,38 @@ from spider.lib.tensor import (
 )
 
 
+def embed_dataloader(encoder, data_loader, show_progress_bar: bool = False, convert_to_tensor: bool = True) -> List[torch.Tensor]:
+    encoded_embeds = []
+    pbar = tqdm_if_main_worker(
+        data_loader, desc=f"Encoding {col}", 
+        disable=(not show_progress_bar)
+    )
+    embed_device = ("cuda" if torch.cuda.is_available() else "cpu")
+    for batch_dict in pbar:
+        batch_dict = move_to_cuda(batch_dict)
+        with torch.autocast(embed_device, dtype=torch.bfloat16):
+            outputs = encoder(**batch_dict)
+        if hasattr(outputs, 'pooler_output'):
+            embeds = outputs.pooler_output
+        elif hasattr(outputs, 'last_hidden_state'):
+            embeds = mean_pool(
+                hidden_states=outputs.last_hidden_state,
+                attention_mask=batch_dict['attention_mask']
+            )
+        else:
+            # already pooled
+            embeds = outputs
+        embeds = torch.nn.functional.normalize(embeds, p=2, dim=-1)
+        encoded_embeds.append(embeds)
+        
+    if convert_to_tensor:
+        return torch.cat(encoded_embeds, dim=0)
+    else:
+        encoded_embeds = [embeds.cpu().numpy() for embeds in encoded_embeds]
+        output_array = np.concatenate(encoded_embeds, axis=0)
+        return output_array
+
+
 def move_to_cuda(sample):
     if len(sample) == 0:
         return {}
@@ -109,25 +141,13 @@ class DenseEncoder(torch.nn.Module):
         return self.encode(
             dataset=query_list, **kwargs, prefix=self.query_prefix
         )
-    
-    @torch.no_grad()
-    def encode(
-            self, 
-            dataset: Union[list[str], datasets.Dataset], 
-            col: str = "text", 
-            batch_size: int = 256, 
-            prefix: str = "", 
-            show_progress_bar: bool = True,
-            convert_to_tensor: bool = False,
-        ) -> Union[torch.Tensor, np.ndarray]:
-        """ Returns a list of embeddings for the given sentences.
-        Args:
-            sentences (`List[str]`): List of sentences to encode
-            batch_size (`int`): Batch size for the encoding
 
-        Returns:
-            `List[np.ndarray]` or `List[tensor]`: List of embeddings for the given sentences
-        """
+    def _create_dataloader(self, 
+                           dataset: Union[list[str], datasets.Dataset], 
+                           col: str,
+                           prefix: str,
+                           batch_size: int,
+                            ) -> torch.utils.data.DataLoader:
         if isinstance(dataset, list):
             if isinstance(dataset[0], str):
                 dataset = datasets.Dataset.from_dict({ col: dataset })
@@ -148,7 +168,7 @@ class DenseEncoder(torch.nn.Module):
         effective_batch_size = (batch_size * max(1, self.gpu_count))
         max_num_batches = int(math.ceil(len(dataset) / effective_batch_size))
         num_workers = min(max_num_batches, max(1, self.gpu_count) * 4)
-        data_loader = torch.utils.data.DataLoader(
+        return torch.utils.data.DataLoader(
             dataset,
             batch_size=effective_batch_size,
             shuffle=False,
@@ -158,40 +178,137 @@ class DenseEncoder(torch.nn.Module):
             persistent_workers=False,
             pin_memory=True
         )
+    
+    @torch.no_grad()
+    def encode(
+            self, 
+            dataset: Union[list[str], datasets.Dataset], 
+            col: str = "text", 
+            batch_size: int = 256, 
+            prefix: str = "", 
+            show_progress_bar: bool = True,
+            convert_to_tensor: bool = False,
+        ) -> Union[torch.Tensor, np.ndarray]:
+        """ Returns a list of embeddings for the given sentences.
+        Args:
+            sentences (`List[str]`): List of sentences to encode
+            batch_size (`int`): Batch size for the encoding
+
+        Returns:
+            `List[np.ndarray]` or `List[tensor]`: List of embeddings for the given sentences
+        """
+        data_loader = self._create_dataloader(
+            dataset=dataset,
+            col=col,
+            batch_size=batch_size,
+            prefix=prefix,
+        )
         self._consider_putting_model_on_device()
 
-        encoded_embeds = []
-        pbar = tqdm_if_main_worker(
-            data_loader, desc=f"Encoding {col}", 
-            disable=((dataset.num_rows < 128) or (not show_progress_bar))
+        show_progress_bar = (dataset.num_rows >= 128) and show_progress_bar
+        encoded_embeds = embed_dataloader(
+            self.encoder,
+            data_loader, 
+            convert_to_tensor=convert_to_tensor,
+            show_progress_bar=show_progress_bar
         )
-        embed_device = ("cuda" if self.gpu_count else "cpu")
-        for batch_dict in pbar:
-            batch_dict = move_to_cuda(batch_dict)
-            with torch.autocast(embed_device, dtype=torch.bfloat16):
-                outputs = self.encoder(**batch_dict)
-            if hasattr(outputs, 'pooler_output'):
-                embeds = outputs.pooler_output
-            elif hasattr(outputs, 'last_hidden_state'):
-                embeds = mean_pool(
-                    hidden_states=outputs.last_hidden_state,
-                    attention_mask=batch_dict['attention_mask']
-                )
-            else:
-                # already pooled
-                embeds = outputs
-            embeds = torch.nn.functional.normalize(embeds, p=2, dim=-1)
-            encoded_embeds.append(embeds)
-
         num_cleaned_cache_files = dataset.cleanup_cache_files()
         if num_cleaned_cache_files: 
             print(f"cleaned {num_cleaned_cache_files} files")
-        if convert_to_tensor:
-            return torch.cat(encoded_embeds, dim=0)
-        else:
-            encoded_embeds = [embeds.cpu().numpy() for embeds in encoded_embeds]
-            output_array = np.concatenate(encoded_embeds, axis=0)
-            return output_array
+
+        return encoded_embeds
+
+
+class TwoStageDenseEncoder(DenseEncoder):
+    def _encode_with_neighbors(
+            self, 
+            text_list: List[str], 
+            neighbors_lists: List[List[str]],
+            col: str = "text", 
+            batch_size: int = 256, 
+            prefix: str = "",
+            show_progress_bar: bool = True,
+            convert_to_tensor: bool = True,
+        ) -> np.ndarray:
+
+        # TODO: track/manage number somehow?
+        all_neighbors = [el for el_list in neighbors_lists for el in el_list]
+        first_stage_dataloader = self._create_dataloader(
+            dataset=all_neighbors,
+            col=col,
+            batch_size=batch_size,
+            prefix=prefix,
+        )
+        dataset_embeddings = embed_dataloader(
+            self.encoder.first_stage_model,
+            first_stage_dataloader, 
+            convert_to_tensor=convert_to_tensor,
+            show_progress_bar=show_progress_bar,
+        )
+        # TODO: reshape here
+        second_stage_dataloader = self._create_dataloader(
+            dataset=text_list,
+            col=col,
+            batch_size=batch_size,
+            prefix=prefix,
+        )
+
+        # TODO: use dataset_embeddings in batches? zip into dataloader? idk.
+        output_embeddings = embed_dataloader(
+            self.encoder.second_stage_model,
+            second_stage_dataloader, 
+            convert_to_tensor=convert_to_tensor,
+            show_progress_bar=show_progress_bar,
+        )
+        return output_embeddings
+
+    def encode_queries(
+            self, 
+            query_list, 
+            query_ids_list, 
+            full_corpus,
+            rerank_results: Dict, 
+            col: str = "text", 
+            batch_size: int = 256, 
+            prefix: str = "",
+            show_progress_bar: bool = True,
+            convert_to_tensor: bool = True,
+        ) -> np.ndarray:
+        neighbors_ids_lists = [rerank_results[q] for q in query_ids_list]
+        neighbors_lists = [[full_corpus[id] for id in id_list] for id_list in neighbors_ids_lists]
+        return self._encode_with_neighbors(
+            query_list, 
+            neighbors_lists, 
+            col=col, 
+            batch_size=batch_size,
+            prefix=prefix,
+            show_progress_bar=show_progress_bar,
+            convert_to_tensor=convert_to_tensor,
+        )
+    
+    def encode_corpus(
+            self, 
+            corpus_list, 
+            corpus_ids_list, 
+            full_corpus, 
+            rerank_results, 
+            col: str = "text", 
+            batch_size: int = 256, 
+            prefix: str = "",
+            show_progress_bar: bool = True,
+            convert_to_tensor: bool = True,
+        ) -> np.ndarray:
+        neighbors_ids_lists = [rerank_results[q] for q in corpus_ids_list]
+        neighbors_lists = [[full_corpus[id] for id in id_list] for id_list in neighbors_ids_lists]
+        return self._encode_with_neighbors(
+            corpus_list,
+            neighbors_lists,
+            col=col, 
+            batch_size=batch_size,
+            prefix=prefix,
+            show_progress_bar=show_progress_bar,
+            convert_to_tensor=convert_to_tensor,
+        )
 
 
 def embed_with_cache(
@@ -200,7 +317,8 @@ def embed_with_cache(
         d: datasets.Dataset,              
         col: str, 
         save_to_disk: bool = True,
-        batch_size: int = 4096
+        batch_size: int = 4096,
+        max_seq_length: int = 256,
     ) -> datasets.Dataset:
     embedder_cache_path = model_name.replace('/', '__')
     cache_folder = os.path.join(get_spider_cache_dir(), 'corpus_embeddings', embedder_cache_path)
@@ -219,7 +337,7 @@ def embed_with_cache(
     d_subset = d.remove_columns(all_other_colums)
 
     print(f"[embed_with_cache] encoding {len(d)} with batch size {batch_size}")
-    model = DenseEncoder(model_name, max_seq_length=128)
+    model = DenseEncoder(model_name, max_seq_length=max_seq_length)
     embeddings = model.encode(d_subset, col, batch_size=batch_size)
 
     print(f"[embed_with_cache] creating datasets")

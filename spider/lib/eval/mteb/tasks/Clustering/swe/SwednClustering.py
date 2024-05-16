@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import datasets
 
-from mteb.abstasks import TaskMetadata
-from mteb.abstasks.AbsTaskClusteringFast import AbsTaskClusteringFast
+from spider.lib.eval.mteb.abstasks import TaskMetadata
+from spider.lib.eval.mteb.abstasks.AbsTaskClusteringFast import AbsTaskClusteringFast
 
 
 def dataset_transform(self):

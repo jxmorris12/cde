@@ -2,7 +2,7 @@ from typing import Dict, List
 
 import datasets
 
-from mteb.abstasks import AbsTaskRetrieval, CrosslingualTask, TaskMetadata
+from spider.lib.eval.mteb.abstasks import AbsTaskRetrieval, CrosslingualTask, TaskMetadata
 
 _LANGUAGES = {
     "mlqa.ar.ar": ["ara-Arab", "ara-Arab"],

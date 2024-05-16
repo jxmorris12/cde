@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import datasets
 
-from mteb.abstasks import MultilingualTask
-from mteb.abstasks.AbsTaskRetrieval import AbsTaskRetrieval
-from mteb.abstasks.TaskMetadata import TaskMetadata
+from spider.lib.eval.mteb.abstasks import MultilingualTask
+from spider.lib.eval.mteb.abstasks.AbsTaskRetrieval import AbsTaskRetrieval
+from spider.lib.eval.mteb.abstasks.TaskMetadata import TaskMetadata
 
 _LANGS = ["python", "javascript", "go", "ruby", "java", "php"]
 

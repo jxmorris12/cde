@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from mteb.abstasks.AbsTaskClusteringFast import AbsTaskClusteringFast
-from mteb.abstasks.TaskMetadata import TaskMetadata
+from spider.lib.eval.mteb.abstasks.AbsTaskClusteringFast import AbsTaskClusteringFast
+from spider.lib.eval.mteb.abstasks.TaskMetadata import TaskMetadata
 
 
 def split_labels(record: dict) -> dict:

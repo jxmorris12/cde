@@ -5,8 +5,8 @@ import ast
 import datasets
 import numpy as np
 
-from mteb.abstasks import AbsTaskClassification
-from mteb.abstasks.TaskMetadata import TaskMetadata
+from spider.lib.eval.mteb.abstasks import AbsTaskClassification
+from spider.lib.eval.mteb.abstasks.TaskMetadata import TaskMetadata
 
 
 class IndonesianMongabayConservationClassification(AbsTaskClassification):
