@@ -42,23 +42,38 @@ class FakeDatasetTransformer(torch.nn.Module):
           self.config = FakeConfig()
           super().__init__()
 
-    def first_stage_model(self, input_ids: torch.Tensor) -> torch.Tensor:
+    def first_stage_model(
+            self, 
+            input_ids: torch.Tensor, 
+            attention_mask: torch.Tensor
+        ) -> torch.Tensor:
         batch_size, seq_length = input_ids.shape
         return torch.randn(
             batch_size, seq_length, self.config.hidden_size, device=input_ids.device)
     
-    def second_stage_model_stage_model(self, input_ids: torch.Tensor) -> torch.Tensor:
+    def second_stage_model(
+            self, 
+            input_ids: torch.Tensor, 
+            attention_mask: torch.Tensor, 
+            dataset_embeddings: torch.Tensor
+        ) -> torch.Tensor:
         batch_size, seq_length = input_ids.shape
         return torch.randn(
             batch_size, seq_length, self.config.hidden_size, device=input_ids.device)
 
-    def forward(self, 
-                input_ids: torch.Tensor, 
-                attention_mask: torch.Tensor, 
-                dataset_input_ids: Optional[torch.Tensor],
-                dataset_attention_mask: Optional[torch.Tensor],
+    def forward(
+            self, 
+            input_ids: torch.Tensor, 
+            attention_mask: torch.Tensor, 
+            dataset_input_ids: Optional[torch.Tensor],
+            dataset_attention_mask: Optional[torch.Tensor],
         ) -> FakeModelOutput:
-        first_stage_outputs = self.first_stage_model(input_ids)
+        dataset_embeddings = self.first_stage_model(
+            input_ids=input_ids, 
+            attention_mask=attention_mask
+        )
         return self.second_stage_model(
-            input_ids=input_ids
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            dataset_embeddings=dataset_embeddings,
         )

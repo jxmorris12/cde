@@ -7,6 +7,9 @@ from spider.lib.eval.mteb import MTEB
 from helpers import FakeDatasetTransformer
 
 
+os.environ["TOKENIZERS_PARALLELISM"] = "1"
+
+
 gtr_mn = "sentence-transformers/gtr-t5-base"
 
 

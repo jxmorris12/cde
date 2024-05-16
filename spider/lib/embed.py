@@ -19,7 +19,7 @@ from spider.lib.tensor import (
 )
 
 
-def embed_dataloader(encoder, data_loader, show_progress_bar: bool = False, convert_to_tensor: bool = True) -> List[torch.Tensor]:
+def embed_dataloader(encoder, data_loader, col: str, show_progress_bar: bool = False, convert_to_tensor: bool = True) -> List[torch.Tensor]:
     encoded_embeds = []
     pbar = tqdm_if_main_worker(
         data_loader, desc=f"Encoding {col}", 
@@ -142,12 +142,13 @@ class DenseEncoder(torch.nn.Module):
             dataset=query_list, **kwargs, prefix=self.query_prefix
         )
 
-    def _create_dataloader(self, 
-                           dataset: Union[list[str], datasets.Dataset], 
-                           col: str,
-                           prefix: str,
-                           batch_size: int,
-                            ) -> torch.utils.data.DataLoader:
+    def _create_dataloader(
+            self, 
+            dataset: Union[list[str], datasets.Dataset], 
+            col: str,
+            prefix: str,
+            batch_size: int,
+        ) -> torch.utils.data.DataLoader:
         if isinstance(dataset, list):
             if isinstance(dataset[0], str):
                 dataset = datasets.Dataset.from_dict({ col: dataset })
@@ -209,6 +210,7 @@ class DenseEncoder(torch.nn.Module):
         encoded_embeds = embed_dataloader(
             self.encoder,
             data_loader, 
+            col=col,
             convert_to_tensor=convert_to_tensor,
             show_progress_bar=show_progress_bar
         )
@@ -233,6 +235,7 @@ class TwoStageDenseEncoder(DenseEncoder):
 
         # TODO: track/manage number somehow?
         all_neighbors = [el for el_list in neighbors_lists for el in el_list]
+        assert len(all_neighbors) > 0
         first_stage_dataloader = self._create_dataloader(
             dataset=all_neighbors,
             col=col,
@@ -242,6 +245,7 @@ class TwoStageDenseEncoder(DenseEncoder):
         dataset_embeddings = embed_dataloader(
             self.encoder.first_stage_model,
             first_stage_dataloader, 
+            col=col,
             convert_to_tensor=convert_to_tensor,
             show_progress_bar=show_progress_bar,
         )
@@ -253,10 +257,16 @@ class TwoStageDenseEncoder(DenseEncoder):
             prefix=prefix,
         )
 
+        # TODO: Unify this with RerankHelper so we get access to ensembling and such.
         # TODO: use dataset_embeddings in batches? zip into dataloader? idk.
         output_embeddings = embed_dataloader(
-            self.encoder.second_stage_model,
+            functools.partial(
+                self.encoder.second_stage_model,
+                # TODO: Actually pass the real ones here
+                dataset_embeddings=dataset_embeddings[0, None]
+            ),
             second_stage_dataloader, 
+            col=col,
             convert_to_tensor=convert_to_tensor,
             show_progress_bar=show_progress_bar,
         )
