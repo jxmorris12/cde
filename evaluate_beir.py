@@ -31,7 +31,7 @@ beir_dataset_names = [
 ]
 
 # beir_dataset_names = [ 'msmarco' ]
-beir_dataset_names = [ 'nfcorpus' ]
+# beir_dataset_names = [ 'nfcorpus' ]
 
 cwd = os.path.normpath(
     os.path.dirname(os.path.abspath(__file__)),
@@ -67,7 +67,7 @@ def setup_eval_cmd_parser(parser: argparse.ArgumentParser) -> argparse.ArgumentP
         "--transductive_input_strategy", "--t",
         type=str, 
         default="topk",
-        choices=["fake", "random_corpus", "topk", "topk_pool"],
+        choices=["fake", "random_corpus", "topk", "topk_pool", "null", "null_topk"],
     )
     parser.add_argument(
         "--transductive_n_outputs_ensemble",
@@ -82,6 +82,7 @@ def evaluate_model(args):
     save_folder = os.path.join(root_save_folder, args.model_key)
     os.makedirs(save_folder, exist_ok=True)
     args_dict = dict(vars(args))
+    args_dict.pop("func")
 
     ##########################################
     # Remove defaults from new args to preserve caching
@@ -94,6 +95,7 @@ def evaluate_model(args):
     args_dict["datasets"] = tuple(beir_dataset_names)
     save_hash = md5_hash_kwargs(**args_dict)
     save_path = os.path.join(save_folder, save_hash  + ".json")
+    print(f"checking for cached results at {save_path}")
     if os.path.exists(save_path):
         print(f"found cached results at {save_path}")
         exit()

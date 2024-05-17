@@ -22,6 +22,9 @@ MtebDataset = Any # Weird import error so we fake the class name for typing.
 BeirDataset = Any # Weird import error so we fake the class name for typing.
 
 
+TensorPair = Tuple[torch.Tensor, torch.Tensor]
+
+
 def tokenize_transform(
         examples: Dict[str, List],
         tokenizer,
@@ -63,7 +66,7 @@ class RerankHelper:
         self.max_seq_length = max_seq_length
         self.name = name
 
-        assert transductive_input_strategy in ["fake", "random_corpus", "topk", "topk_pool"]
+        assert transductive_input_strategy in ["fake", "random_corpus", "topk", "topk_pool", "null", "null_topk"]
         self.transductive_input_strategy = transductive_input_strategy
         # Subsample queries from large sets so that we can evaluate
         # in a reasonable amount of time. Also remember this will be
@@ -80,7 +83,8 @@ class RerankHelper:
             input_ids: torch.Tensor, 
             attention_mask: torch.Tensor,
             dataset_input_ids: torch.Tensor,
-            dataset_attention_mask: torch.Tensor
+            dataset_attention_mask: torch.Tensor,
+            **kwargs
         ) -> torch.Tensor:
         rerank_device = ("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
         with torch.autocast(rerank_device, dtype=self.default_dtype):
@@ -91,6 +95,7 @@ class RerankHelper:
                 attention_mask=attention_mask,
                 dataset_input_ids=dataset_input_ids,
                 dataset_attention_mask=dataset_attention_mask,
+                **kwargs
             )
 
     def _get_dataset_inputs(
@@ -100,7 +105,7 @@ class RerankHelper:
             all_topk_docs: List[Tuple[int, torch.Tensor]], 
             document_inputs: Dict[str, torch.Tensor], 
             top_k: int
-        ) -> Tuple[torch.Tensor, torch.Tensor]:
+        ) -> TensorPair:
         if self.transductive_input_strategy == "fake":
             batch_size = document_inputs["input_ids"].shape[0]
             fake_seq_length = top_k
@@ -240,20 +245,25 @@ class RerankHelper:
                         top_k=top_k,
                     )
                 )
-                # TODO: Cache first-stage outputs here so that things are faster.
+               
+                # TODO: Cache first-stage outputs and reuse between doc and query.
+                null_dataset_embedding_query = self.transductive_input_strategy in ["null", "null_topk"]
                 query_embedding = self._forward_batched(
                     input_ids=query_inputs.input_ids[None],
                     attention_mask=query_inputs.attention_mask[None],
                     dataset_input_ids=dataset_input_ids,
                     dataset_attention_mask=dataset_attention_mask,
+                    null_dataset_embedding=null_dataset_embedding_query,
                 ).flatten()
                 ensemble_query_embedding.append(query_embedding)
                 
+                null_dataset_embedding_document = self.transductive_input_strategy in ["null"]
                 document_embeddings = self._forward_batched(
                     input_ids=document_inputs.input_ids,
                     attention_mask=document_inputs.attention_mask,
                     dataset_input_ids=dataset_input_ids,
                     dataset_attention_mask=dataset_attention_mask,
+                    null_dataset_embedding=null_dataset_embedding_document,
                 )
                 ensemble_document_embeddings.append(document_embeddings)
             
