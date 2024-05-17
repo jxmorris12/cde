@@ -31,6 +31,7 @@ beir_dataset_names = [
 ]
 
 # beir_dataset_names = [ 'msmarco' ]
+beir_dataset_names = [ 'nfcorpus' ]
 
 cwd = os.path.normpath(
     os.path.dirname(os.path.abspath(__file__)),
@@ -68,6 +69,11 @@ def setup_eval_cmd_parser(parser: argparse.ArgumentParser) -> argparse.ArgumentP
         default="topk",
         choices=["fake", "random_corpus", "topk", "topk_pool"],
     )
+    parser.add_argument(
+        "--transductive_n_outputs_ensemble",
+        type=int,
+        default=1
+    )
 
 def evaluate_model(args):
     model_folder = MODEL_FOLDER_DICT[args.model_key]
@@ -81,6 +87,8 @@ def evaluate_model(args):
     # Remove defaults from new args to preserve caching
     if args_dict["transductive_input_strategy"] == "topk":
         args_dict.pop("transductive_input_strategy")
+    if args_dict["transductive_n_outputs_ensemble"] == 1:
+        args_dict.pop("transductive_n_outputs_ensemble")
     ##########################################
 
     args_dict["datasets"] = tuple(beir_dataset_names)
@@ -100,6 +108,7 @@ def evaluate_model(args):
     trainer.args.max_batch_size_fits_in_memory = args.batch_size
     trainer.args.eval_rerank_topk = args.top_k
     trainer.args.transductive_input_strategy = args.transductive_input_strategy
+    trainer.args.transductive_n_outputs_ensemble = args.transductive_n_outputs_ensemble
     results_dict = trainer.evaluate_retrieval_datasets(n=args.total)
     results_dict["_args"] = args_dict
 

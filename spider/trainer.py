@@ -742,6 +742,7 @@ class CustomTrainer(transformers.Trainer):
             batch_size=self.args.max_batch_size_fits_in_memory,
             max_reranking_queries=n,
             name=metric_key_prefix,
+            transductive_n_outputs_ensemble=self.args.transductive_n_outputs_ensemble,
             transductive_input_strategy=self.args.transductive_input_strategy,
         )
 

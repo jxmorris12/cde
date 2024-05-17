@@ -54,7 +54,7 @@ class RerankHelper:
             name: str, 
             transductive_input_strategy: str,
             pooling_factor: int = 1,
-            n_outputs_ensemble: int = 1,
+            transductive_n_outputs_ensemble: int = 1,
             default_dtype = torch.bfloat16,
         ):
         self.model = model
@@ -69,11 +69,11 @@ class RerankHelper:
         # in a reasonable amount of time. Also remember this will be
         # distributed across GPUs. So it's not that bad.
         self.max_reranking_queries = max_reranking_queries
-        self.pooling_factor = pooling_factor
-        self.n_outputs_ensemble = n_outputs_ensemble
+        self.pooling_factor = 4
+        self.transductive_n_outputs_ensemble = transductive_n_outputs_ensemble
         self._pad = lambda t: torch.nn.functional.pad(t, pad=[0, self.max_seq_length - t.shape[-1]], value=self.tokenizer.pad_token_id)
-        self.default_dtype = torch.float16
-        # self.default_dtype = torch.bfloat16
+        # self.default_dtype = torch.float16
+        self.default_dtype = torch.bfloat16
     
     def _forward_batched(
             self, 
@@ -101,7 +101,6 @@ class RerankHelper:
             document_inputs: Dict[str, torch.Tensor], 
             top_k: int
         ) -> Tuple[torch.Tensor, torch.Tensor]:
-        print("-->", self.transductive_input_strategy)
         if self.transductive_input_strategy == "fake":
             batch_size = document_inputs["input_ids"].shape[0]
             fake_seq_length = top_k
@@ -121,6 +120,8 @@ class RerankHelper:
                 self._pad(ids) for ids in corpus[corpus_ids]["input_ids"]])
             dataset_attention_mask = torch.stack([
                 self._pad(ids) for ids in corpus[corpus_ids]["attention_mask"]])
+            dataset_input_ids = dataset_input_ids.to(document_inputs["input_ids"].device)
+            dataset_attention_mask = dataset_attention_mask.to(document_inputs["input_ids"].device)
         elif self.transductive_input_strategy == "topk_pool":
             num_docs_to_pool = self.pooling_factor * top_k
             topk_docs = all_topk_docs[:num_docs_to_pool]
@@ -137,8 +138,6 @@ class RerankHelper:
             dataset_attention_mask = dataset_attention_mask.reshape(
                 (self.pooling_factor, top_k, self.max_seq_length)
             )
-            # if get_rank() == 0: breakpoint()
-            # torch.distributed.barrier()
         else:
             dataset_input_ids = document_inputs.input_ids
             dataset_attention_mask = document_inputs.attention_mask
@@ -205,7 +204,7 @@ class RerankHelper:
                 continue
             ensemble_query_embedding = []
             ensemble_document_embeddings = []
-            for k in range(self.n_outputs_ensemble):
+            for k in range(self.transductive_n_outputs_ensemble):
                 topk_docs = all_topk_docs[k*top_k:(k+1)*top_k]
 
                 # TODO: Enable assertion...
@@ -241,7 +240,7 @@ class RerankHelper:
                         top_k=top_k,
                     )
                 )
-                # TODO: Cache first-stage outputs here so that things are ~30% faster.
+                # TODO: Cache first-stage outputs here so that things are faster.
                 query_embedding = self._forward_batched(
                     input_ids=query_inputs.input_ids[None],
                     attention_mask=query_inputs.attention_mask[None],

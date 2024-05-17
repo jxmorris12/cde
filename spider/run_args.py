@@ -166,6 +166,12 @@ class TrainingArguments(transformers.TrainingArguments):
             "choices": ["fake", "random_corpus", "topk", "topk_pool"],
         }
     )
+    transductive_n_outputs_ensemble: int = field(
+        default=1,
+        metadata={
+            "help": "Number of heads(?) to use, if doing ensembling over top-k outputs"
+        }
+    )
     # https://github.com/huggingface/transformers/blob/e82c1cb78e178519060b9391214727be75a218ca/src/transformers/training_args.py#L121
     output_dir: str = field(
         default="saves",

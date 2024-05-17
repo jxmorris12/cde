@@ -94,21 +94,22 @@ def forward_batched(
         dataset_attention_mask: torch.Tensor,
         batch_size: int,
 ) -> torch.Tensor:
+    # print("forward_batched:", input_ids.shape, "//", dataset_input_ids.shape, dataset_attention_mask.shape)
     if hasattr(model, "module"):
         model = model.module
     
     if hasattr(model, "first_stage_model"):
-        i = 0
-        dataset_embeddings = []
 
         # Support pooling over 3D dataset_input_ids inputs.
         if len(dataset_input_ids.shape) == 2:
             dataset_input_ids = dataset_input_ids[None]
             dataset_attention_mask = dataset_attention_mask[None]
 
+        dataset_embeddings = []
         for j in range(len(dataset_input_ids)):
+            i = 0
             dataset_embeddings_batch = []
-            while i < len(dataset_input_ids):
+            while i < dataset_input_ids.shape[1]:
                 dataset_embeddings_batch.append(
                     model.first_stage_model(
                         input_ids=dataset_input_ids[j][i:i+batch_size],
