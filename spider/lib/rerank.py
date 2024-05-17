@@ -52,7 +52,7 @@ class RerankHelper:
             max_reranking_queries: int, 
             max_seq_length: int, 
             name: str, 
-            fake_dataset_info: bool,
+            transductive_input_strategy: str,
             pooling_factor: int = 1,
             n_outputs_ensemble: int = 1,
             default_dtype = torch.bfloat16,
@@ -62,7 +62,9 @@ class RerankHelper:
         self.batch_size = batch_size
         self.max_seq_length = max_seq_length
         self.name = name
-        self.transductive_input_strategy = ("fake" if fake_dataset_info else "topk")
+
+        assert transductive_input_strategy in ["fake", "random_corpus", "topk", "topk_pool"]
+        self.transductive_input_strategy = transductive_input_strategy
         # Subsample queries from large sets so that we can evaluate
         # in a reasonable amount of time. Also remember this will be
         # distributed across GPUs. So it's not that bad.
@@ -81,15 +83,15 @@ class RerankHelper:
             dataset_attention_mask: torch.Tensor
         ) -> torch.Tensor:
         rerank_device = ("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
-        # with torch.autocast(rerank_device, dtype=self.default_dtype):
-        return forward_batched(
-            model=self.model,
-            batch_size=self.batch_size,
-            input_ids=input_ids,
-            attention_mask=attention_mask,
-            dataset_input_ids=dataset_input_ids,
-            dataset_attention_mask=dataset_attention_mask,
-        )
+        with torch.autocast(rerank_device, dtype=self.default_dtype):
+            return forward_batched(
+                model=self.model,
+                batch_size=self.batch_size,
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                dataset_input_ids=dataset_input_ids,
+                dataset_attention_mask=dataset_attention_mask,
+            )
 
     def _get_dataset_inputs(
             self, 
@@ -99,6 +101,7 @@ class RerankHelper:
             document_inputs: Dict[str, torch.Tensor], 
             top_k: int
         ) -> Tuple[torch.Tensor, torch.Tensor]:
+        print("-->", self.transductive_input_strategy)
         if self.transductive_input_strategy == "fake":
             batch_size = document_inputs["input_ids"].shape[0]
             fake_seq_length = top_k
@@ -126,12 +129,16 @@ class RerankHelper:
             for _, (doc_id, _) in enumerate(topk_docs):
                 dataset_input_ids.append(self._pad(corpus[corpus_idx_dict[doc_id]]["input_ids"]))
                 dataset_attention_mask.append(self._pad(corpus[corpus_idx_dict[doc_id]]["attention_mask"]))
+            dataset_input_ids = torch.stack(dataset_input_ids).to(document_inputs["input_ids"].device)
+            dataset_attention_mask = torch.stack(dataset_attention_mask).to(document_inputs["input_ids"].device)
             dataset_input_ids = dataset_input_ids.reshape(
                 (self.pooling_factor, top_k, self.max_seq_length)
             )
             dataset_attention_mask = dataset_attention_mask.reshape(
                 (self.pooling_factor, top_k, self.max_seq_length)
             )
+            # if get_rank() == 0: breakpoint()
+            # torch.distributed.barrier()
         else:
             dataset_input_ids = document_inputs.input_ids
             dataset_attention_mask = document_inputs.attention_mask
@@ -187,7 +194,6 @@ class RerankHelper:
         for j, query_id in tqdm_if_main_worker(
             enumerate(query_keys), total=num_eval_queries, desc=f"[{self.name}]"):
             all_topk_docs = sorted(results[query_id].items(), key=lambda item: item[1], reverse=True)
-            breakpoint() # TODO (Jxm) : Check that all-topk-docs looks right...
             for doc_j, (doc_id, _) in enumerate(all_topk_docs):
                 doc_id_to_key[query_id][doc_j] = doc_id
 

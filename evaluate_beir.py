@@ -62,6 +62,12 @@ def setup_eval_cmd_parser(parser: argparse.ArgumentParser) -> argparse.ArgumentP
         type=int, 
         default=512,
     )
+    parser.add_argument(
+        "--transductive_input_strategy", "--t",
+        type=str, 
+        default="topk",
+        choices=["fake", "random_corpus", "topk", "topk_pool"],
+    )
 
 def evaluate_model(args):
     model_folder = MODEL_FOLDER_DICT[args.model_key]
@@ -69,7 +75,14 @@ def evaluate_model(args):
 
     save_folder = os.path.join(root_save_folder, args.model_key)
     os.makedirs(save_folder, exist_ok=True)
-    args_dict = vars(args)
+    args_dict = dict(vars(args))
+
+    ##########################################
+    # Remove defaults from new args to preserve caching
+    if args_dict["transductive_input_strategy"] == "topk":
+        args_dict.pop("transductive_input_strategy")
+    ##########################################
+
     args_dict["datasets"] = tuple(beir_dataset_names)
     save_hash = md5_hash_kwargs(**args_dict)
     save_path = os.path.join(save_folder, save_hash  + ".json")
@@ -86,6 +99,7 @@ def evaluate_model(args):
     trainer.model.eval()
     trainer.args.max_batch_size_fits_in_memory = args.batch_size
     trainer.args.eval_rerank_topk = args.top_k
+    trainer.args.transductive_input_strategy = args.transductive_input_strategy
     results_dict = trainer.evaluate_retrieval_datasets(n=args.total)
     results_dict["_args"] = args_dict
 
@@ -105,7 +119,7 @@ def print_results(args):
         for k, v in all_jsons[i]["_args"].items():
             all_jsons[i][k] = v
     df = pd.DataFrame(all_jsons)
-    df = df[df["top_k"] == 1024].reset_index()
+    df = df[df["top_k"] == 256].reset_index()
     df = df[df["total"] == 1024].reset_index()
     df = df.set_index("model_key")
     df = df[[c for c in df.columns if c.endswith("NDCG@10")]]

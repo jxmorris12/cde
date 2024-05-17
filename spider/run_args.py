@@ -159,11 +159,11 @@ class DataArguments:
 
 @dataclass
 class TrainingArguments(transformers.TrainingArguments):
-    dataset_info: str = field(
-        default="fake",
+    transductive_input_strategy: str = field(
+        default="topk",
         metadata={
-            "help": "whether to use fake info for dataset (as opposed to our method)",
-            "choices": ["random", "batch", "fake"],
+            "help": "dataset-level info to feed into dataset-conditioned model",
+            "choices": ["fake", "random_corpus", "topk", "topk_pool"],
         }
     )
     # https://github.com/huggingface/transformers/blob/e82c1cb78e178519060b9391214727be75a218ca/src/transformers/training_args.py#L121
