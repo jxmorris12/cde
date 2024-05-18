@@ -29,6 +29,7 @@ def embed_dataloader(encoder, data_loader, col: str, show_progress_bar: bool = F
     for batch_dict in pbar:
         batch_dict = move_to_cuda(batch_dict)
         with torch.autocast(embed_device, dtype=torch.bfloat16):
+            del batch_dict["token_type_ids"]
             outputs = encoder(**batch_dict)
         if hasattr(outputs, 'pooler_output'):
             embeds = outputs.pooler_output
@@ -46,7 +47,7 @@ def embed_dataloader(encoder, data_loader, col: str, show_progress_bar: bool = F
     if convert_to_tensor:
         return torch.cat(encoded_embeds, dim=0)
     else:
-        encoded_embeds = [embeds.cpu().numpy() for embeds in encoded_embeds]
+        encoded_embeds = [embeds.cpu().float().numpy() for embeds in encoded_embeds]
         output_array = np.concatenate(encoded_embeds, axis=0)
         return output_array
 
@@ -119,7 +120,7 @@ class DenseEncoder(torch.nn.Module):
             self.encoder = transformers.AutoModel.from_pretrained(
                 self.model_name_or_path, torch_dtype=torch.float16)
             self.encoder.eval()
-        if hasattr(self.encoder, "encoder"):
+        if hasattr(self.encoder, "decoder") and hasattr(self.encoder, "encoder"):
             print("[DE] taking encoder from an encoder-decoder model")
             self.encoder = self.encoder.encoder
         if self.gpu_count > 0:
@@ -206,7 +207,7 @@ class DenseEncoder(torch.nn.Module):
         )
         self._consider_putting_model_on_device()
 
-        show_progress_bar = (dataset.num_rows >= 128) and show_progress_bar
+        show_progress_bar = (len(dataset) >= 128) and show_progress_bar
         encoded_embeds = embed_dataloader(
             self.encoder,
             data_loader, 
@@ -214,111 +215,112 @@ class DenseEncoder(torch.nn.Module):
             convert_to_tensor=convert_to_tensor,
             show_progress_bar=show_progress_bar
         )
-        num_cleaned_cache_files = dataset.cleanup_cache_files()
-        if num_cleaned_cache_files: 
-            print(f"cleaned {num_cleaned_cache_files} files")
+        if isinstance(dataset, datasets.Dataset):
+            num_cleaned_cache_files = dataset.cleanup_cache_files()
+            if num_cleaned_cache_files: 
+                print(f"cleaned {num_cleaned_cache_files} files")
 
         return encoded_embeds
 
 
-class TwoStageDenseEncoder(DenseEncoder):
-    def _encode_with_neighbors(
-            self, 
-            text_list: List[str], 
-            neighbors_lists: List[List[str]],
-            col: str = "text", 
-            batch_size: int = 256, 
-            prefix: str = "",
-            show_progress_bar: bool = True,
-            convert_to_tensor: bool = True,
-        ) -> np.ndarray:
+# class TwoStageDenseEncoder(DenseEncoder):
+#     def _encode_with_neighbors(
+#             self, 
+#             text_list: List[str], 
+#             neighbors_lists: List[List[str]],
+#             col: str = "text", 
+#             batch_size: int = 256, 
+#             prefix: str = "",
+#             show_progress_bar: bool = True,
+#             convert_to_tensor: bool = True,
+#         ) -> np.ndarray:
 
-        # TODO: track/manage number somehow?
-        all_neighbors = [el for el_list in neighbors_lists for el in el_list]
-        assert len(all_neighbors) > 0
-        first_stage_dataloader = self._create_dataloader(
-            dataset=all_neighbors,
-            col=col,
-            batch_size=batch_size,
-            prefix=prefix,
-        )
-        dataset_embeddings = embed_dataloader(
-            self.encoder.first_stage_model,
-            first_stage_dataloader, 
-            col=col,
-            convert_to_tensor=convert_to_tensor,
-            show_progress_bar=show_progress_bar,
-        )
-        # TODO: reshape here
-        second_stage_dataloader = self._create_dataloader(
-            dataset=text_list,
-            col=col,
-            batch_size=batch_size,
-            prefix=prefix,
-        )
+#         # TODO: track/manage number somehow?
+#         all_neighbors = [el for el_list in neighbors_lists for el in el_list]
+#         assert len(all_neighbors) > 0
+#         first_stage_dataloader = self._create_dataloader(
+#             dataset=all_neighbors,
+#             col=col,
+#             batch_size=batch_size,
+#             prefix=prefix,
+#         )
+#         dataset_embeddings = embed_dataloader(
+#             self.encoder.first_stage_model,
+#             first_stage_dataloader, 
+#             col=col,
+#             convert_to_tensor=convert_to_tensor,
+#             show_progress_bar=show_progress_bar,
+#         )
+#         # TODO: reshape here
+#         second_stage_dataloader = self._create_dataloader(
+#             dataset=text_list,
+#             col=col,
+#             batch_size=batch_size,
+#             prefix=prefix,
+#         )
 
-        # TODO: Unify this with RerankHelper so we get access to ensembling and such.
-        # TODO: use dataset_embeddings in batches? zip into dataloader? idk.
-        output_embeddings = embed_dataloader(
-            functools.partial(
-                self.encoder.second_stage_model,
-                # TODO: Actually pass the real ones here
-                dataset_embeddings=dataset_embeddings[0, None]
-            ),
-            second_stage_dataloader, 
-            col=col,
-            convert_to_tensor=convert_to_tensor,
-            show_progress_bar=show_progress_bar,
-        )
-        return output_embeddings
+#         # TODO: Unify this with RerankHelper so we get access to ensembling and such.
+#         # TODO: use dataset_embeddings in batches? zip into dataloader? idk.
+#         output_embeddings = embed_dataloader(
+#             functools.partial(
+#                 self.encoder.second_stage_model,
+#                 # TODO: Actually pass the real ones here
+#                 dataset_embeddings=dataset_embeddings[0, None]
+#             ),
+#             second_stage_dataloader, 
+#             col=col,
+#             convert_to_tensor=convert_to_tensor,
+#             show_progress_bar=show_progress_bar,
+#         )
+#         return output_embeddings
 
-    def encode_queries(
-            self, 
-            query_list, 
-            query_ids_list, 
-            full_corpus,
-            rerank_results: Dict, 
-            col: str = "text", 
-            batch_size: int = 256, 
-            prefix: str = "",
-            show_progress_bar: bool = True,
-            convert_to_tensor: bool = True,
-        ) -> np.ndarray:
-        neighbors_ids_lists = [rerank_results[q] for q in query_ids_list]
-        neighbors_lists = [[full_corpus[id] for id in id_list] for id_list in neighbors_ids_lists]
-        return self._encode_with_neighbors(
-            query_list, 
-            neighbors_lists, 
-            col=col, 
-            batch_size=batch_size,
-            prefix=prefix,
-            show_progress_bar=show_progress_bar,
-            convert_to_tensor=convert_to_tensor,
-        )
+#     def encode_queries(
+#             self, 
+#             query_list, 
+#             query_ids_list, 
+#             full_corpus,
+#             rerank_results: Dict, 
+#             col: str = "text", 
+#             batch_size: int = 256, 
+#             prefix: str = "",
+#             show_progress_bar: bool = True,
+#             convert_to_tensor: bool = True,
+#         ) -> np.ndarray:
+#         neighbors_ids_lists = [rerank_results[q] for q in query_ids_list]
+#         neighbors_lists = [[full_corpus[id] for id in id_list] for id_list in neighbors_ids_lists]
+#         return self._encode_with_neighbors(
+#             query_list, 
+#             neighbors_lists, 
+#             col=col, 
+#             batch_size=batch_size,
+#             prefix=prefix,
+#             show_progress_bar=show_progress_bar,
+#             convert_to_tensor=convert_to_tensor,
+#         )
     
-    def encode_corpus(
-            self, 
-            corpus_list, 
-            corpus_ids_list, 
-            full_corpus, 
-            rerank_results, 
-            col: str = "text", 
-            batch_size: int = 256, 
-            prefix: str = "",
-            show_progress_bar: bool = True,
-            convert_to_tensor: bool = True,
-        ) -> np.ndarray:
-        neighbors_ids_lists = [rerank_results[q] for q in corpus_ids_list]
-        neighbors_lists = [[full_corpus[id] for id in id_list] for id_list in neighbors_ids_lists]
-        return self._encode_with_neighbors(
-            corpus_list,
-            neighbors_lists,
-            col=col, 
-            batch_size=batch_size,
-            prefix=prefix,
-            show_progress_bar=show_progress_bar,
-            convert_to_tensor=convert_to_tensor,
-        )
+#     def encode_corpus(
+#             self, 
+#             corpus_list, 
+#             corpus_ids_list, 
+#             full_corpus, 
+#             rerank_results, 
+#             col: str = "text", 
+#             batch_size: int = 256, 
+#             prefix: str = "",
+#             show_progress_bar: bool = True,
+#             convert_to_tensor: bool = True,
+#         ) -> np.ndarray:
+#         neighbors_ids_lists = [rerank_results[q] for q in corpus_ids_list]
+#         neighbors_lists = [[full_corpus[id] for id in id_list] for id_list in neighbors_ids_lists]
+#         return self._encode_with_neighbors(
+#             corpus_list,
+#             neighbors_lists,
+#             col=col, 
+#             batch_size=batch_size,
+#             prefix=prefix,
+#             show_progress_bar=show_progress_bar,
+#             convert_to_tensor=convert_to_tensor,
+#         )
 
 
 def embed_with_cache(

@@ -77,7 +77,6 @@ class BiEncoder(transformers.PreTrainedModel):
         del dataset_input_ids
         del dataset_attention_mask
         del token_type_ids
-
         outputs = (
             self.embedder(
                 input_ids=input_ids,
@@ -234,6 +233,7 @@ class DatasetConditionedBiencoder(transformers.PreTrainedModel):
             null_dataset_embedding: bool = False
         ) -> torch.Tensor:
         dataset_embeddings = dataset_embeddings[None, :, :] # (b, d) -> (1, b, d)
+        dataset_embeddings = dataset_embeddings.to(input_ids.device)
 
         if dataset_embeddings.shape[1] > self.config.transductive_corpus_size:
             # If too many dataset embeddings are passed in, just take the first N until
@@ -378,6 +378,7 @@ class DatasetConditionedEncoderDecoder(transformers.PreTrainedModel):
             dataset_embeddings: torch.Tensor
         ) -> torch.Tensor:
         dataset_embeddings = dataset_embeddings[None, :, :] # (b, d) -> (1, b, d)
+        dataset_embeddings = dataset_embeddings.to(input_ids).device
 
         if dataset_embeddings.shape[1] > self.config.transductive_corpus_size:
             # If too many dataset embeddings are passed in, just take the first N until

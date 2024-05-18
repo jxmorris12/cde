@@ -67,12 +67,17 @@ def setup_eval_cmd_parser(parser: argparse.ArgumentParser) -> argparse.ArgumentP
         "--transductive_input_strategy", "--t",
         type=str, 
         default="topk",
-        choices=["fake", "random_corpus", "topk", "topk_pool", "null", "null_topk"],
+        choices=["fake", "dummy", "random_corpus", "topk", "topk_pool", "null", "null_topk"],
     )
     parser.add_argument(
         "--transductive_n_outputs_ensemble",
         type=int,
         default=1
+    )
+    parser.add_argument(
+        "--embedder_rerank",
+        type=str,
+        default="sentence-transformers/gtr-t5-base"
     )
 
 def evaluate_model(args):
@@ -90,6 +95,8 @@ def evaluate_model(args):
         args_dict.pop("transductive_input_strategy")
     if args_dict["transductive_n_outputs_ensemble"] == 1:
         args_dict.pop("transductive_n_outputs_ensemble")
+    if args_dict["embedder_rerank"] == "sentence-transformers/gtr-t5-base":
+        args_dict.pop("embedder_rerank")
     ##########################################
 
     args_dict["datasets"] = tuple(beir_dataset_names)
@@ -100,6 +107,7 @@ def evaluate_model(args):
         print(f"found cached results at {save_path}")
         exit()
 
+    args_str += f' --embedder_rerank "{args.embedder_rerank}"'
     trainer = analyze_utils.load_trainer_from_checkpoint_and_args(
         model_folder=model_folder,
         args_str=args_str,
@@ -115,7 +123,6 @@ def evaluate_model(args):
     results_dict["_args"] = args_dict
 
     if trainer._is_main_worker:
-        del results_dict["_args"]["func"]
         with open(save_path, "w") as json_file:
             json.dump(results_dict, json_file, indent=4)
         print(f"[rank 0] saved {len(results_dict)} results to {save_path}")

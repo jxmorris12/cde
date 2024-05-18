@@ -66,7 +66,7 @@ class RerankHelper:
         self.max_seq_length = max_seq_length
         self.name = name
 
-        assert transductive_input_strategy in ["fake", "random_corpus", "topk", "topk_pool", "null", "null_topk"]
+        assert transductive_input_strategy in ["fake", "dummy", "random_corpus", "topk", "topk_pool", "null", "null_topk"]
         self.transductive_input_strategy = transductive_input_strategy
         # Subsample queries from large sets so that we can evaluate
         # in a reasonable amount of time. Also remember this will be
@@ -207,6 +207,14 @@ class RerankHelper:
             if (j % world_size) != rank:
                 # poor man's distributed sampler
                 continue
+
+            if self.transductive_input_strategy == "dummy":
+                # allow 'dummy' reranking
+                biencoder_score = torch.tensor([v for k,v in all_topk_docs])[:top_k]
+                rerank_scores_biencoder.extend(biencoder_score.tolist())
+                agreement.append(biencoder_score.argmax() == 0)
+                continue
+
             ensemble_query_embedding = []
             ensemble_document_embeddings = []
             for k in range(self.transductive_n_outputs_ensemble):
@@ -269,18 +277,18 @@ class RerankHelper:
             
             ensemble_query_embedding = torch.stack(ensemble_query_embedding, dim=0).mean(0)
             ensemble_document_embeddings = torch.stack(ensemble_document_embeddings, dim=0).mean(0)
+            
             biencoder_score = torch.nn.functional.cosine_similarity(
                 ensemble_query_embedding, 
                 ensemble_document_embeddings
             ).flatten().cpu()
             rerank_scores_biencoder.extend(biencoder_score.tolist())
-
             agreement.append(biencoder_score.argmax() == 0)
         
         # print("agreement perc:", torch.tensor(agreement).float().mean())
         pair_ids = torch.tensor(pair_ids, device=device)
         rerank_scores_biencoder = torch.tensor(rerank_scores_biencoder, device=device)
-
+        # max_length = int(math.ceil(top_k * num_eval_queries / world_size)) * 2
         true_top_k = len(document_inputs.input_ids)
         max_length = int(math.ceil(true_top_k * num_eval_queries / world_size)) * 2
 

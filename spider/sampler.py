@@ -124,6 +124,7 @@ class FixedSubdomainSampler(RandomSampler):
             dataset: NomicDataset, 
             batch_size: int, 
             shuffle: bool, 
+            share_negatives_between_gpus: bool,
             num_samples: Optional[int] = None,
             seed: int = 42,
         ):
@@ -136,6 +137,7 @@ class FixedSubdomainSampler(RandomSampler):
             seed=seed,
         )
         assert hasattr(self.dataset, 'subdomain_idxs')
+        self.share_negatives_between_gpus = share_negatives_between_gpus
         self.batch_assignments = self.dataset.subdomain_idxs
         g = torch.Generator()
         g.manual_seed(self.seed + self.epoch)
@@ -158,7 +160,12 @@ class FixedSubdomainSampler(RandomSampler):
         all_assignments = torch.tensor(
             [v for L in tqdm_if_main_worker(batch_lists, desc="Sampler tensorizing clusters") for v in L])
         
-        effective_batch_size = self.batch_size * self.world_size
+        effective_batch_size = (
+            self.batch_size * self.world_size 
+            if self.share_negatives_between_gpus
+            else 
+            self.batch_size
+        )
         effective_length = len(self.dataset) - (len(self.dataset) % effective_batch_size)
         # 2. Trim off the end (effectively drop_last=True)
         all_assignments = all_assignments[:effective_length]
@@ -201,6 +208,7 @@ class AutoClusterSampler(FixedSubdomainSampler):
             batch_size: int,
             cluster_size: int,
             shuffle: bool,
+            share_negatives_between_gpus: bool,
             model: str,
             num_samples: Optional[int] = None,
             seed: int = 42,
@@ -210,12 +218,14 @@ class AutoClusterSampler(FixedSubdomainSampler):
             batch_size=batch_size, 
             shuffle=False,
             num_samples=num_samples,
+            share_negatives_between_gpus=share_negatives_between_gpus,
             seed=seed,
         )
         self.dataset = dataset
         self.model = model
         self.query_to_doc = query_to_doc
         self.cluster_size = cluster_size
+        self.share_negatives_between_gpus = share_negatives_between_gpus
     
     @property
     def batch_assignments(self) -> Dict[int, List[int]]:
@@ -245,6 +255,7 @@ class AutoClusterWithinDomainSampler(FixedSubdomainSampler):
             batch_size: int,
             cluster_size: int,
             shuffle: bool,
+            share_negatives_between_gpus: bool,
             model: str,
             num_samples: Optional[int] = None,
             seed: int = 42,
@@ -255,11 +266,13 @@ class AutoClusterWithinDomainSampler(FixedSubdomainSampler):
             batch_size=batch_size, 
             shuffle=False,
             num_samples=num_samples,
+            share_negatives_between_gpus=share_negatives_between_gpus,
             seed=seed,
         )
         self.query_to_doc = query_to_doc
         self.batch_size = batch_size
         self.cluster_size = cluster_size
+        self.share_negatives_between_gpus = share_negatives_between_gpus
         self.dataset = dataset
         self.model = model
     
@@ -294,6 +307,7 @@ def get_sampler(
     batch_size: int,
     cluster_size: int,
     shuffle: bool,
+    share_negatives_between_gpus: bool,
     clustering_model: str,
     clustering_query_to_doc: bool = True,
     num_samples: Optional[int] = None,
@@ -312,6 +326,7 @@ def get_sampler(
             dataset=dataset, 
             batch_size=batch_size,
             shuffle=shuffle,
+            share_negatives_between_gpus=share_negatives_between_gpus,
             num_samples=num_samples,
             seed=seed,
         )
@@ -321,6 +336,7 @@ def get_sampler(
             batch_size=batch_size,
             shuffle=shuffle,
             cluster_size=cluster_size,
+            share_negatives_between_gpus=share_negatives_between_gpus,
             query_to_doc=clustering_query_to_doc, 
             model=clustering_model,
             num_samples=num_samples,
@@ -331,6 +347,7 @@ def get_sampler(
             dataset=dataset, 
             batch_size=batch_size,
             shuffle=shuffle,
+            share_negatives_between_gpus=share_negatives_between_gpus,
             cluster_size=cluster_size,
             query_to_doc=clustering_query_to_doc, 
             model=clustering_model,
