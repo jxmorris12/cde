@@ -42,20 +42,24 @@ TASK_LIST_RETRIEVAL = [
     "FEVER",
 ]
 
-TASK_LIST_RETRIEVAL = ["SCIDOCS", "SciFact", "NFCorpus", "TRECCOVID", "Touche2020"] # Small datasets.
-# TASK_LIST_RETRIEVAL = ["QuoraRetrieval"]
+# TASK_LIST_RETRIEVAL = ["SCIDOCS", "SciFact", "NFCorpus", "TRECCOVID", "Touche2020"] # Small datasets.
 # TASK_LIST_RETRIEVAL = ["TRECCOVID"]
 # TASK_LIST_RETRIEVAL = ["FiQA2018"]
 
 
-TASK_LIST_RETRIEVAL = [
-    "FiQA2018", 
-    "SCIDOCS", 
-    "SciFact", 
-    "NFCorpus", 
-    "TRECCOVID", 
-    "Touche2020"
-] # Small datasets.
+# TASK_LIST_RETRIEVAL = [
+#     "ArguAna",
+#     "FiQA2018", 
+#     "NFCorpus", 
+#     "SCIDOCS", 
+#     "SciFact", 
+#     "Touche2020",
+#     "TRECCOVID", 
+# ] # Small datasets.
+
+
+# TASK_LIST_RETRIEVAL = ["QuoraRetrieval"]
+# TASK_LIST_RETRIEVAL = ["NFCorpus"]
 
 def parse_args() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Process model key")
@@ -87,7 +91,7 @@ def main():
         load_from_checkpoint=True,
         return_args=True
     )
-    random.seed(42)
+    trainer.model.eval()
     mteb_encoder = DenseEncoder(
         model_name_or_path=trainer.model.config.embedder,
         # encoder=trainer.model,
@@ -97,7 +101,6 @@ def main():
         document_prefix="search_document: " if data_args.use_prefix else "",
     )
 
-    n_ensemble = 1
     for task_idx, task in enumerate(TASK_LIST_RETRIEVAL):
         print(f"Beginning {task} ({task_idx+1} / {len(TASK_LIST_RETRIEVAL)})")
         evaluation = MTEB(tasks=[task], task_langs=["en"])
@@ -105,29 +108,36 @@ def main():
         evaluation.tasks[0].load_data()
         all_documents = list(evaluation.tasks[0].corpus["test"].values())
         all_dataset_embeddings = []
+        random.seed(51)
         corpus_documents = random.choices(all_documents, k=256)
         corpus_documents = [
-            document.get("title", "") + document.get("text", "")
-            for document in corpus_documents
+            mteb_encoder.document_prefix + '{} {}'.format(doc.get('title', ''), doc['text']).strip() 
+            for doc in corpus_documents
         ]
-        mteb_encoder.encoder = trainer.model.first_stage_model
-        dataset_embeddings = torch.tensor(
-            mteb_encoder.encode_corpus(corpus_documents)
-        )
-        dataset_embeddings /= n_ensemble
-        mteb_encoder._model_is_on_device = False
-        mteb_encoder.encoder = trainer.model.second_stage_model
+        print(corpus_documents[2])
+        trainer.model.first_stage_model.cuda()
+        dataset_inputs = mteb_encoder.tokenizer(
+            corpus_documents,
+            return_tensors="pt",
+            max_length=trainer.model.config.max_seq_length,
+            padding=True,
+            truncation=True,
+        ).to("cuda")
+        with torch.no_grad(), torch.autocast("cuda", dtype=torch.bfloat16):
+            dataset_embeddings = trainer.model.first_stage_model(
+                **dataset_inputs
+            )
         ##################################################
-        mteb_encoder.encoder.forward = functools.partial(
-            mteb_encoder.encoder.forward,
-            dataset_embeddings=dataset_embeddings
-        )
+        mteb_encoder.model_kwargs = {
+            "dataset_embeddings": dataset_embeddings.float().cpu().numpy(),
+            "null_dataset_embedding": False,
+        }
         results = evaluation.run(
             mteb_encoder, 
             output_folder=os.path.join("results_mteb", args.model_key),
-            batch_size=256, 
-            corpus_chunk_size=100_000,
-            verbosity=2
+            batch_size=512, 
+            corpus_chunk_size=500_000, # 1_000_000,
+            verbosity=2,
         )
         print(task)
         print("\t", results)

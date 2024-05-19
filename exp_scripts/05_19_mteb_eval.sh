@@ -1,14 +1,12 @@
 # MODELS=(
-#     "cde"
-#     "cde--supervised-1"
 #     "cde--supervised-2"
 #     "cde--supervised-3"
 # )
 MODELS=(
+    "cde"
+    "cde--supervised-1"
     "cde--no-prefix"
     "cde--no-prefix--supervised-1"
-    "cde--no-prefix--supervised-2"
-    "cde--no-prefix--supervised-3"
 )
 
 for model in "${MODELS[@]}"; do

@@ -151,6 +151,8 @@ class RerankHelper:
             # TODO: Fix so we always have this and don't need to hack like this
             dataset_input_ids = torch.cat([dataset_input_ids, dataset_input_ids], dim=0)[:top_k]
             dataset_attention_mask = torch.cat([dataset_attention_mask, dataset_attention_mask], dim=0)[:top_k]
+        
+        print(self.tokenizer.decode(dataset_input_ids[0], skip_special_tokens=True))
         return dataset_input_ids, dataset_attention_mask
 
     @torch.no_grad
@@ -172,7 +174,10 @@ class RerankHelper:
             tokenizer=self.tokenizer,
             max_length=self.max_seq_length,
         )
-        queries: datasets.Dataset = dataset.queries.map(tokenize_queries_func, batched=True)
+        queries: datasets.Dataset = dataset.queries.map(
+            tokenize_queries_func, 
+            batched=True
+        )
         queries.set_format("pt")
 
         results: Dict[str, Dict[str, float]] = dataset.rerank_results

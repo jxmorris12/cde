@@ -242,8 +242,9 @@ class DatasetConditionedBiencoder(transformers.PreTrainedModel):
             dataset_embeddings: torch.Tensor,
             null_dataset_embedding: bool = False
         ) -> torch.Tensor:
-        dataset_embeddings = dataset_embeddings[None, :, :] # (b, d) -> (1, b, d)
+        dataset_embeddings = torch.tensor(dataset_embeddings)[None, :, :] # (b, d) -> (1, b, d)
         dataset_embeddings = dataset_embeddings.to(input_ids.device)
+        dataset_embeddings = dataset_embeddings.to(torch.float32)
 
         if dataset_embeddings.shape[1] > self.config.transductive_corpus_size:
             # If too many dataset embeddings are passed in, just take the first N until
@@ -253,8 +254,6 @@ class DatasetConditionedBiencoder(transformers.PreTrainedModel):
         batch_size = input_ids.shape[0]
         _, corpus_size, _hidden_dim = dataset_embeddings.shape
         assert _ == 1
-
-        print("shapes:", input_ids.shape, dataset_embeddings.shape)
 
         dataset_embeddings = dataset_embeddings.expand((batch_size, -1, -1)) # -> (b, 4+b, d) # soft_prompt.repeat((len(input_ids), 1, 1))  
         if self.training and self.sequence_dropout_prob > 0.0:
@@ -396,7 +395,7 @@ class DatasetConditionedEncoderDecoder(transformers.PreTrainedModel):
             # If too many dataset embeddings are passed in, just take the first N until
             # we have the proper number.
             dataset_embeddings = dataset_embeddings[:, :self.config.transductive_corpus_size, :]
-        
+                
         batch_size = input_ids.shape[0]
         _, corpus_size, _hidden_dim = dataset_embeddings.shape
         assert _ == 1
