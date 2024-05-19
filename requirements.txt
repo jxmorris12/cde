@@ -3,6 +3,7 @@ beir
 bm25_pt
 datasets
 mteb
+ninja
 optimum
 transformers
 wandb

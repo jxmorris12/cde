@@ -42,11 +42,20 @@ TASK_LIST_RETRIEVAL = [
     "FEVER",
 ]
 
-# TASK_LIST_RETRIEVAL = ["SCIDOCS", "SciFact", "NFCorpus", "TRECCOVID", "Touche2020"] # Small datasets.
+TASK_LIST_RETRIEVAL = ["SCIDOCS", "SciFact", "NFCorpus", "TRECCOVID", "Touche2020"] # Small datasets.
 # TASK_LIST_RETRIEVAL = ["QuoraRetrieval"]
 # TASK_LIST_RETRIEVAL = ["TRECCOVID"]
 # TASK_LIST_RETRIEVAL = ["FiQA2018"]
 
+
+TASK_LIST_RETRIEVAL = [
+    "FiQA2018", 
+    "SCIDOCS", 
+    "SciFact", 
+    "NFCorpus", 
+    "TRECCOVID", 
+    "Touche2020"
+] # Small datasets.
 
 def parse_args() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Process model key")
@@ -72,9 +81,11 @@ def main():
     args = parse_args()
     model_folder = MODEL_FOLDER_DICT[args.model_key]
     args_str = ARGS_STR_DICT[args.model_key]
-    trainer = analyze_utils.load_trainer_from_checkpoint_and_args(
+    trainer, (model_args, data_args, training_args) = analyze_utils.load_trainer_from_checkpoint_and_args(
         model_folder=model_folder,
         args_str=args_str,
+        load_from_checkpoint=True,
+        return_args=True
     )
     random.seed(42)
     mteb_encoder = DenseEncoder(
@@ -82,8 +93,8 @@ def main():
         # encoder=trainer.model,
         encoder=trainer.model.second_stage_model,
         max_seq_length=trainer.model.config.max_seq_length,
-        query_prefix="search_query: ",
-        document_prefix="search_document: ",
+        query_prefix="search_query: " if data_args.use_prefix else "",
+        document_prefix="search_document: " if data_args.use_prefix else "",
     )
 
     n_ensemble = 1
@@ -114,7 +125,7 @@ def main():
         results = evaluation.run(
             mteb_encoder, 
             output_folder=os.path.join("results_mteb", args.model_key),
-            batch_size=64, 
+            batch_size=256, 
             corpus_chunk_size=100_000,
             verbosity=2
         )

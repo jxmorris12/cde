@@ -21,7 +21,8 @@ def load_trainer_from_checkpoint_and_args(
         model_folder: str, 
         args_str: str = "", 
         beir_dataset_names: Optional[List[str]] = None,
-        load_from_checkpoint: bool = True
+        load_from_checkpoint: bool = True,
+        return_args: bool = False
     ):
     torch.compiler.reset()
     torch._dynamo.config.optimize_ddp = False
@@ -124,5 +125,9 @@ def load_trainer_from_checkpoint_and_args(
     if load_from_checkpoint:
         trainer._load_from_checkpoint(checkpoint_path)
     trainer.model.eval()
-    return trainer
+
+    if return_args:
+        return trainer, (model_args, data_args, training_args )
+    else:
+        return trainer
     

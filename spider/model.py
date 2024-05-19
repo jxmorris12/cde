@@ -63,8 +63,8 @@ class BiEncoder(transformers.PreTrainedModel):
             self, 
             input_ids: torch.Tensor,
             attention_mask: torch.Tensor,
-            dataset_input_ids: Optional[torch.Tensor] = None,
-            dataset_attention_mask: Optional[torch.Tensor] = None,
+            # dataset_input_ids: Optional[torch.Tensor] = None,
+            # dataset_attention_mask: Optional[torch.Tensor] = None,
             token_type_ids = None,
         ) -> torch.Tensor:
         """
@@ -74,9 +74,16 @@ class BiEncoder(transformers.PreTrainedModel):
                 [d1, d2, d3, hn1_1, hn1_2, hn2_1, hn2_2, hn3_1, hn3_2]
                 for a corpus with three documents and two hard negatives per document
         """
-        del dataset_input_ids
-        del dataset_attention_mask
+        # del dataset_input_ids
+        # del dataset_attention_mask
         del token_type_ids
+
+        # from spider.lib.dist import get_rank
+        # tokenizer = transformers.AutoTokenizer.from_pretrained("bert-base-uncased")
+        # if get_rank() == 0:
+        #     breakpoint()
+        # torch.distributed.barrier()
+        print("BiEncoder forward", input_ids.shape)
         outputs = (
             self.embedder(
                 input_ids=input_ids,
@@ -135,6 +142,9 @@ class TwoEmbeddersWithMLP(transformers.PreTrainedModel):
     ) -> torch.Tensor:
         batch_size = input_ids.shape[0]
         _corpus_size = dataset_input_ids.shape[0]
+        
+        torch.distributed.barrier()
+
         dataset_backbone_input_embeddings = mean_pool(
             hidden_states=self.backbone(
                 input_ids=dataset_input_ids,
@@ -243,6 +253,8 @@ class DatasetConditionedBiencoder(transformers.PreTrainedModel):
         batch_size = input_ids.shape[0]
         _, corpus_size, _hidden_dim = dataset_embeddings.shape
         assert _ == 1
+
+        print("shapes:", input_ids.shape, dataset_embeddings.shape)
 
         dataset_embeddings = dataset_embeddings.expand((batch_size, -1, -1)) # -> (b, 4+b, d) # soft_prompt.repeat((len(input_ids), 1, 1))  
         if self.training and self.sequence_dropout_prob > 0.0:

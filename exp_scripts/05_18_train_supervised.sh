@@ -1,0 +1,13 @@
+# yes prefix
+# torchrun --nproc_per_node 8 finetune.py --per_device_train_batch_size 256 --per_device_eval_batch_size 256 --bf16 1 --use_wandb 1 --dataset nomic_supervised --sampling_strategy cluster_within_domain --num_train_epochs 3 --learning_rate 2e-5 --embedder nomic-ai/nomic-embed-text-v1-unsupervised --clustering_model gtr_base --clustering_query_to_doc 1 --automatically_deduplicate_documents 1 --automatically_deduplicate_queries 1 --arch transductive --eval_rerank_topk 512 --use_prefix 1 --exp_name 2024-05-18-transductive-2 --num_hard_negatives 7 --lr_scheduler_type linear --ddp_share_negatives_between_gpus 0 --use_gc 1 --max_batch_size_fits_in_memory 128 --warmup_steps 400 --logging_steps 40 --train_cluster_size 224 --save_strategy epoch --save_total_limit 3 --model_state_dict_from_path /data/saves/tti3/2024-05-15-transductive-pretrain-22 --transductive_corpus_size 256 --transductive_sequence_dropout_prob 0.2
+
+# no prefix
+# torchrun --nproc_per_node 8 finetune.py --per_device_train_batch_size 256 --per_device_eval_batch_size 256 --bf16 1 --use_wandb 1 --dataset nomic_supervised --sampling_strategy cluster_within_domain --num_train_epochs 3 --learning_rate 2e-5 --embedder nomic-ai/nomic-embed-text-v1-unsupervised --clustering_model gtr_base --clustering_query_to_doc 1 --automatically_deduplicate_documents 1 --automatically_deduplicate_queries 1 --arch transductive --eval_rerank_topk 512 --use_prefix 0 --exp_name 2024-05-18-transductive-2--no-prefix --num_hard_negatives 7 --lr_scheduler_type linear --ddp_share_negatives_between_gpus 0 --use_gc 1 --max_batch_size_fits_in_memory 128 --warmup_steps 400 --logging_steps 40 --train_cluster_size 224 --save_strategy epoch --save_total_limit 3 --model_state_dict_from_path /data/saves/tti3/2024-05-18-transductive-pretrain-22--no-prefix --transductive_corpus_size 256 --transductive_sequence_dropout_prob 0.2
+
+FLASH_ATTENTION_FORCE_BUILD=TRUE uv pip install --no-cache-dir flash-attn --no-build-isolation git+https://github.com/HazyResearch/flash-attention.git#subdirectory=csrc/rotary git+https://github.com/HazyResearch/flash-attention.git#subdirectory=csrc/layer_norm git+https://github.com/HazyResearch/flash-attention.git#subdirectory=csrc/fused_dense_lib git+https://github.com/HazyResearch/flash-attention.git#subdirectory=csrc/xentropy
+
+python evaluate_mteb.py "transductive-scratch-02-cluster224--2"
+
+python evaluate_mteb.py "transductive-scratch-06-cluster224--2.8"
+
+python evaluate_mteb.py "transductive-scratch-06-cluster224--2.8--supervised"
