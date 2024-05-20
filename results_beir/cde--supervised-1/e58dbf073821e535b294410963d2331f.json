@@ -1,0 +1,34 @@
+{
+    "eval_BeIR/hotpotqa_NDCG@1": 0.7936,
+    "eval_BeIR/hotpotqa_NDCG@5": 0.67311,
+    "eval_BeIR/hotpotqa_NDCG@10": 0.69012,
+    "eval_BeIR/hotpotqa_NDCG@100": 0.70972,
+    "eval_BeIR/hotpotqa_MAP@1": 0.3968,
+    "eval_BeIR/hotpotqa_MAP@5": 0.59634,
+    "eval_BeIR/hotpotqa_MAP@10": 0.60653,
+    "eval_BeIR/hotpotqa_MAP@100": 0.61282,
+    "eval_BeIR/hotpotqa_Recall@1": 0.3968,
+    "eval_BeIR/hotpotqa_Recall@5": 0.66417,
+    "eval_BeIR/hotpotqa_Recall@10": 0.7069,
+    "eval_BeIR/hotpotqa_Recall@100": 0.78036,
+    "eval_BeIR/hotpotqa_P@1": 0.7936,
+    "eval_BeIR/hotpotqa_P@5": 0.26567,
+    "eval_BeIR/hotpotqa_P@10": 0.14138,
+    "eval_BeIR/hotpotqa_P@100": 0.01561,
+    "eval_BeIR/hotpotqa_score_weighted_qrels/mean": 0.4359715894006122,
+    "eval_BeIR/hotpotqa_score_weighted_qrels/sum": 1744.75830078125,
+    "eval_BeIR/hotpotqa_score_weighted_qrels/total": 4002,
+    "NDCG@10/sum": 0.69012,
+    "NDCG@10/mean": 0.69012,
+    "_args": {
+        "command": "run",
+        "model_key": "cde--supervised-1",
+        "top_k": 1024,
+        "batch_size": 1024,
+        "total": 2001,
+        "transductive_input_strategy": "random_corpus__topk__interp",
+        "datasets": [
+            "hotpotqa"
+        ]
+    }
+}

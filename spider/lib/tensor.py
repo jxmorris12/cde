@@ -95,7 +95,7 @@ def forward_batched(
         batch_size: int,
         **second_stage_kwargs,
 ) -> torch.Tensor:
-    print("forward_batched:", input_ids.shape, "//", dataset_input_ids.shape, dataset_attention_mask.shape)
+    # print("forward_batched:", input_ids.shape, "//", dataset_input_ids.shape, dataset_attention_mask.shape)
     dataset_input_ids = dataset_input_ids[:256]
     dataset_attention_mask = dataset_attention_mask[:256]
     if hasattr(model, "module"):

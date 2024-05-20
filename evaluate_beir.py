@@ -31,9 +31,10 @@ beir_dataset_names = [
 ]
 
 # beir_dataset_names = [ 'msmarco' ]
-# beir_dataset_names = [ 'nfcorpus' ]
-# beir_dataset_names = [ 'arguana' ]
-beir_dataset_names = [ 'hotpotqa' ]
+# beir_dataset_names = [ 'nfcorpus', 'arguana' ]
+# beir_dataset_names = [ 'hotpotqa' ]
+# beir_dataset_names = [ 'dbpedia', 'climate-fever', 'fever' ]
+beir_dataset_names = ['arguana']
 
 cwd = os.path.normpath(
     os.path.dirname(os.path.abspath(__file__)),

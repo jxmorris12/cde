@@ -177,7 +177,7 @@ class RerankHelper:
             dataset_input_ids = torch.cat([dataset_input_ids, dataset_input_ids], dim=0)[:top_k]
             dataset_attention_mask = torch.cat([dataset_attention_mask, dataset_attention_mask], dim=0)[:top_k]
         
-        print(self.tokenizer.decode(dataset_input_ids[0], skip_special_tokens=True))
+        # print(self.tokenizer.decode(dataset_input_ids[0], skip_special_tokens=True))
         return dataset_input_ids, dataset_attention_mask
 
     @torch.no_grad

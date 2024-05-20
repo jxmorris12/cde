@@ -10,7 +10,6 @@ import pathlib
 import random
 import yaml
 
-import beir.datasets.data_loader
 import datasets
 import numpy as np
 import pickle
@@ -109,17 +108,14 @@ def load_beir_uncached(dataset: str, split: str, embedder_rerank: str) -> Tuple[
         rerank_results
     """
     transformers.logging.set_verbosity_error()
-    print("[load_beir_uncached] loading dataset uncached", dataset)
-    #### Download msmarco.zip dataset and unzip the dataset
-    url = "https://public.ukp.informatik.tu-darmstadt.de/thakur/BEIR/datasets/{}.zip".format(dataset)
     out_dir = os.path.join(pathlib.Path(__file__).parent.absolute(), "datasets")
-    print("... downloading")
-    data_path = download_url_and_unzip(url, out_dir)
+    data_path = os.path.join(out_dir, dataset)
 
-    print("... loading split", split, "at path", data_path)
+    print(
+        "[load_beir_uncached] loading dataset uncached", 
+        dataset, "... loading split", split
+    )
     ### Load BEIR MSMARCO training dataset, this will be used for query and corpus for reference.
-    corpus, queries, qrels = beir.datasets.data_loader.GenericDataLoader(data_path).load(split=split)
-    # bm25_results = get_bm25_results(dataset=dataset, corpus=corpus, queries=queries)
     print("... getting reranking results")
     from mteb import HFDataLoader
     hf_data_loader = HFDataLoader(
@@ -127,20 +123,13 @@ def load_beir_uncached(dataset: str, split: str, embedder_rerank: str) -> Tuple[
         streaming=False, 
         keep_in_memory=False
     )
+    corpus, queries, qrels = hf_data_loader.load(split=split)
     rerank_results = get_reranking_results(
         data_path=data_path, 
         split=split,
         model_name=embedder_rerank,
         hf_data_loader=hf_data_loader,
     )
-
-    corpus = datasets.Dataset.from_list(
-        [{"id": k, "text": v["text"]} for k,v in corpus.items()])
-    # corpus._fingerprint = md5_hash(f"msmarco_beir_{split}") 
-
-    queries = datasets.Dataset.from_list([{ "id": k, "text": v} for k,v in queries.items()])
-    # queries._fingerprint = md5_hash(f"msmarco_beir_{split}") 
-
     return corpus, queries, qrels, rerank_results
 
 
