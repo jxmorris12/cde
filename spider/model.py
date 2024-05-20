@@ -63,8 +63,8 @@ class BiEncoder(transformers.PreTrainedModel):
             self, 
             input_ids: torch.Tensor,
             attention_mask: torch.Tensor,
-            # dataset_input_ids: Optional[torch.Tensor] = None,
-            # dataset_attention_mask: Optional[torch.Tensor] = None,
+            dataset_input_ids: Optional[torch.Tensor] = None,
+            dataset_attention_mask: Optional[torch.Tensor] = None,
             token_type_ids = None,
         ) -> torch.Tensor:
         """
@@ -83,7 +83,6 @@ class BiEncoder(transformers.PreTrainedModel):
         # if get_rank() == 0:
         #     breakpoint()
         # torch.distributed.barrier()
-        print("BiEncoder forward", input_ids.shape)
         outputs = (
             self.embedder(
                 input_ids=input_ids,
@@ -250,12 +249,13 @@ class DatasetConditionedBiencoder(transformers.PreTrainedModel):
             # If too many dataset embeddings are passed in, just take the first N until
             # we have the proper number.
             dataset_embeddings = dataset_embeddings[:, :self.config.transductive_corpus_size, :]
-        
+        # tok = transformers.AutoTokenizer.from_pretrained("bert-base-uncased")
+        # breakpoint()
         batch_size = input_ids.shape[0]
         _, corpus_size, _hidden_dim = dataset_embeddings.shape
         assert _ == 1
 
-        dataset_embeddings = dataset_embeddings.expand((batch_size, -1, -1)) # -> (b, 4+b, d) # soft_prompt.repeat((len(input_ids), 1, 1))  
+        dataset_embeddings = dataset_embeddings.expand((batch_size, -1, -1)) 
         if self.training and self.sequence_dropout_prob > 0.0:
             sequence_dropout_mask = (
                 torch.rand((batch_size, corpus_size), device=dataset_embeddings.device) < self.sequence_dropout_prob

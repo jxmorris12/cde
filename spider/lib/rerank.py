@@ -5,6 +5,7 @@ import functools
 import heapq
 import logging
 import math
+import os
 
 import datasets
 import random
@@ -78,6 +79,7 @@ class RerankHelper:
         self._pad = lambda t: torch.nn.functional.pad(t, pad=[0, self.max_seq_length - t.shape[-1]], value=self.tokenizer.pad_token_id)
         # self.default_dtype = torch.float16
         self.default_dtype = torch.bfloat16
+        self.dummy_model = None
     
     def _forward_batched(
             self, 
@@ -105,6 +107,7 @@ class RerankHelper:
             corpus: datasets.Dataset, 
             all_topk_docs: List[Tuple[int, torch.Tensor]], 
             document_inputs: Dict[str, torch.Tensor], 
+            tokenize_corpus_func,
             top_k: int
         ) -> TensorPair:
         if self.transductive_input_strategy == "fake":
@@ -122,12 +125,10 @@ class RerankHelper:
             dataset_attention_mask = fake_dataset_attention_mask
         elif self.transductive_input_strategy == "random_corpus":
             corpus_ids = random.choices(range(len(corpus)), k=top_k)
-            dataset_input_ids = torch.stack([
-                self._pad(ids) for ids in corpus[corpus_ids]["input_ids"]])
-            dataset_attention_mask = torch.stack([
-                self._pad(ids) for ids in corpus[corpus_ids]["attention_mask"]])
-            dataset_input_ids = dataset_input_ids.to(document_inputs["input_ids"].device)
-            dataset_attention_mask = dataset_attention_mask.to(document_inputs["input_ids"].device)
+            corpus_inputs = tokenize_corpus_func(corpus[corpus_ids])
+            corpus_inputs = corpus_inputs.to(document_inputs["input_ids"].device)
+            dataset_input_ids = corpus_inputs.input_ids
+            dataset_attention_mask = corpus_inputs.attention_mask
         elif self.transductive_input_strategy == "topk_pool":
             num_docs_to_pool = self.pooling_factor * top_k
             topk_docs = all_topk_docs[:num_docs_to_pool]
@@ -165,7 +166,20 @@ class RerankHelper:
             tokenizer=self.tokenizer,
             max_length=self.max_seq_length,
         )
-        corpus: datasets.Dataset = dataset.corpus.map(tokenize_corpus_func, batched=True)
+
+        os.environ["TOKENIZERS_PARALLELISM"] = "1"
+        corpus = dataset.corpus
+        # corpus: datasets.Dataset = dataset.corpus.map(
+        #     tokenize_corpus_func, 
+        #     batched=True, 
+        #     batch_size=10_000,
+        #     num_proc=(64 if len(dataset.corpus) > 700_000 else None)
+        # )
+        # corpus: datasets.Dataset = dataset.corpus.map(
+        #     tokenize_corpus_func, 
+        #     batched=True, 
+        #     batch_size=10_000,
+        # )
         corpus.set_format("pt")
 
         tokenize_queries_func = functools.partial(
@@ -201,6 +215,8 @@ class RerankHelper:
         num_eval_queries = min(self.max_reranking_queries, len(query_keys))
         agreement = []
 
+        self.model.eval()
+
         for j, query_id in tqdm_if_main_worker(
             enumerate(query_keys), total=num_eval_queries, desc=f"[{self.name}]"):
             all_topk_docs = sorted(results[query_id].items(), key=lambda item: item[1], reverse=True)
@@ -214,13 +230,6 @@ class RerankHelper:
                 # poor man's distributed sampler
                 continue
 
-            if self.transductive_input_strategy == "dummy":
-                # allow 'dummy' reranking
-                biencoder_score = torch.tensor([v for k,v in all_topk_docs])[:top_k]
-                rerank_scores_biencoder.extend(biencoder_score.tolist())
-                agreement.append(biencoder_score.argmax() == 0)
-                continue
-
             ensemble_query_embedding = []
             ensemble_document_embeddings = []
             for k in range(self.transductive_n_outputs_ensemble):
@@ -229,27 +238,35 @@ class RerankHelper:
                 # TODO: Enable assertion...
                 # assert len(topk_docs) == topk_docs, f"fewer than {top_k} docs available in dataset {self.name}"
 
-                query_batch = queries[query_idx_dict[query_id]]
-                query_inputs = transformers.BatchEncoding(
-                    data={
-                        "input_ids": query_batch["input_ids"],
-                        "attention_mask": query_batch["attention_mask"],
-                    }
-                ).to(device)
+                query_batch = queries[query_idx_dict[query_id]]["text"]
+                query_inputs: transformers.BatchEncoding = tokenize_queries_func({ "text": [query_batch] }).to(device)
 
-                documents_input_ids = []
-                documents_attention_mask = []
+                docs = []
                 for doc_j, (doc_id, _) in enumerate(topk_docs):
                     pair_ids.append([(j, doc_j)])
                     doc_j += 1
-                    documents_input_ids.append(self._pad(corpus[corpus_idx_dict[doc_id]]["input_ids"]))
-                    documents_attention_mask.append(self._pad(corpus[corpus_idx_dict[doc_id]]["attention_mask"]))
+                    docs.append(corpus[corpus_idx_dict[doc_id]]["text"])
                 
-                document_inputs = transformers.BatchEncoding(data={
-                    "input_ids": torch.stack(documents_input_ids),
-                    "attention_mask": torch.stack(documents_attention_mask)
-                }).to(device)
-
+                if self.transductive_input_strategy == "dummy":
+                    from sentence_transformers import SentenceTransformer
+                    if self.dummy_model is None:
+                        self.dummy_model = SentenceTransformer("Snowflake/snowflake-arctic-embed-l")
+                    query_embedding = self.dummy_model.encode(
+                        [query_batch], 
+                        prompt_name="query", 
+                        convert_to_tensor=True
+                    )
+                    document_embeddings = self.dummy_model.encode(
+                        docs,
+                        batch_size=512,
+                        convert_to_tensor=True
+                    )
+                    ensemble_query_embedding.append(query_embedding)
+                    ensemble_document_embeddings.append(document_embeddings)
+                    continue
+                
+                document_inputs = tokenize_corpus_func({ "text": docs })
+                document_inputs: transformers.BatchEncoding = document_inputs.to(device)
                 dataset_input_ids, dataset_attention_mask = (
                     self._get_dataset_inputs(
                         corpus_idx_dict=corpus_idx_dict,
@@ -257,14 +274,15 @@ class RerankHelper:
                         all_topk_docs=all_topk_docs,
                         document_inputs=document_inputs,
                         top_k=top_k,
+                        tokenize_corpus_func=tokenize_corpus_func,
                     )
                 )
                
                 # TODO: Cache first-stage outputs and reuse between doc and query.
                 null_dataset_embedding_query = self.transductive_input_strategy in ["null", "null_topk"]
                 query_embedding = self._forward_batched(
-                    input_ids=query_inputs.input_ids[None],
-                    attention_mask=query_inputs.attention_mask[None],
+                    input_ids=query_inputs.input_ids,
+                    attention_mask=query_inputs.attention_mask,
                     dataset_input_ids=dataset_input_ids,
                     dataset_attention_mask=dataset_attention_mask,
                     null_dataset_embedding=null_dataset_embedding_query,
@@ -282,7 +300,7 @@ class RerankHelper:
                 ensemble_document_embeddings.append(document_embeddings)
             
             ensemble_query_embedding = torch.stack(ensemble_query_embedding, dim=0).mean(0)
-            ensemble_document_embeddings = torch.stack(ensemble_document_embeddings, dim=0).mean(0)
+            ensemble_document_embeddings = torch.stack(ensemble_document_embeddings,  dim=0).mean(0)
             
             biencoder_score = torch.nn.functional.cosine_similarity(
                 ensemble_query_embedding, 
@@ -295,7 +313,9 @@ class RerankHelper:
         pair_ids = torch.tensor(pair_ids, device=device)
         rerank_scores_biencoder = torch.tensor(rerank_scores_biencoder, device=device)
         # max_length = int(math.ceil(top_k * num_eval_queries / world_size)) * 2
-        true_top_k = len(document_inputs.input_ids)
+        # true_top_k = len(document_inputs.input_ids)
+        true_top_k = len(docs)
+        print("true_top_k =", true_top_k)
         max_length = int(math.ceil(true_top_k * num_eval_queries / world_size)) * 2
 
         # add dummy elements to make same shapes for gather.
@@ -328,7 +348,8 @@ class RerankHelper:
 
         #### Reranking results
         rerank_results_biencoder = collections.defaultdict(dict)
-        for pair, score in zip(pair_ids, rerank_scores_biencoder):
+        rerank_tqdm = tqdm_if_main_worker(rerank_scores_biencoder, desc="computing score", leave=False)
+        for pair, score in zip(pair_ids, rerank_tqdm):
             query_j, doc_j = pair[0], pair[1]
             query_id = query_keys[query_j]
             doc_id = doc_id_to_key[query_id][doc_j]
@@ -416,10 +437,7 @@ def get_reranking_results(
             for sub_corpus_id, score in zip(
                 cos_scores_top_k_idx[query_itr], cos_scores_top_k_values[query_itr]
             ):
-                try:
-                    corpus_id = corpus_ids[corpus_start_idx + sub_corpus_id]
-                except IndexError:
-                    breakpoint()
+                corpus_id = corpus_ids[corpus_start_idx + sub_corpus_id]
                 if corpus_id != query_id:
                     if len(result_heaps[query_id]) < top_k:
                         # Push item on the heap
