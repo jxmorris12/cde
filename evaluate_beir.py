@@ -69,7 +69,7 @@ def setup_eval_cmd_parser(parser: argparse.ArgumentParser) -> argparse.ArgumentP
         "--transductive_input_strategy", "--t",
         type=str, 
         default="topk",
-        choices=["fake", "dummy", "random_corpus", "topk", "topk_pool", "null", "null_topk"],
+        choices=["fake", "dummy", "random_corpus", "topk", "random_corpus__topk__interp", "topk_pool", "null", "null_topk"],
     )
     parser.add_argument(
         "--transductive_n_outputs_ensemble",

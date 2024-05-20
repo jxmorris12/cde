@@ -163,7 +163,7 @@ class TrainingArguments(transformers.TrainingArguments):
         default="topk",
         metadata={
             "help": "dataset-level info to feed into dataset-conditioned model",
-            "choices": ["fake", "dummy", "random_corpus", "topk", "topk_pool", "null_topk", "null"],
+            "choices": ["fake", "dummy", "random_corpus", "topk", "random_corpus__topk__interp", "topk_pool", "null_topk", "null"],
         }
     )
     transductive_n_outputs_ensemble: int = field(

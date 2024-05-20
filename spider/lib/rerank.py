@@ -68,7 +68,7 @@ class RerankHelper:
         self.max_seq_length = max_seq_length
         self.name = name
 
-        assert transductive_input_strategy in ["fake", "dummy", "random_corpus", "topk", "topk_pool", "null", "null_topk"]
+        assert transductive_input_strategy in ["fake", "dummy", "random_corpus", "random_corpus__topk__interp", "topk", "topk_pool", "null", "null_topk"]
         self.transductive_input_strategy = transductive_input_strategy
         # Subsample queries from large sets so that we can evaluate
         # in a reasonable amount of time. Also remember this will be
@@ -129,6 +129,29 @@ class RerankHelper:
             corpus_inputs = corpus_inputs.to(document_inputs["input_ids"].device)
             dataset_input_ids = corpus_inputs.input_ids
             dataset_attention_mask = corpus_inputs.attention_mask
+        elif self.transductive_input_strategy == "random_corpus__topk__interp":
+            corpus_ids = random.choices(range(len(corpus)), k=top_k)
+            corpus_inputs = tokenize_corpus_func(corpus[corpus_ids])
+            corpus_inputs = corpus_inputs.to(document_inputs["input_ids"].device)
+            random_dataset_input_ids = corpus_inputs.input_ids
+            random_dataset_attention_mask = corpus_inputs.attention_mask
+            dataset_input_ids = torch.cat(
+                [
+                    document_inputs.input_ids,
+                    random_dataset_input_ids,
+                ],
+                dim=0
+            )
+            dataset_attention_mask = torch.cat(
+                [
+                    document_inputs.attention_mask,
+                    random_dataset_attention_mask,
+                ],
+                dim=0
+            )
+            idxs = torch.randperm(len(dataset_input_ids))[:top_k]
+            dataset_input_ids = dataset_input_ids[idxs]
+            dataset_attention_mask = dataset_attention_mask[idxs]
         elif self.transductive_input_strategy == "topk_pool":
             num_docs_to_pool = self.pooling_factor * top_k
             topk_docs = all_topk_docs[:num_docs_to_pool]
