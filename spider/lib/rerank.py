@@ -17,6 +17,7 @@ from spider.lib.embed import embed_with_cache
 from spider.lib.misc import tqdm_if_main_worker
 from spider.lib.tensor import forward_batched
 
+from mteb import HFDataLoader, RetrievalEvaluator
 
 MtebDataset = Any # Weird import error so we fake the class name for typing.
 BeirDataset = Any # Weird import error so we fake the class name for typing.
@@ -336,16 +337,23 @@ class RerankHelper:
         return rerank_results_biencoder
     
 
-def get_reranking_results(data_path: str, split: str, model_name: str,
-                            hf_data_loader = None) -> Dict:
+def get_reranking_results(
+        data_path: str, 
+        split: str, 
+        model_name: str,
+        hf_data_loader = None
+    ) -> Dict:
     """Reranks dataset at `data_path` using model with name `model_name`."""
-    from spider.lib.eval.mteb import HFDataLoader, RetrievalEvaluator
     # Reranking adapted from here.
     # https://github.com/embeddings-benchmark/mteb/blob/0c67d969b8e34ccf94286c3e2758c7a8d0943e81/mteb/evaluation/evaluators/RetrievalEvaluator.py#L189
 
     print("[get_reranking_results] Loading:", data_path)
     if hf_data_loader is None:
-        hf_data_loader = HFDataLoader(data_folder=data_path, streaming=False, keep_in_memory=False)
+        hf_data_loader = HFDataLoader(
+            data_folder=data_path, 
+            streaming=False, 
+            keep_in_memory=False
+        )
     corpus, queries, _qrels = hf_data_loader.load(split=split)
     retriever = RetrievalEvaluator(
         None,
@@ -363,7 +371,7 @@ def get_reranking_results(data_path: str, split: str, model_name: str,
         d=queries, 
         col='text',
         save_to_disk=False,
-        batch_size=4096,
+        batch_size=2048,
     )["embeds"]
     
     # queries = { query['id']: query['text'] for query in queries }
@@ -387,7 +395,7 @@ def get_reranking_results(data_path: str, split: str, model_name: str,
             d=corpus.select(range(corpus_start_idx, corpus_end_idx)), 
             col='text',
             save_to_disk=False,
-            batch_size=4096,
+            batch_size=2048,
         )["embeds"]
         cos_scores = retriever.retriever.score_functions["cos_sim"](
             query_embeddings, sub_corpus_embeddings

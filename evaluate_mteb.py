@@ -1,19 +1,22 @@
 import argparse
+import collections
 import functools
 import os
 import random
 
 import torch
 
+from spider.lib import cluster_dataset
 from spider.lib.embed import DenseEncoder
 from spider.lib.model_configs import MODEL_FOLDER_DICT, ARGS_STR_DICT
 from spider.lib.utils import analyze_utils
 
 from mteb import MTEB
+from mteb import HFDataLoader
 # from spider.lib.eval.mteb import MTEB
-# from spider.lib.eval.mteb.evaluation.evaluators import cos_sim
 
 TASK_LIST_RETRIEVAL = [
+    "HotpotQA",
     "ArguAna",
     "ClimateFEVER",
     "CQADupstackAndroidRetrieval",
@@ -30,7 +33,6 @@ TASK_LIST_RETRIEVAL = [
     "CQADupstackWordpressRetrieval",
     "DBPedia",
     "FiQA2018",
-    "MSMARCO",
     "NFCorpus",
     "NQ",
     "QuoraRetrieval",
@@ -38,8 +40,8 @@ TASK_LIST_RETRIEVAL = [
     "SciFact",
     "Touche2020",
     "TRECCOVID",
-    "HotpotQA",
     "FEVER",
+    "MSMARCO",
 ]
 
 # TASK_LIST_RETRIEVAL = ["SCIDOCS", "SciFact", "NFCorpus", "TRECCOVID", "Touche2020"] # Small datasets.
@@ -71,15 +73,6 @@ def parse_args() -> argparse.ArgumentParser:
     )
     return parser.parse_args()
 
-# def batched_cos_sim(a: torch.Tensor, b: torch.Tensor, batch_size: int) -> torch.Tensor:
-#     cos_sims = []
-#     i = 0
-#     while i < len(b):
-#         cos_sims.append(
-#             cos_sim(a, b[i: i+batch_size])
-#         )
-#         i += batch_size
-#     return torch.cat(cos_sims, dim=0)
 
 def main():
     args = parse_args()
@@ -94,7 +87,6 @@ def main():
     trainer.model.eval()
     mteb_encoder = DenseEncoder(
         model_name_or_path=trainer.model.config.embedder,
-        # encoder=trainer.model,
         encoder=trainer.model.second_stage_model,
         max_seq_length=trainer.model.config.max_seq_length,
         query_prefix="search_query: " if data_args.use_prefix else "",
@@ -103,13 +95,48 @@ def main():
 
     for task_idx, task in enumerate(TASK_LIST_RETRIEVAL):
         print(f"Beginning {task} ({task_idx+1} / {len(TASK_LIST_RETRIEVAL)})")
-        evaluation = MTEB(tasks=[task], task_langs=["en"])
+        evaluation = MTEB(
+            tasks=[task], 
+            task_langs=["en"],
+            embedder_rerank="sentence-transformers/gtr-t5-base"
+        )
+        split = "dev" if task == "MSMARCO" else "test"
         ##################################################
         evaluation.tasks[0].load_data()
-        all_documents = list(evaluation.tasks[0].corpus["test"].values())
+        corpus = evaluation.tasks[0].corpus["test"]
+        dataset_path = evaluation.tasks[0].metadata_dict["dataset"]["path"]
+        hf_repo_qrels = (
+            dataset_path + "-qrels" if "clarin-knext" in dataset_path else None
+        )
+        corpus_ds, _q, _qrels = HFDataLoader(
+            hf_repo=dataset_path,
+            hf_repo_qrels=hf_repo_qrels,
+            streaming=False,
+            keep_in_memory=False,
+        ).load(split=split)
+        cluster_matches = cluster_dataset(
+            dataset=corpus_ds,
+            model="gtr_base",
+            query_key="text",
+            document_key="text",
+            query_to_doc=True,
+            cluster_size=256,
+        )
+        cluster_assignments = collections.defaultdict(list)
+        for k, v in cluster_matches.items():
+            cluster_assignments[v[0]].append(k)
+        ##################################################
+        all_documents = list(corpus.values())
         all_dataset_embeddings = []
-        random.seed(51)
-        corpus_documents = random.choices(all_documents, k=256)
+        random.seed(52)
+        ##################################################
+        corpus_document_ids = []
+        while len(corpus_document_ids) < 256:
+            cluster_idx = random.choice(list(cluster_assignments.keys()))
+            corpus_document_ids.extend(cluster_assignments[cluster_idx])
+        corpus_document_ids = random.shuffle(corpus_document_ids)[:256]
+        corpus_documents = [corpus_ds[id] for id in corpus_document_ids]
+        ##################################################
         corpus_documents = [
             mteb_encoder.document_prefix + '{} {}'.format(doc.get('title', ''), doc['text']).strip() 
             for doc in corpus_documents
@@ -135,9 +162,10 @@ def main():
         results = evaluation.run(
             mteb_encoder, 
             output_folder=os.path.join("results_mteb", args.model_key),
-            batch_size=512, 
-            corpus_chunk_size=500_000, # 1_000_000,
+            batch_size=1024, 
+            corpus_chunk_size=500_000,
             verbosity=2,
+            eval_splits=[split]
         )
         print(task)
         print("\t", results)

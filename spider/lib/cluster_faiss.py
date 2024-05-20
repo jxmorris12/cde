@@ -26,6 +26,7 @@ def paired_kmeans_faiss(
         ], dim=1
     )
     paired_vectors /= paired_vectors.norm(dim=1, keepdim=True, p=2)
+    paired_vectors = paired_vectors.cpu()
 
     dim = paired_vectors[0].numel()
     # TODO: How to make kmeans use more gpu mem?

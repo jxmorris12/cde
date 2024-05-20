@@ -11,5 +11,5 @@ MODELS=(
 
 for model in "${MODELS[@]}"; do
     echo $model;
-    CUDA_VISIBLE_DEVICES=0 python evaluate_mteb.py $model;
+    python evaluate_mteb.py $model;
 done

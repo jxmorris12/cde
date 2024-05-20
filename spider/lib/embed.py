@@ -33,9 +33,10 @@ def embed_dataloader(
     )
     embed_device = ("cuda" if torch.cuda.is_available() else "cpu")
     for batch_dict in pbar:
+        if "token_type_ids" in batch_dict:
+            batch_dict.pop("token_type_ids")
         batch_dict = move_to_cuda(batch_dict)
         with torch.autocast(embed_device, dtype=torch.bfloat16):
-            del batch_dict["token_type_ids"]
             outputs = encoder(**batch_dict, **kwargs)
         if hasattr(outputs, 'pooler_output'):
             embeds = outputs.pooler_output
@@ -96,11 +97,12 @@ class DenseEncoder(torch.nn.Module):
             model_name_or_path)
         self.gpu_count = torch.cuda.device_count()
 
-        self._model_is_on_device = False
+        self.model_is_on_device = False
         self.max_length = max_seq_length
         self.query_prefix = query_prefix
         self.document_prefix = document_prefix
         self.model_kwargs = {}
+        self._max_num_chars = 2048
 
     def tokenize_transform(
             self,
@@ -111,7 +113,7 @@ class DenseEncoder(torch.nn.Module):
         ) -> Dict[str, torch.Tensor]:
         texts = examples[col]
         batch_dict = self.tokenizer(
-            [prefix + t for t in texts],
+            [prefix + t[:self._max_num_chars] for t in texts],
             max_length=max_length,
             padding=True,
             # padding="max_length",
@@ -120,7 +122,7 @@ class DenseEncoder(torch.nn.Module):
         return batch_dict
 
     def _consider_putting_model_on_device(self) -> None:
-        if self._model_is_on_device:
+        if self.model_is_on_device:
             return
         if self.encoder is None:
             print("[DE] initializing from", self.model_name_or_path)
@@ -136,7 +138,7 @@ class DenseEncoder(torch.nn.Module):
         if self.gpu_count > 1:
             print(f"[DE] Wrapped DenseEncoder in {self.gpu_count} GPUs")
             self.encoder = torch.nn.DataParallel(self.encoder)
-        self._model_is_on_device = True
+        self.model_is_on_device = True
     
     def encode_corpus(self, corpus: List[Dict[str, str]], *args, **kwargs) -> np.ndarray:
         if isinstance(corpus[0], dict):
@@ -164,7 +166,8 @@ class DenseEncoder(torch.nn.Module):
                 dataset = datasets.Dataset.from_list(dataset)
             else:
                 raise RuntimeError("unknown dataset format to encode")
-
+        
+        os.environ["TOKENIZERS_PARALLELISM"] = "1"
         dataset.set_transform(
             functools.partial(
                 self.tokenize_transform, 
@@ -181,7 +184,7 @@ class DenseEncoder(torch.nn.Module):
             batch_size=effective_batch_size,
             shuffle=False,
             drop_last=False,
-            num_workers=0, 
+            num_workers=min(max_num_batches, self.gpu_count * 4), 
             collate_fn=data_collator,
             persistent_workers=False,
             pin_memory=True
@@ -262,7 +265,7 @@ def embed_with_cache(
     print(f"[embed_with_cache] creating datasets")
 
     if not save_to_disk:
-        return { "embeds": torch.tensor(embeddings) }
+        return { "embeds": embeddings }
 
     datasets_list = []
     max_dataset_size = 8_000_000

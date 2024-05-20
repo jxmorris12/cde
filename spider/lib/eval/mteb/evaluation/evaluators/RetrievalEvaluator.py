@@ -77,11 +77,23 @@ class DenseRetrievalExactSearch:
         query_ids = list(queries.keys())
         self.results = {qid: {} for qid in query_ids}
         queries = [queries[qid] for qid in query_ids]
+
+        neighbor_topk = 256
+        neighbor_sentence_ids = [
+            sorted(
+                rerank_results[id], 
+                key=lambda item: item[1], 
+                reverse=True
+            )[:neighbor_topk] 
+            for id in query_ids
+        ]
+        neighbor_sentences = [corpus[id] for id in neighbor_sentence_ids]
+        dataset_embeddings = self._encode_first_stage(
+            neighbor_sentences
+        )
+
         query_embeddings = self.model.encode_queries(
             queries,
-            query_ids,
-            corpus,
-            rerank_results,
             batch_size=self.batch_size,
             show_progress_bar=self.show_progress_bar,
             convert_to_tensor=self.convert_to_tensor,
@@ -285,64 +297,30 @@ class DenseRetrievalExactSearch:
         raise NotImplementedError(
             "You must implement a predict method for your reranker model"
         )
-
-
-class DRESModel:
-    """Dense Retrieval Exact Search (DRES) requires an encode_queries & encode_corpus method.
-    This class converts a model with just an .encode method into DRES format.
-    """
-
-    def __init__(self, model, **kwargs):
-        self.model = model
-        self.use_sbert_model = isinstance(model, SentenceTransformer)
-        self.save_corpus_embeddings = kwargs.get("save_corpus_embeddings", False)
-        self.corpus_embeddings = {}
-
-    def encode_queries(
-            self, 
-            queries: List[str], 
+    
+    def _encode_first_stage(
+            self,
+            neighbor_sentence_ids,
             full_corpus,
-            rerank_results,
-            batch_size: int, 
-            **kwargs
+            batch_size: int
         ):
-        if self.use_sbert_model:
-            if isinstance(self.model._first_module(), Transformer):
-                logger.info(
-                    f"Queries will be truncated to {self.model.get_max_seq_length()} tokens."
-                )
-            elif isinstance(self.model._first_module(), WordEmbeddings):
-                logger.warning(
-                    "Queries will not be truncated. This could lead to memory issues. In that case please lower the batch_size."
-                )
+        nbr_ids = list(set(n for n_list in neighbor_sentence_ids for n in n_list))
+        minicorpus = [full_corpus[_id] for _id in ids_set]
+        # TODO: Hack this less
+        self.model.model_is_on_device = False
+        prev_model_on_device = self.model.model_is_on_device
+        prev_encoder = self.model.encoder
+        self.model.encoder = self.first_stage_model
+        encodings = self.model.encode(minicorpus)
+        encodings_dict = zip(nbr_ids, encodings)
+        dataset_embeddings = torch.stack([
+            torch.stack([encodings_dict[n_id] for n_id in n_list])
+            for n_list in nbr_ids
+        ])
+        self.model.model_is_on_device = prev_model_on_device
+        self.model.encoder = prev_encoder
+        return dataset_embeddings
 
-        if "instructions" in kwargs:
-            if kwargs["instructions"] is not None:
-                queries = [
-                    (query + " " + kwargs["instructions"][query]).strip()
-                    for query in queries
-                ]
-            new_kwargs = {
-                k: v for k, v in kwargs.items() if k not in ["instructions", "qid"]
-            }
-        else:
-            # can't just delete, cuz assign by reference on kwargs
-            new_kwargs = kwargs
-
-        neighbor_topk = 256
-        neighbor_sentence_ids = [rerank_results[id][:neighbor_topk] for id in full_corpus.keys()]
-        neighbor_sentences = [full_corpus[id] for id in neighbor_sentence_ids]
-
-        first_stage_embeddings = self.model.encode_first_stage(
-            sentences=neighbor_sentences,
-            batch_size=batch_size,
-        )
-        query_embeddings = self.model.encode_second_stage(
-            queries, 
-            first_stage_embeddings=first_stage_embeddings, 
-            batch_size=batch_size, **new_kwargs
-        )
-        return query_embeddings
 
     def encode_corpus(self, 
             corpus: List[Dict[str, str]], 
@@ -382,9 +360,16 @@ class DRESModel:
             new_kwargs = kwargs
         
         # TODO: Argparse for topk
+        # TODO: Do something non-random
         neighbor_topk = 256
-        neighbor_sentence_ids = [rerank_results[id][:neighbor_topk] for id in corpus.keys()]
-        neighbor_sentences = [full_corpus[id] for id in neighbor_sentence_ids]
+        neighbor_sentence_ids = [
+            random.choices(len(full_corpus), k=neighbor_topk)
+        ]
+        dataset_embeddings = self._encode_first_stage(
+            neighbor_sentence_ids,
+            full_corpus,
+            batch_size=batch_size,
+        )
         first_stage_embeddings = self.model.encode_first_stage(
             sentences=neighbor_sentences,
             batch_size=batch_size,

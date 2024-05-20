@@ -93,7 +93,7 @@ class HFDataLoader:
             rerank_folder,
             self.embedder_rerank.replace("/", "__")
         )
-        print("searching for rerank results at path", rerank_path)
+        print("[HFDataLoader] loading rerank results at path", rerank_path)
         if os.path.exists(rerank_path):
             rerank_results = pickle.load(open(rerank_path, 'rb'))
         else:
@@ -272,6 +272,7 @@ class AbsTaskRetrieval(AbsTask):
         if self.data_loaded:
             return
         self.corpus, self.queries, self.rerank_results, self.relevant_docs = {}, {}, {}, {}
+        self.corpus_ds, self.queries_ds = {}, {}
         dataset_path = self.metadata_dict["dataset"]["path"]
         hf_repo_qrels = (
             dataset_path + "-qrels" if "clarin-knext" in dataset_path else None
@@ -285,6 +286,7 @@ class AbsTaskRetrieval(AbsTask):
                 embedder_rerank=self.embedder_rerank,
             ).load(split=split, do_reranking=True)
             # Conversion from DataSet
+            self.corpus_ds[split], self.queries_ds[split] = corpus, queries
             queries = {query["id"]: query["text"] for query in queries}
             corpus = {
                 doc["id"]: {"title": doc["title"], "text": doc["text"]}
@@ -328,7 +330,7 @@ class AbsTaskRetrieval(AbsTask):
         return scores
 
     def _evaluate_split(
-        self, retriever, corpus, queries, relevant_docs, rerank_results, lang=None, **kwargs
+        self, retriever, corpus, queries, rerank_results, relevant_docs, lang=None, **kwargs
     ):
         start_time = time()
         results = retriever(corpus, queries, rerank_results)

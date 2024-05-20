@@ -121,10 +121,17 @@ def load_beir_uncached(dataset: str, split: str, embedder_rerank: str) -> Tuple[
     corpus, queries, qrels = beir.datasets.data_loader.GenericDataLoader(data_path).load(split=split)
     # bm25_results = get_bm25_results(dataset=dataset, corpus=corpus, queries=queries)
     print("... getting reranking results")
+    from mteb import HFDataLoader
+    hf_data_loader = HFDataLoader(
+        hf_repo=f"mteb/{dataset}", 
+        streaming=False, 
+        keep_in_memory=False
+    )
     rerank_results = get_reranking_results(
         data_path=data_path, 
         split=split,
-        model_name=embedder_rerank
+        model_name=embedder_rerank,
+        hf_data_loader=hf_data_loader,
     )
 
     corpus = datasets.Dataset.from_list(

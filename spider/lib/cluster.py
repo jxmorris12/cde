@@ -90,9 +90,9 @@ def embed_for_clustering(
             "sentence-transformers/gtr-t5-base", 
             dataset_fingerprint + "_queries", 
             dataset,
-            "query",
+            query_key,
             save_to_disk=False,
-            batch_size=8192,
+            batch_size=2048,
         )
         print("[embed_with_cache] halving query embeddings")
         query_embeddings = query_embeddings["embeds"].half()
@@ -105,9 +105,9 @@ def embed_for_clustering(
             "sentence-transformers/gtr-t5-base", 
             dataset._fingerprint + "_documents", 
             dataset,
-            "document",
+            document_key,
             save_to_disk=False,
-            batch_size=8192,
+            batch_size=2048,
         )
         corpus_embeddings = corpus_embeddings["embeds"].half()
         print("[embed_with_cache] got corpus embeddings, remapping")
