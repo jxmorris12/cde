@@ -83,21 +83,14 @@ class RerankHelper:
     
     def _forward_batched(
             self, 
-            input_ids: torch.Tensor, 
-            attention_mask: torch.Tensor,
-            dataset_input_ids: torch.Tensor,
-            dataset_attention_mask: torch.Tensor,
+            model: torch.nn.Module,
             **kwargs
         ) -> torch.Tensor:
         rerank_device = ("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
         with torch.autocast(rerank_device, dtype=self.default_dtype):
             return forward_batched(
-                model=self.model,
+                model=model,
                 batch_size=self.batch_size,
-                input_ids=input_ids,
-                attention_mask=attention_mask,
-                dataset_input_ids=dataset_input_ids,
-                dataset_attention_mask=dataset_attention_mask,
                 **kwargs
             )
 
@@ -300,24 +293,27 @@ class RerankHelper:
                         tokenize_corpus_func=tokenize_corpus_func,
                     )
                 )
-               
-                # TODO: Cache first-stage outputs and reuse between doc and query.
+                dataset_embeddings = self._forward_batched(
+                    model=self.model.first_stage_model,
+                    input_ids=dataset_input_ids,
+                    attention_mask=dataset_attention_mask,
+                )
                 null_dataset_embedding_query = self.transductive_input_strategy in ["null", "null_topk"]
                 query_embedding = self._forward_batched(
+                    model=self.model.second_stage_model,
                     input_ids=query_inputs.input_ids,
                     attention_mask=query_inputs.attention_mask,
-                    dataset_input_ids=dataset_input_ids,
-                    dataset_attention_mask=dataset_attention_mask,
+                    dataset_embeddings=dataset_embeddings,
                     null_dataset_embedding=null_dataset_embedding_query,
                 ).flatten()
                 ensemble_query_embedding.append(query_embedding)
                 
                 null_dataset_embedding_document = self.transductive_input_strategy in ["null"]
                 document_embeddings = self._forward_batched(
+                    model=self.model.second_stage_model,
                     input_ids=document_inputs.input_ids,
                     attention_mask=document_inputs.attention_mask,
-                    dataset_input_ids=dataset_input_ids,
-                    dataset_attention_mask=dataset_attention_mask,
+                    dataset_embeddings=dataset_embeddings,
                     null_dataset_embedding=null_dataset_embedding_document,
                 )
                 ensemble_document_embeddings.append(document_embeddings)

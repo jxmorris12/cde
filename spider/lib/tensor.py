@@ -147,8 +147,7 @@ def forward_batched(
                 model(
                     input_ids=input_ids[i:i+batch_size],
                     attention_mask=attention_mask[i:i+batch_size],
-                    dataset_input_ids=dataset_input_ids,
-                    dataset_attention_mask=dataset_attention_mask,
+                    **second_stage_model_kwargs,
                 )
             )
             i += batch_size
