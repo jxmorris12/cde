@@ -26,6 +26,23 @@ from spider.lib import (
 from spider.sampler import Sampler
 
 
+
+class NomicEmbeddingModelWrapper(torch.nn.Module):
+    # TODO: Put this somewhere else
+    def __init__(self):
+        super().__init__()
+        self.model = transformers.AutoModel.from_pretrained(
+            "nomic-ai/nomic-embed-text-v1", 
+            trust_remote_code=True
+        )
+        self.model.eval()
+    
+    def forward(self, **kwargs):
+        from spider.lib import mean_pool
+        output = self.model(**kwargs)
+        embeddings = mean_pool(output[0], kwargs["attention_mask"])
+        return torch.nn.functional.normalize(embeddings, p=2, dim=1)
+
 def reset_memory() -> None:
     gc.collect()
     torch.cuda.empty_cache()
@@ -83,11 +100,7 @@ class CustomTrainer(transformers.Trainer):
 
         effective_batch_size = get_world_size() * self.args.per_device_train_batch_size
         self._memory_reset_step_frequency = int(2000 * effective_batch_size / 256)
-        # if get_rank() == 0:
-        #     print(
-        #         "effective_batch_size", effective_batch_size, 
-        #         "--> memory_reset_step_frequency =", self._memory_reset_step_frequency
-        #     )
+        self._hn_filter_model = None
     
     def consider_gather(self, tensor: torch.Tensor) -> torch.Tensor:
         if self.args.ddp_share_negatives_between_gpus:
@@ -298,7 +311,6 @@ class CustomTrainer(transformers.Trainer):
         
         pred_labels = one_hot_labels[torch.arange(len(one_hot_labels)), logits.argmax(dim=1)]
         acc = pred_labels.float().mean()
-        if get_rank() == 0: breakpoint()
 
         metrics = {
             "acc": acc.detach(),
@@ -464,6 +476,31 @@ class CustomTrainer(transformers.Trainer):
                 }
             for key, val in grad_norm_metrics.items():
                 self._log_extra(key, val)
+            
+    def _get_query_doc_scores(self, query_inputs, document_inputs) -> torch.Tensor:
+        from spider.lib.tensor import forward_batched
+        
+        if self._hn_filter_model is None:
+            self._hn_filter_model = NomicEmbeddingModelWrapper()
+            self._hn_filter_model.to(self.args.device)
+
+        with torch.no_grad():
+            query_outputs = forward_batched(
+                model=self._hn_filter_model,
+                input_ids=query_inputs["input_ids"],
+                attention_mask=query_inputs["attention_mask"],
+                batch_size=(self.args.per_device_train_batch_size * 2),
+            )
+            doc_outputs = forward_batched(
+                model=self._hn_filter_model,
+                input_ids=document_inputs["input_ids"],
+                attention_mask=document_inputs["attention_mask"],
+                batch_size=(self.args.per_device_train_batch_size * 4),
+            )
+
+        scores = query_outputs @ doc_outputs.T
+        
+        return scores
 
     def compute_loss(
         self,
@@ -522,6 +559,14 @@ class CustomTrainer(transformers.Trainer):
             smart_labels = (query_collisions.long() @ smart_labels_doc.long()).bool()
         else:
             smart_labels = smart_labels_doc
+        
+        # Automatically filter out too-hard negatives.
+        # TODO: Argparse for threshold
+        if self.args.hn_tune_threshold is not None:
+            qd_scores = self._get_query_doc_scores(query_inputs, document_inputs)
+            qd_scores = qd_scores.to(smart_labels.device)
+            smart_labels_neg = qd_scores > self.args.hn_tune_threshold
+            smart_labels = smart_labels | smart_labels_neg
 
         # Aggregate labels for duplicate queries.
         num_unique_documents = document_unique_ids.unique().numel()
@@ -584,7 +629,6 @@ class CustomTrainer(transformers.Trainer):
                 one_hot_labels=one_hot_labels,
                 duplicate_labels=duplicate_labels,
             )
-            if get_rank() == 0: breakpoint()
             return loss
         else:
             e1 = model(**query_inputs)

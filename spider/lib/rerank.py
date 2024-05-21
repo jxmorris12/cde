@@ -293,29 +293,56 @@ class RerankHelper:
                         tokenize_corpus_func=tokenize_corpus_func,
                     )
                 )
-                dataset_embeddings = self._forward_batched(
-                    model=self.model.first_stage_model,
-                    input_ids=dataset_input_ids,
-                    attention_mask=dataset_attention_mask,
-                )
-                null_dataset_embedding_query = self.transductive_input_strategy in ["null", "null_topk"]
-                query_embedding = self._forward_batched(
-                    model=self.model.second_stage_model,
-                    input_ids=query_inputs.input_ids,
-                    attention_mask=query_inputs.attention_mask,
-                    dataset_embeddings=dataset_embeddings,
-                    null_dataset_embedding=null_dataset_embedding_query,
-                ).flatten()
+                if hasattr(self.model, 'first_stage_model'):
+                    dataset_embeddings = self._forward_batched(
+                        model=self.model.first_stage_model,
+                        input_ids=dataset_input_ids,
+                        attention_mask=dataset_attention_mask,
+                    )
+                    null_dataset_embedding_query = self.transductive_input_strategy in ["null", "null_topk"]
+                    query_embedding = self._forward_batched(
+                        model=self.model.second_stage_model,
+                        input_ids=query_inputs.input_ids,
+                        attention_mask=query_inputs.attention_mask,
+                        dataset_embeddings=dataset_embeddings,
+                        null_dataset_embedding=null_dataset_embedding_query,
+                    ).flatten()
+
+                    # Add each corpus as an embedding to itself
+                    S = len(document_inputs.input_ids)
+                    corpus_dataset_embeddings = self._forward_batched(
+                        model=self.model.first_stage_model,
+                        input_ids=document_inputs.input_ids,
+                        attention_mask=document_inputs.attention_mask,
+                    )
+                    corpus_dataset_embeddings = corpus_dataset_embeddings[:, None, :]
+                    corpus_dataset_embeddings = corpus_dataset_embeddings.expand(-1, S, -1)
+                    dataset_embeddings = dataset_embeddings[None]
+                    dataset_embeddings = dataset_embeddings.expand(S, -1, -1)
+                    left_only = (torch.arange(S) < 1)[None, :, None].to(dataset_embeddings.device)
+                    dataset_embeddings = torch.where(left_only, corpus_dataset_embeddings, dataset_embeddings)
+                    
+                    null_dataset_embedding_document = self.transductive_input_strategy in ["null"]
+                    document_embeddings = self._forward_batched(
+                        model=self.model.second_stage_model,
+                        input_ids=document_inputs.input_ids,
+                        attention_mask=document_inputs.attention_mask,
+                        dataset_embeddings=dataset_embeddings,
+                        null_dataset_embedding=null_dataset_embedding_document,
+                    )
+                else:
+                    # biencoder
+                    query_embedding = self._forward_batched(
+                        model=self.model,
+                        input_ids=query_inputs.input_ids,
+                        attention_mask=query_inputs.attention_mask,
+                    ).flatten()
+                    document_embeddings = self._forward_batched(
+                        model=self.model,
+                        input_ids=document_inputs.input_ids,
+                        attention_mask=document_inputs.attention_mask,
+                    )
                 ensemble_query_embedding.append(query_embedding)
-                
-                null_dataset_embedding_document = self.transductive_input_strategy in ["null"]
-                document_embeddings = self._forward_batched(
-                    model=self.model.second_stage_model,
-                    input_ids=document_inputs.input_ids,
-                    attention_mask=document_inputs.attention_mask,
-                    dataset_embeddings=dataset_embeddings,
-                    null_dataset_embedding=null_dataset_embedding_document,
-                )
                 ensemble_document_embeddings.append(document_embeddings)
             
             ensemble_query_embedding = torch.stack(ensemble_query_embedding, dim=0).mean(0)

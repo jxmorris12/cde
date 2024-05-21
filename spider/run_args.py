@@ -188,6 +188,12 @@ class TrainingArguments(transformers.TrainingArguments):
             "help": "Number of epochs for training"
         },
     )
+    hn_tune_threshold: Optional[float] = field(
+        default=None,
+        metadata={
+            "help": "threshold for tuning hard negatives (in 0-1) or none",
+        }
+    )
     learning_rate: float = field(
         default=2e-5,
         metadata={"help": "The initial learning rate for AdamW on the backbone model."}

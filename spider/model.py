@@ -244,7 +244,9 @@ class DatasetConditionedBiencoder(transformers.PreTrainedModel):
         if not isinstance(dataset_embeddings, torch.Tensor):
             dataset_embeddings = torch.tensor(dataset_embeddings)
 
-        dataset_embeddings = dataset_embeddings[None, :, :] # (b, d) -> (1, b, d)
+        if len(dataset_embeddings.shape) == 2:
+            # Auto-expand for a batch.
+            dataset_embeddings = dataset_embeddings[None, :, :] # (b, d) -> (1, b, d)
         dataset_embeddings = dataset_embeddings.to(input_ids.device)
         dataset_embeddings = dataset_embeddings.to(torch.float32)
 
@@ -254,9 +256,10 @@ class DatasetConditionedBiencoder(transformers.PreTrainedModel):
             dataset_embeddings = dataset_embeddings[:, :self.config.transductive_corpus_size, :]
         batch_size = input_ids.shape[0]
         _, corpus_size, _hidden_dim = dataset_embeddings.shape
-        assert _ == 1
+        if _ == 1:
+            # Auto-expand for a batch.
+            dataset_embeddings = dataset_embeddings.expand((batch_size, -1, -1))
 
-        dataset_embeddings = dataset_embeddings.expand((batch_size, -1, -1)) 
         if self.training and self.sequence_dropout_prob > 0.0:
             sequence_dropout_mask = (
                 torch.rand((batch_size, corpus_size), device=dataset_embeddings.device) < self.sequence_dropout_prob
