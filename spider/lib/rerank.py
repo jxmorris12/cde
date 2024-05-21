@@ -338,7 +338,6 @@ class RerankHelper:
         # max_length = int(math.ceil(top_k * num_eval_queries / world_size)) * 2
         # true_top_k = len(document_inputs.input_ids)
         true_top_k = len(docs)
-        print("true_top_k =", true_top_k)
         max_length = int(math.ceil(true_top_k * num_eval_queries / world_size)) * 2
 
         # add dummy elements to make same shapes for gather.

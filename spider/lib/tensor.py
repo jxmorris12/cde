@@ -1,3 +1,5 @@
+from typing import Optional
+
 import math
 
 import torch
@@ -90,19 +92,15 @@ def forward_batched(
         model: torch.nn.Module,
         input_ids: torch.Tensor,
         attention_mask: torch.Tensor,
-        dataset_input_ids: torch.Tensor,
-        dataset_attention_mask: torch.Tensor,
         batch_size: int,
-        **second_stage_kwargs,
+        dataset_input_ids: Optional[torch.Tensor] = None,
+        dataset_attention_mask: Optional[torch.Tensor] = None,
+        **second_stage_model_kwargs,
 ) -> torch.Tensor:
-    # print("forward_batched:", input_ids.shape, "//", dataset_input_ids.shape, dataset_attention_mask.shape)
-    dataset_input_ids = dataset_input_ids[:256]
-    dataset_attention_mask = dataset_attention_mask[:256]
     if hasattr(model, "module"):
         model = model.module
     
     if hasattr(model, "first_stage_model"):
-
         # Support pooling over 3D dataset_input_ids inputs.
         if len(dataset_input_ids.shape) == 2:
             dataset_input_ids = dataset_input_ids[None]
@@ -135,7 +133,7 @@ def forward_batched(
                     input_ids=input_ids[j:j+batch_size],
                     attention_mask=attention_mask[j:j+batch_size],
                     dataset_embeddings=dataset_embeddings,
-                    **second_stage_kwargs,
+                    **second_stage_model_kwargs,
                 )
             )
             j += batch_size

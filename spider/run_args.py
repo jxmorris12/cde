@@ -207,7 +207,7 @@ class TrainingArguments(transformers.TrainingArguments):
         default=64, metadata={"help": "Batch size per GPU/TPU core/CPU for evaluation."}
     )
     transductive_corpus_size: int = field(
-        default=224,
+        default=256,
         metadata={
             "help": "Corpus input size for transductive encoder",
         }

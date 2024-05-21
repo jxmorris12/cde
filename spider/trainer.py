@@ -298,6 +298,7 @@ class CustomTrainer(transformers.Trainer):
         
         pred_labels = one_hot_labels[torch.arange(len(one_hot_labels)), logits.argmax(dim=1)]
         acc = pred_labels.float().mean()
+        if get_rank() == 0: breakpoint()
 
         metrics = {
             "acc": acc.detach(),
@@ -583,6 +584,7 @@ class CustomTrainer(transformers.Trainer):
                 one_hot_labels=one_hot_labels,
                 duplicate_labels=duplicate_labels,
             )
+            if get_rank() == 0: breakpoint()
             return loss
         else:
             e1 = model(**query_inputs)
