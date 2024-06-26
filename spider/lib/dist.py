@@ -101,6 +101,11 @@ def verify_ddp_weights_equal(model: torch.nn.Module, atol: float = 1e-5) -> None
         model = model.module
     
     world_size = get_world_size()
+
+    if world_size > 8:
+        print(f"[verify_ddp_weights_equal] Skipping with world_size={world_size} ⚠️")
+        return
+
     for name, param in model.named_parameters():
         gathered_param = gather(param).reshape((world_size, -1))
         absolute_diffs = (gathered_param[None, 0, :] - gathered_param).abs()

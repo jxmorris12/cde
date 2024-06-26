@@ -303,6 +303,7 @@ class NomicSupervisedDataset:
     
     def __getitem__(self, query_id: int) -> Dict[str, torch.Tensor]: 
         ex = self.dataset[query_id]
+        # print("NomicSupervisedDataset.__getitem__", query_id)
         
         if self.use_prefix:
             query_prefix = self.get_query_prefix(ex["dataset"])
@@ -359,6 +360,7 @@ class NomicUnsupervisedDataset(torch.utils.data.Dataset):
         self.dataset = (
             datasets.load_dataset(
                 "nomic-ai/nomic_embed_unsupervised",
+                num_proc=32,
             )["train"]
         )
         print("[NomicUnsupervisedDataset] loading subdomain idxs")

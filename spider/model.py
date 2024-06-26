@@ -283,8 +283,10 @@ class DatasetConditionedBiencoder(transformers.PreTrainedModel):
             randomized_order = torch.stack(
                 [
                     torch.cat(
-                        (torch.randperm(corpus_size), 
-                        torch.arange(self.n_soft_prompt) + corpus_size), dim=0) 
+                        (
+                            torch.randperm(corpus_size, device=soft_prompt.device), 
+                            torch.arange(self.n_soft_prompt, device=soft_prompt.device) + corpus_size
+                        ), dim=0) 
                         for _ in range(batch_size)])
             randomized_order = randomized_order.to(soft_prompt.device)
             soft_prompt = soft_prompt.gather(1, randomized_order[..., None].expand_as(soft_prompt))

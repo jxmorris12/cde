@@ -92,10 +92,10 @@ def embed_for_clustering(
             dataset,
             query_key,
             save_to_disk=False,
-            batch_size=2048,
+            batch_size=512,
         )
         print("[embed_with_cache] halving query embeddings")
-        query_embeddings = query_embeddings["embeds"].half()
+        query_embeddings = query_embeddings["embeds"].half().cpu()
         assert not query_embeddings.isnan().any(), "got nan query embeddings"
         query_output_idxs = dataset["idx"]
         corpus_output_idxs = dataset["idx"]
@@ -107,9 +107,9 @@ def embed_for_clustering(
             dataset,
             document_key,
             save_to_disk=False,
-            batch_size=2048,
+            batch_size=512,
         )
-        corpus_embeddings = corpus_embeddings["embeds"].half()
+        corpus_embeddings = corpus_embeddings["embeds"].half().cpu()
         print("[embed_with_cache] got corpus embeddings, remapping")
 
         assert not corpus_embeddings.isnan().any(), "got nan corpus embeddings"
@@ -377,10 +377,15 @@ def cluster_subdomains_uncached(
     if batch_size < cluster_size:
         print("WARNING: batch size", batch_size, "is less than cluster size", cluster_size)
     
-    # subdomains_smallest_first = sorted(subdomains.items(), key=lambda x: len(x[1]))
+    subdomains_smallest_first = sorted(subdomains.items(), key=lambda x: len(x[1]))
     subdomains_largest_first = sorted(subdomains.items(), key=lambda x: -len(x[1]))
     all_cluster_assignments = []
-    for j, (_, data_idxs) in enumerate(subdomains_largest_first):
+
+    import random
+    import time
+    random.seed(time.time())
+    random.shuffle(subdomains_smallest_first)
+    for j, (_, data_idxs) in enumerate(subdomains_smallest_first):
         perc = (j + 1) / len(subdomains) * 100
         print(f"({j + 1} / {len(subdomains)} -- {perc:.1f}%) selecting {len(data_idxs)} indices for clustering")
         mini_dataset = dataset.dataset.select(data_idxs, keep_in_memory=True)
@@ -391,8 +396,8 @@ def cluster_subdomains_uncached(
         cluster_assignments = cluster_dataset(
             dataset=mini_dataset,
             model=model,
-            query_key=dataset._document_input_ids_key,
-            document_key=dataset._query_input_ids_key,
+            query_key="query",
+            document_key="document",
             query_to_doc=query_to_doc,
             cluster_size=cluster_size,
         )

@@ -41,6 +41,7 @@ def issue_warnings_after_load(load_result: Dict[str, List[str]]) -> None:
             f"There were unexpected keys in the checkpoint model loaded: {load_result.unexpected_keys}."
         )
 
+
 def get_checkpoint(training_args) -> Optional[str]:
     last_checkpoint = None
     if (
@@ -128,15 +129,15 @@ def main():
         beir_dataset_names = [
             # https://github.com/beir-cellar/beir/blob/f062f038c4bfd19a8ca942a9910b1e0d218759d4/examples/dataset/download_dataset.py#L13
             'arguana',
-            'webis-touche2020',
+            # 'webis-touche2020',
             'quora',
             'nfcorpus',
             'scidocs', 
             'scifact',
             'trec-covid',
-            'signal1m',
+            # 'signal1m',
             'fiqa',
-            'trec-news',  
+            # 'trec-news',  
             'msmarco',
         #############################################
             'nq',
@@ -162,9 +163,9 @@ def main():
         **{f"BeIR/{k}": v for k,v in beir_dict.items()}
     }
 
-    collator_cls = DocumentQueryCollatorWithPadding
     if data_args.dataset == 'synthetic_words':
         train_dataset, eval_dataset = load_synthetic_words_dataset()
+        collator_cls = DocumentQueryCollatorWithPadding
     elif data_args.dataset == 'nomic_unsupervised':
         train_dataset = NomicUnsupervisedDataset(
             tokenizer=embedder_tokenizer,
@@ -314,6 +315,7 @@ def main():
             model_args, os.path.join(training_args.output_dir, "model_args.bin"),
         )
 
+    # trainer.evaluate_retrieval_datasets()
     trainer.train(resume_from_checkpoint=checkpoint)
     trainer.evaluate_retrieval_datasets()
 

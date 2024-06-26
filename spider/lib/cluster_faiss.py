@@ -2,7 +2,7 @@ from typing import Tuple
 
 import gc
 
-import faiss
+# import faiss
 import torch
 
 
@@ -10,7 +10,7 @@ def paired_kmeans_faiss(
     q: torch.Tensor,
     X: torch.Tensor, 
     k: int,
-    max_iters: int = 100, 
+    max_iters: int = 40, 
     n_redo: int = 3,
     seed: int = 42
 ) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -40,7 +40,7 @@ def paired_kmeans_faiss(
         gpu=torch.cuda.is_available(), 
         verbose=True,
         spherical=True,
-        decode_block_size=2**12,
+        decode_block_size=2**11,
         seed=seed,
     )
     # otherwise the kmeans implementation sub-samples the training set

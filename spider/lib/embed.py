@@ -51,7 +51,7 @@ def embed_dataloader(
         encoded_embeds.append(embeds)
         
     if convert_to_tensor:
-        return torch.cat(encoded_embeds, dim=0)
+        return torch.cat(encoded_embeds, dim=0).cpu()
     else:
         encoded_embeds = [embeds.cpu().float().numpy() for embeds in encoded_embeds]
         output_array = np.concatenate(encoded_embeds, axis=0)
@@ -184,9 +184,14 @@ class DenseEncoder(torch.nn.Module):
             batch_size=effective_batch_size,
             shuffle=False,
             drop_last=False,
-            num_workers=min(max_num_batches, self.gpu_count * 4), 
+            num_workers=min(
+                max_num_batches, 
+                len(os.sched_getaffinity(0)),
+                self.gpu_count * 8
+            ), 
+            prefetch_factor=4,
             collate_fn=data_collator,
-            persistent_workers=False,
+            persistent_workers=True,
             pin_memory=True
         )
     

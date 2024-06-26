@@ -50,6 +50,9 @@ class TokenizerCollator(transformers.DataCollatorWithPadding):
 
     def __call__(self, features: List[Dict[str, Any]]) -> Dict[str, Any]:
         os.environ['TOKENIZERS_PARALLELISM'] = '1'
+        # print("collate __call__ [1]")
+
+        max_num_chars = 4 * self.max_length
         query = []
         document = []
         random_document = []
@@ -59,11 +62,10 @@ class TokenizerCollator(transformers.DataCollatorWithPadding):
         out_ex["idx"] = []
 
         for ex in features:
-            query.append(ex["query"])
-            document.append(ex["document"])
+            query.append(ex["query"][:max_num_chars])
+            document.append(ex["document"][:max_num_chars])
             out_ex["idx"].append(ex["idx"])
-            if "negative_document" in ex: negative_document.extend(ex["negative_document"])
-            if "random_document" in ex: random_document.append(ex["random_document"])
+            if "negative_document" in ex: negative_document.extend([d[:max_num_chars] for d in ex["negative_document"]])
 
         tokenize_fn = functools.partial(
             self.tokenizer, 
@@ -76,6 +78,7 @@ class TokenizerCollator(transformers.DataCollatorWithPadding):
         out_ex["query_input_ids"] = query_encoded.input_ids
         out_ex["query_attention_mask"] = query_encoded.attention_mask
 
+
         document_encoded = tokenize_fn(document)
         out_ex["document_input_ids"] = document_encoded.input_ids
         out_ex["document_attention_mask"] = document_encoded.attention_mask
@@ -83,14 +86,10 @@ class TokenizerCollator(transformers.DataCollatorWithPadding):
         if len(negative_document):
             negative_document_encoded = tokenize_fn(negative_document)
             out_ex["negative_document_input_ids"] = negative_document_encoded.input_ids
-            out_ex["negative_document_attention_mask"] = negative_document_encoded.attention_mask
-
-        if len(random_document):
-            random_document_encoded = tokenize_fn(random_document)
-            out_ex["random_document_input_ids"] = random_document_encoded.input_ids
-            out_ex["random_document_attention_mask"] = random_document_encoded.attention_mask
+            out_ex["negative_document_attention_mask"] = negative_document_encoded.attention_mask\
 
         out_ex["idx"] = torch.tensor(out_ex["idx"])
+        # print("collate __call__ [2]")
 
         return out_ex
 

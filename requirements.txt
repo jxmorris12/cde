@@ -1,8 +1,11 @@
 accelerate
 bm25_pt
 datasets
+hf-transfer
 mteb
 ninja
+numpy<2.0
 optimum
+torchvision
 transformers
 wandb

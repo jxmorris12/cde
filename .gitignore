@@ -1,4 +1,5 @@
 __pycache__/
+core.*
 data
 data/
 datasets
@@ -8,6 +9,7 @@ notebooks/
 saves
 saves/
 slurm-*.out
+slurm_out/
 slurm-scripts/
 wandb/
 

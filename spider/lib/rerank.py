@@ -424,7 +424,7 @@ def get_reranking_results(
     retriever = RetrievalEvaluator(
         None,
         score_function="dot",
-        batch_size=2048,
+        batch_size=512,
         # This way we'll keep the top 10,000 not just
         #  the top 1,000 (by default) values.
         k_values=[1, 3, 5, 10, 100, 1000, 10_000],
@@ -437,7 +437,7 @@ def get_reranking_results(
         d=queries, 
         col='text',
         save_to_disk=False,
-        batch_size=2048,
+        batch_size=512,
     )["embeds"]
     
     # queries = { query['id']: query['text'] for query in queries }
@@ -461,7 +461,7 @@ def get_reranking_results(
             d=corpus.select(range(corpus_start_idx, corpus_end_idx)), 
             col='text',
             save_to_disk=False,
-            batch_size=2048,
+            batch_size=512,
         )["embeds"]
         cos_scores = retriever.retriever.score_functions["cos_sim"](
             query_embeddings, sub_corpus_embeddings

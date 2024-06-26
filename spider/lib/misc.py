@@ -1,6 +1,7 @@
 from typing import Dict, Iterable, List, Tuple, Union
 
 import collections
+import functools
 import glob
 import json
 import hashlib
@@ -414,6 +415,10 @@ def load_embedder_and_tokenizer(name: str) -> Tuple:
     else:
         model = transformers.AutoModel.from_pretrained(name, trust_remote_code=True)
         tokenizer = transformers.AutoTokenizer.from_pretrained(name)
+
+        # if use_bettertransformer:
+        #     from optimum.bettertransformer import BetterTransformer
+        #     model = BetterTransformer.transform(model)
     return model, tokenizer
 
 
@@ -437,3 +442,28 @@ def count_cpus() -> int:
         return len(os.sched_getaffinity(0)) 
     except AttributeError:
         return multiprocessing.cpu_count()
+
+
+def shuffle_batches(g: torch.Generator, list_of_tensors: List[torch.Tensor]) -> List[int]:
+    all_indices = []
+    for batch_tensor in tqdm_if_main_worker(list_of_tensors, colour="green", desc="Sampler shuffling per-batch"): 
+        rand_perm = torch.randperm(len(batch_tensor), generator=g)
+        batch_list = batch_tensor[rand_perm].tolist()
+        all_indices.extend(batch_list)
+    return all_indices
+
+
+def shuffle_batches_multiproc(g: torch.Generator, list_of_tensors: List[torch.Tensor], num_processes: int = 8) -> List[int]:
+    all_indices = []
+    print(f"Shuffling {len(list_of_tensors)} tensors with {num_processes} workers.")
+    pbar = tqdm_if_main_worker(list_of_tensors, colour="orange", desc=f"Sampler shuffling per-batch (nproc={num_processes})")
+    pool = multiprocessing.Pool(processes=num_processes) 
+    chunk_size = len(list_of_tensors) // num_processes
+    chunks = [list_of_tensors[i:i + chunk_size] for i in range(0, len(list_of_tensors), chunk_size)]
+    worker_func = functools.partial(shuffle_batches, g=g)
+    results = pool.map(worker_func, chunks)
+    all_indices = []
+    for result in results:
+        all_indices.extend(result)
+        pbar.update()
+    return all_indices

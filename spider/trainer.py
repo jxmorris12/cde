@@ -211,7 +211,8 @@ class CustomTrainer(transformers.Trainer):
     def _is_main_worker(self) -> bool:
         return (
             (self.args.local_rank <= 0) and 
-            (int(os.environ.get("LOCAL_RANK", 0)) <= 0)
+            (int(os.environ.get("LOCAL_RANK", 0)) <= 0) and
+            get_rank() == 0
         )
     
     def _inner_training_loop(self, *args, **kwargs):
@@ -253,9 +254,12 @@ class CustomTrainer(transformers.Trainer):
             if get_rank() == 0:
                 print("[rank 0] Resetting memory")
             reset_memory()
+        
+        # print("[0] training_step init", get_rank())
 
         model.train()
         inputs = self._prepare_inputs(inputs)
+        # print("[1] training_step compute_loss", get_rank())
         with self.compute_loss_context_manager():
             loss = self.compute_loss(model, inputs)
         if self.args.n_gpu > 1:
@@ -263,12 +267,14 @@ class CustomTrainer(transformers.Trainer):
         # Uncomment next line to test eval straightaway.
         # self.control.should_evaluate = True  #########
         ##############################################
+        # print("[2] training_step accelerator.backward", get_rank())
         if not self.use_gc:
             self.accelerator.backward(loss)
         self._log_grad_norm_metrics(model=model)
         if self._run_ddp_verify and (get_world_size() > 1) and self.state.global_step in [2, 2000, 20_000]:
             if get_rank() == 0: print("[verify_ddp_weights_equal] running at step", self.state.global_step)
             verify_ddp_weights_equal(model) # TODO: Only call this every once in a while
+        # print("[3] training_step return", get_rank())
         return loss.detach() / self.args.gradient_accumulation_steps
 
     def _contrastive_loss(

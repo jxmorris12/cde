@@ -17,6 +17,8 @@ from spider.lib import (
     cluster_subdomains,
     get_rank, 
     get_world_size, 
+    shuffle_batches,
+    shuffle_batches_multiproc,
     tqdm_if_main_worker,
 ) 
 
@@ -180,11 +182,12 @@ class FixedSubdomainSampler(RandomSampler):
         batch_perm = torch.randperm(num_batches, generator=g)
         # 5. Flatten and return
         print(f"[sampler] finished running get_indices on rank {get_rank()}")
-        all_indices = []
-        for batch_tensor in tqdm_if_main_worker(all_assignments[batch_perm], colour="green", desc="Sampler shuffling per-batch"): 
-            rand_perm = torch.randperm(len(batch_tensor), generator=g)
-            batch_list = batch_tensor[rand_perm].tolist()
-            all_indices.extend(batch_list)
+        
+        use_shuffle_batches_multiproc = False # TODO: Work on this.
+        if use_shuffle_batches_multiproc:
+            all_indices = shuffle_batches_multiproc(g, all_assignments[batch_perm])
+        else:
+            all_indices = shuffle_batches(g, all_assignments[batch_perm])
         return all_indices
         
     def __iter__(self):  
