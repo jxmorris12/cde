@@ -270,12 +270,14 @@ def embed_with_cache(
     print(f"[embed_with_cache] creating datasets")
 
     if not save_to_disk:
+        print("[embed_with_cache] returning dict")
         return { "embeds": embeddings }
 
     datasets_list = []
-    max_dataset_size = 8_000_000
+    max_dataset_size = 1_000_000
     i = 0
     while i < len(embeddings):
+        print("[embed_with_cache] creating dataset from dict -- i =", i)
         dataset = datasets.Dataset.from_dict({
             "embeds": embeddings[i : i + max_dataset_size] 
         })

@@ -106,6 +106,7 @@ def main():
 
     # transformers.logging.set_verbosity_error()
     datasets.logging.set_verbosity_error()
+    datasets.utils.logging.disable_progress_bar()
 
     torch.set_float32_matmul_precision('high')
 
@@ -198,7 +199,7 @@ def main():
         effective_train_batch_size = (training_args.per_device_train_batch_size * get_world_size())
     else:
         effective_train_batch_size = (training_args.per_device_train_batch_size)
-    print(f"[*] loading sampler with effective_train_batch_size = {effective_train_batch_size}")
+    print0(f"[*] loading sampler with effective_train_batch_size = {effective_train_batch_size}")
     train_sampler_fn = functools.partial(
         get_sampler,
         dataset=train_dataset,
@@ -211,6 +212,7 @@ def main():
         clustering_query_to_doc=data_args.clustering_query_to_doc,
         seed=training_args.seed,
     )
+    # breakpoint()
     data_args_eval = copy.copy(data_args)
     data_args_eval.sampling_strategy = "domain" # always set this for eval
     eval_sampler_fn = functools.partial(

@@ -464,7 +464,7 @@ def get_reranking_results(
             batch_size=512,
         )["embeds"]
         cos_scores = retriever.retriever.score_functions["cos_sim"](
-            query_embeddings, sub_corpus_embeddings
+            query_embeddings.cuda(), sub_corpus_embeddings.cuda()
         )
         cos_scores[torch.isnan(cos_scores)] = -1
         cos_scores_top_k_values, cos_scores_top_k_idx = torch.topk(

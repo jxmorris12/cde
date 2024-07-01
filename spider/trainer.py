@@ -65,14 +65,14 @@ class CustomTrainer(transformers.Trainer):
     _eval_sampler_fns: Callable[[], Dict[str, Sampler]]
 
     def __init__(
-                self, 
-                *args,
-                 embedder_tokenizer: transformers.PreTrainedTokenizer,
-                 retrieval_datasets: Dict[str, datasets.Dataset],
-                 train_sampler_fn: Callable[[], Sampler],
-                 eval_sampler_fns: Callable[[], Dict[str, Sampler]],
-                  **kwargs
-                ):
+            self, 
+            *args,
+                embedder_tokenizer: transformers.PreTrainedTokenizer,
+                retrieval_datasets: Dict[str, datasets.Dataset],
+                train_sampler_fn: Callable[[], Sampler],
+                eval_sampler_fns: Callable[[], Dict[str, Sampler]],
+                **kwargs
+            ):
         super().__init__(*args, **kwargs)
         self.max_seq_length = self.model.config.max_seq_length
         self.retrieval_datasets = retrieval_datasets
@@ -246,7 +246,6 @@ class CustomTrainer(transformers.Trainer):
         Overriding from trainer so that we can disable backward()
         in favor of the gradcache backward()
         """
-        # Reset dataloader index
         self.train_dataloader.dataset.reset_dataset_idx()
 
         # Reset memory every once in awhile to try to help CPU/GPU OOM

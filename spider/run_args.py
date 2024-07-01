@@ -10,7 +10,12 @@ import torch
 import transformers
 
 
-from spider.lib import get_rank, get_world_size, count_cpus
+from spider.lib import (
+    count_cpus,
+    get_rank, 
+    get_world_size, 
+    print0,
+)
 
 
 @dataclass
@@ -326,23 +331,23 @@ class TrainingArguments(transformers.TrainingArguments):
             self.report_to = ["wandb"] if (self.local_rank <= 0) else []
         else:
             self.report_to = []
-            print("disabling wandb.")
+            print0("disabling wandb.")
             os.environ["WANDB_MODE"] = "disabled"
         ############################################################################
         num_devices = max(1, torch.cuda.device_count())
-        num_cpus = min(32, num_devices * 4, count_cpus())
+        num_cpus = min(num_devices * 12, count_cpus())
         num_workers = int(num_cpus / num_devices)
         if self.tiny_debug:
-            print("[tiny_debug] Setting num workers to 0")
+            print0("[tiny_debug] Setting num workers to 0")
             num_workers = 0
         self.eval_steps = int(self.eval_steps / num_devices)
         self.save_steps = int(self.save_steps / num_devices)
         self.warmup_steps = int(self.warmup_steps / num_devices)
-        if get_rank() == 0:
-            print(f"training with eval_steps = {self.eval_steps} / num_workers = {num_workers} / warmup_steps = {self.warmup_steps} / world_size {get_world_size()}")
+        print0(f"training with eval_steps = {self.eval_steps} / num_workers = {num_workers} / warmup_steps = {self.warmup_steps} / world_size {get_world_size()}")
         ############################################################################
         self.dataloader_num_workers = num_workers
-        self.dataloader_persistent_workers = (num_workers > 0)
+        self.dataloader_persistent_workers = (num_workers > 0) # This may have been giving me weird deadlocks.
+        self.dataloader_prefetch_factor = 4
         self.dataloader_pin_memory = True
         today_date = datetime.date.today()
         formatted_date = today_date.strftime("%Y-%m-%d")

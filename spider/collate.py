@@ -49,8 +49,7 @@ class TokenizerCollator(transformers.DataCollatorWithPadding):
     # TODO: Fix to use separate tokenizers
 
     def __call__(self, features: List[Dict[str, Any]]) -> Dict[str, Any]:
-        os.environ['TOKENIZERS_PARALLELISM'] = '1'
-        # print("collate __call__ [1]")
+        os.environ['TOKENIZERS_PARALLELISM'] = '0'
 
         max_num_chars = 4 * self.max_length
         query = []
@@ -86,7 +85,7 @@ class TokenizerCollator(transformers.DataCollatorWithPadding):
         if len(negative_document):
             negative_document_encoded = tokenize_fn(negative_document)
             out_ex["negative_document_input_ids"] = negative_document_encoded.input_ids
-            out_ex["negative_document_attention_mask"] = negative_document_encoded.attention_mask\
+            out_ex["negative_document_attention_mask"] = negative_document_encoded.attention_mask
 
         out_ex["idx"] = torch.tensor(out_ex["idx"])
         # print("collate __call__ [2]")

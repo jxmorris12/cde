@@ -26,7 +26,8 @@ from spider.lib import (
     get_spider_cache_dir,
     get_num_proc,
     get_rank,
-    get_reranking_results
+    get_reranking_results,
+    print0
 )
 
 
@@ -111,12 +112,12 @@ def load_beir_uncached(dataset: str, split: str, embedder_rerank: str) -> Tuple[
     out_dir = os.path.join(pathlib.Path(__file__).parent.absolute(), "datasets")
     data_path = os.path.join(out_dir, dataset)
 
-    print(
+    print0(
         "[load_beir_uncached] loading dataset uncached", 
         dataset, "... loading split", split
     )
     ### Load BEIR MSMARCO training dataset, this will be used for query and corpus for reference.
-    print("... getting reranking results")
+    print0("... getting reranking results")
     from mteb import HFDataLoader
     hf_data_loader = HFDataLoader(
         hf_repo=f"mteb/{dataset}", 
@@ -135,7 +136,7 @@ def load_beir_uncached(dataset: str, split: str, embedder_rerank: str) -> Tuple[
 
 def load_beir(dataset: str, split: str, embedder_rerank: str) -> Tuple[datasets.Dataset, datasets.Dataset, Dict[str, Dict[str, int]]]:
     if get_rank() == 0:
-        print("[load_beir] loading dataset", dataset)
+        print0("[load_beir] loading dataset", dataset)
     cache_path = datasets.config.HF_DATASETS_CACHE # something like /home/jxm3/.cache/huggingface/datasets
     corpus_path = os.path.join(cache_path, f'tti_beir_local_{dataset}_corpus_{split}')
     queries_path = os.path.join(cache_path, f'tti_beir_local_{dataset}_queries_{split}')
@@ -150,9 +151,10 @@ def load_beir(dataset: str, split: str, embedder_rerank: str) -> Tuple[datasets.
         queries = datasets_fast_load_from_disk(queries_path)
         logging.info(f"Loading {dataset} split %s qrels from path %s", split, qrels_path)
         qrels = pickle.load(open(qrels_path, 'rb'))
-        logging.info(f"Loading {dataset} split %s ance results from path %s", split, rerank_path)
+        logging.info(f"Loading {dataset} split %s reranking results from path %s", split, rerank_path)
         rerank_results = pickle.load(open(rerank_path, 'rb'))
     else:
+        print0("[rerank] will save reranking results to path", rerank_path)
         corpus, queries, qrels, rerank_results = load_beir_uncached(
             dataset=dataset, split=split, embedder_rerank=embedder_rerank,
         )
@@ -212,6 +214,7 @@ class NomicSupervisedDataset:
             keep_in_memory=False,
             num_proc=32,
         )["train"]
+        # self.dataset = self.dataset.select(range(999))
         self.subdomain_idxs = get_subdomain_idxs_cached(self.dataset)
         self.tokenizer = tokenizer
         self.max_seq_length = max_seq_length
@@ -303,7 +306,7 @@ class NomicSupervisedDataset:
     
     def __getitem__(self, query_id: int) -> Dict[str, torch.Tensor]: 
         ex = self.dataset[query_id]
-        # print("NomicSupervisedDataset.__getitem__", query_id)
+        # print0("NomicSupervisedDataset.__getitem__", query_id)
         
         if self.use_prefix:
             query_prefix = self.get_query_prefix(ex["dataset"])
@@ -341,7 +344,7 @@ def get_subdomain_idxs_cached(dataset: datasets.Dataset):
         return pickle.load(open(cache_file_path, 'rb'))
     else:
         subdomain_idxs = collections.defaultdict(list)
-        print("Getting subdomains from dataset")
+        print0("Getting subdomains from dataset")
         subdomains = dataset["dataset"]
         for i in tqdm.trange(len(dataset), desc="Counting dataset subdomains", colour="blue"):
             subdomain = subdomains[i]
@@ -356,20 +359,23 @@ class NomicUnsupervisedDataset(torch.utils.data.Dataset):
     max_seq_length: int
     use_prefix: bool
     def __init__(self, tokenizer: transformers.AutoTokenizer, max_seq_length: int, use_prefix: bool = False):
-        print("[NomicUnsupervisedDataset] loading dataset")
+        print0("[NomicUnsupervisedDataset] loading dataset")
         self.dataset = (
             datasets.load_dataset(
                 "nomic-ai/nomic_embed_unsupervised",
                 num_proc=32,
+                keep_in_memory=False,
             )["train"]
         )
-        print("[NomicUnsupervisedDataset] loading subdomain idxs")
+        # self.dataset = self.dataset.select(range(999))
+        print0("[NomicUnsupervisedDataset] loading subdomain idxs")
         subdomain_idxs_dict = get_subdomain_idxs_cached(
             dataset=self.dataset
         )
+        # self.dataset = self.dataset.select(range(999))
         # TODO: Share dict between processes.
         self.subdomain_idxs = subdomain_idxs_dict
-        assert len(self.dataset) == 238_998_494
+        # assert len(self.dataset) == 238_998_494
         self.tokenizer = tokenizer
         self.max_seq_length = max_seq_length
 
@@ -430,6 +436,7 @@ class NomicUnsupervisedDataset(torch.utils.data.Dataset):
         query = query_prefix + ex["query"]
         document = document_prefix + ex["document"]
         # random_idx = random.choice(range(len(self.dataset)))
+        # print0("__collate__ call [3]")
         return {
             'idx': query_id,
             ######################################################################
@@ -442,7 +449,7 @@ class NomicUnsupervisedDataset(torch.utils.data.Dataset):
 
 @functools.lru_cache()
 def get_char_ids(vocab_size: int, tokenizer_name: str) -> List[torch.Tensor]:
-    print("GET_CHAR_IDS")
+    print0("GET_CHAR_IDS")
     tokenizer = transformers.AutoTokenizer.from_pretrained(tokenizer_name)
     char_strs = [
         f'{(idx+1)}. ' for idx in range(vocab_size)
@@ -627,4 +634,4 @@ def load_synthetic_words_dataset() -> Tuple[datasets.Dataset, datasets.Dataset]:
 
 if __name__ == '__main__':
     ds_train = NomicSupervisedDataset()
-    print(ds_train[0])
+    print0(ds_train[0])

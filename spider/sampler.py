@@ -17,6 +17,7 @@ from spider.lib import (
     cluster_subdomains,
     get_rank, 
     get_world_size, 
+    print0,
     shuffle_batches,
     shuffle_batches_multiproc,
     tqdm_if_main_worker,
@@ -44,10 +45,10 @@ class Sampler(abc.ABC, torch.utils.data.Sampler):
         self.rank = get_rank()
         self.world_size = get_world_size()
         self.num_samples = num_samples or (
-            math.floor(len(self.dataset) / self.world_size / self.batch_size) 
+            (len(self.dataset) // self.world_size // self.batch_size) 
                 * self.batch_size
         )
-        # if get_rank() == 0: print(f"[Sampler] set self.num_samples={self.num_samples} (original num_samples={num_samples})")
+        # if get_rank() == 0: print0(f"[Sampler] set self.num_samples={self.num_samples} (original num_samples={num_samples})")
         self.total_size = self.num_samples * self.world_size
         self.shuffle = shuffle
         self.seed = seed
@@ -194,9 +195,9 @@ class FixedSubdomainSampler(RandomSampler):
         idxs = self._get_indices()
         num_chunks_per_rank = self.total_size // self.batch_size // self.world_size
 
-        global_chunk_offset = self.batch_size * self.rank
+        local_chunk_offset = self.batch_size * self.rank
         for chunk_idx in range(num_chunks_per_rank):
-            local_chunk_offset = (chunk_idx * self.world_size * self.batch_size)
+            global_chunk_offset = (chunk_idx * self.world_size * self.batch_size)
             chunk_start = global_chunk_offset + local_chunk_offset
             for i in idxs[chunk_start:chunk_start+self.batch_size]:
                 yield i

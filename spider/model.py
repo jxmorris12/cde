@@ -39,12 +39,12 @@ class BiEncoder(transformers.PreTrainedModel):
         super().__init__(config=config)
 
         if config.limit_layers:
-            print(f"Limiting layers to {config.limit_layers}")
+            print0(f"Limiting layers to {config.limit_layers}")
             limit_layers(embedder, config.limit_layers)
     
         self.embedder = embedder
         # if ("t5" in embedder.config.model_type):
-        #     print(f"using torch.compile() on embedder of type `{embedder.config.model_type}`")
+        #     print0(f"using torch.compile() on embedder of type `{embedder.config.model_type}`")
         #     self.embedder = torch.compile(self.embedder) 
         self.hidden_size = self.embedder.config.hidden_size
         self.mlp = torch.nn.Sequential(
@@ -226,7 +226,7 @@ class DatasetConditionedBiencoder(transformers.PreTrainedModel):
             torch.nn.ReLU(),
             torch.nn.Linear(self.hidden_size, self.config.embedding_output_dim or self.hidden_size)
         )
-        self.randomize_dataset_sequence_order = True
+        self.randomize_dataset_sequence_order = False
         self.sequence_dropout_prob = vars(config).get("transductive_sequence_dropout_prob", 0.0)
         if self.sequence_dropout_prob > 0.0:
             self.sequence_dropout_null_embedding = torch.nn.Parameter(
@@ -464,7 +464,7 @@ class DatasetTransformer(transformers.PreTrainedModel):
         super().__init__(config=config)
 
         if config.limit_layers:
-            print(f"Limiting layers to {config.limit_layers}")
+            print0(f"Limiting layers to {config.limit_layers}")
             limit_layers(embedder, config.limit_layers)
             limit_layers(dataset_backbone, config.limit_layers)
         
@@ -516,7 +516,7 @@ class DatasetTransformerEncoderDecoder(transformers.PreTrainedModel):
         super().__init__(config=config)
 
         if config.limit_layers:
-            print(f"Limiting layers to {config.limit_layers}")
+            print0(f"Limiting layers to {config.limit_layers}")
             limit_layers(embedder, config.limit_layers)
             limit_layers(dataset_backbone, config.limit_layers)
         
