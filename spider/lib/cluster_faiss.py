@@ -40,12 +40,12 @@ def paired_kmeans_faiss(
         gpu=torch.cuda.is_available(), 
         verbose=True,
         spherical=True,
-        decode_block_size=2**20,
+        decode_block_size=2**24,
         seed=seed,
     )
     # otherwise the kmeans implementation sub-samples the training set
     # to <= 256 points per centroid
-    # kmeans.max_points_per_centroid = 512
+    kmeans.max_points_per_centroid = k * 2
     print("[paired_kmeans_faiss] calling kmeans.train()")
     kmeans.train(paired_vectors)
 

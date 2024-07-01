@@ -4,6 +4,7 @@ data
 data/
 datasets
 datasets/
+log_test/
 logs/
 notebooks/
 saves
