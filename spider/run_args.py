@@ -256,6 +256,14 @@ class TrainingArguments(transformers.TrainingArguments):
             "required": "True",
         }
     )
+    exp_group: str = field(
+        default="",
+        metadata={
+            "help": "Group name for multiple experiments, a string",
+            "required": "False",
+        }
+    )
+
     lr_scheduler_type: str = "constant_with_warmup"
     warmup_steps: int = field(
         default=8_000,

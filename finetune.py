@@ -274,7 +274,7 @@ def main():
         print("starting wandb run with name", wandb_run_id)
         wandb.init(
             entity="jack-morris",
-            project="tti-nomic-6",
+            project="tti-nomic-7",
             name=wandb_run_id,
             resume=(checkpoint is not None),
     )
