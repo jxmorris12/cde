@@ -71,6 +71,8 @@ class CustomTrainer(transformers.Trainer):
                 retrieval_datasets: Dict[str, datasets.Dataset],
                 train_sampler_fn: Callable[[], Sampler],
                 eval_sampler_fns: Callable[[], Dict[str, Sampler]],
+                data_args,
+                model_args,
                 **kwargs
             ):
         super().__init__(*args, **kwargs)
@@ -78,6 +80,8 @@ class CustomTrainer(transformers.Trainer):
         self.retrieval_datasets = retrieval_datasets
         self._train_sampler_fn = train_sampler_fn
         self._eval_sampler_fns = eval_sampler_fns
+        self.data_args = data_args
+        self.model_args = model_args
         self._signature_columns = [
             "idx",
             "query", "document",
@@ -101,6 +105,18 @@ class CustomTrainer(transformers.Trainer):
         effective_batch_size = get_world_size() * self.args.per_device_train_batch_size
         self._memory_reset_step_frequency = int(2000 * effective_batch_size / 256)
         self._hn_filter_model = None
+    
+    def _save(self, output_dir: Optional[str] = None, state_dict=None):
+        super()._save(output_dir=output_dir, state_dict=state_dict)
+        
+        if get_rank() == 0:
+            # Save trainer data args and model args
+            torch.save(
+                self.data_args, os.path.join(output_dir, "data_args.bin")
+            )
+            torch.save(
+               self.model_args, os.path.join(output_dir, "model_args.bin"),
+            )
     
     def consider_gather(self, tensor: torch.Tensor) -> torch.Tensor:
         if self.args.ddp_share_negatives_between_gpus:

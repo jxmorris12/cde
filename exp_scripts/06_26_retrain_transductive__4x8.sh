@@ -28,7 +28,6 @@ export HF_HUB_OFFLINE=1
 
 srun torchrun \
     --nnodes 8 \
-    --nproc_per_node 1 \
     --rdzv_id $RANDOM \
     --rdzv_backend c10d \
     --rdzv_endpoint $head_node_ip:29500 \

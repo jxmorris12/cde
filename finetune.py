@@ -105,7 +105,7 @@ def main():
     # os.environ["TORCH_DISTRIBUTED_DEBUG"] = "DETAIL"
 
     # transformers.logging.set_verbosity_error()
-    datasets.logging.set_verbosity_error()
+    # datasets.logging.set_verbosity_error()
     datasets.utils.logging.disable_progress_bar()
 
     torch.set_float32_matmul_precision('high')
@@ -124,7 +124,7 @@ def main():
 
     if training_args.tiny_debug: 
         datasets.logging.set_verbosity_info()
-        beir_dataset_names = [ 'quora' ]
+        beir_dataset_names = [ 'arguana' ]
         training_args.max_eval_batches = 1
     else:
         beir_dataset_names = [
@@ -226,7 +226,7 @@ def main():
         clustering_query_to_doc=data_args.clustering_query_to_doc,
         num_samples=(training_args.per_device_eval_batch_size * training_args.max_eval_batches),
     )
-    print("[main] creating val samplers")
+    print0("[main] creating val samplers")
     eval_sampler_fns = {
         "cluster_within_domain": functools.partial(eval_sampler_fn, sampling_strategy="cluster_within_domain"),
         "domain": functools.partial(eval_sampler_fn, sampling_strategy="domain"),
@@ -251,7 +251,7 @@ def main():
         )
     
     if training_args.model_state_dict_from_path:
-        print("[load_model] loading from path", training_args.model_state_dict_from_path)
+        print0("[load_model] loading from path", training_args.model_state_dict_from_path)
         state_dict = load_model_state_dict_from_path(
             training_args.model_state_dict_from_path
         )
@@ -271,7 +271,7 @@ def main():
     checkpoint = get_checkpoint(training_args)
     if get_rank() == 0:
         wandb_run_id = training_args.exp_name
-        print("starting wandb run with name", wandb_run_id)
+        print0("starting wandb run with name", wandb_run_id)
         wandb.init(
             entity="jack-morris",
             project="tti-nomic-7",
@@ -297,6 +297,8 @@ def main():
         data_collator=collator,
         model=model,
         args=training_args,
+        data_args=data_args,
+        model_args=model_args,
         train_dataset=train_dataset,
         # eval_dataset=eval_dataset,
         eval_dataset=None,
@@ -307,15 +309,6 @@ def main():
     )
     logging.info("train() loaded checkpoint %s", checkpoint)
     print0("[main] trainer.train()")
-    
-    if get_rank() == 0:
-        # Save trainer data args and model args
-        torch.save(
-            data_args, os.path.join(training_args.output_dir, "data_args.bin")
-        )
-        torch.save(
-            model_args, os.path.join(training_args.output_dir, "model_args.bin"),
-        )
 
     # trainer.evaluate_retrieval_datasets()
     trainer.train(resume_from_checkpoint=checkpoint)
