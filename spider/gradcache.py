@@ -10,7 +10,6 @@ from itertools import repeat
 import accelerate
 import torch
 from torch import Tensor, nn
-from torch.cuda.amp import autocast
 from torch.utils.checkpoint import get_device_states, set_device_states
 
 from spider.lib.dist import get_rank, get_world_size
@@ -170,7 +169,7 @@ class GradCache:
         :param model_input: input to the model call
         :return: model output
         """
-        with autocast() if self.bf16 else nullcontext():
+        with torch.autocast(device_type="cuda") if self.bf16 else nullcontext():
             if isinstance(model_input, Tensor):
                 return model(model_input)
             elif isinstance(model_input, list):
@@ -371,7 +370,7 @@ class GradCache:
         for x, state, gradient, sync_context in zip(
             model_inputs_tqdm, random_states, cached_gradients, sync_contexts
         ):
-            with state, sync_context(), (autocast() if self.bf16 else nullcontext()):
+            with state, sync_context(), (torch.autocast(device_type="cuda") if self.bf16 else nullcontext()):
                 y = model(
                     input_ids=x["input_ids"],
                     attention_mask=x["attention_mask"],
@@ -450,7 +449,7 @@ class GradCache:
         with torch.no_grad():
             for x in first_stage_input_chunks_tqdm:
                 first_stage_rnd_states.append(RandContext(*self.get_input_tensors(x)))
-                with autocast() if self.bf16 else nullcontext():
+                with torch.autocast(device_type="cuda") if self.bf16 else nullcontext():
                     y = first_stage_model(
                         input_ids=x['dataset_input_ids'],
                         attention_mask=x['dataset_attention_mask'],
@@ -477,7 +476,7 @@ class GradCache:
             with torch.no_grad():
                 for x in second_stage_input_chunks_tqdm:
                     rnd_states.append(RandContext(*self.get_input_tensors(x)))
-                    with autocast() if self.bf16 else nullcontext():
+                    with torch.autocast(device_type="cuda") if self.bf16 else nullcontext():
                         y = _model(
                             input_ids=x["input_ids"],
                             attention_mask=x["attention_mask"],
@@ -547,7 +546,7 @@ class GradCache:
         for x, state, gradient, sync_context in zip(
             first_stage_input_chunks, first_stage_rnd_states, first_stage_gradients, sync_contexts
         ):
-            with state, sync_context(), (autocast() if self.bf16 else nullcontext()):
+            with state, sync_context(), (torch.autocast(device_type="cuda") if self.bf16 else nullcontext()):
                 y = first_stage_model(
                     input_ids=x["dataset_input_ids"],
                     attention_mask=x["dataset_attention_mask"],
