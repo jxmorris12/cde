@@ -10,8 +10,12 @@ import datasets
 import torch
 import tqdm
 
-from spider.lib.cluster_faiss import paired_kmeans_faiss
 from bm25_pt.bm25 import TokenizedBM25
+from sklearn.decomposition import TruncatedSVD
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import Normalizer
+
+from spider.lib.cluster_faiss import paired_kmeans_faiss
 
 from .dist import (
     get_rank, 
@@ -39,7 +43,7 @@ SHOULD_MAXIMIZE_CLUSTER_DISTANCE_FOR_MODEL = {
 }
 
 
-def pad_to_length(t, max_doc_length: int = 128):
+def pad_to_length(t, max_doc_length: int = 256):
     if len(t) < max_doc_length:
         nz = max_doc_length - len(t) 
         t = torch.cat((t, torch.zeros((nz,))), dim=0)
@@ -92,7 +96,7 @@ def embed_for_clustering(
             dataset,
             query_key,
             save_to_disk=False,
-            batch_size=512,
+            batch_size=2048,
         )
         print("[embed_with_cache] halving query embeddings")
         query_embeddings = query_embeddings["embeds"].half().cpu()
@@ -107,7 +111,7 @@ def embed_for_clustering(
             dataset,
             document_key,
             save_to_disk=False,
-            batch_size=512,
+            batch_size=2048,
         )
         corpus_embeddings = corpus_embeddings["embeds"].half().cpu()
         print("[embed_with_cache] got corpus embeddings, remapping")
@@ -251,6 +255,7 @@ def cluster_dataset_uncached(
         query_key: str,
         document_key: str,
         cluster_size: int,
+        downscale_and_normalize: bool,
     ) -> Dict[int, List[int]]:
     print("[cluster_dataset_uncached] calling embed_for_clustering...")
     q, X = embed_for_clustering(
@@ -260,12 +265,30 @@ def cluster_dataset_uncached(
         model=model,
         query_to_doc=query_to_doc,
     )
+
+    if downscale_and_normalize:
+        model = Pipeline(
+            [
+                ('svd', TruncatedSVD(n_components=128)),
+                ('normalizer', Normalizer(copy=False))
+            ]
+        )
+        print("[cluster_dataset_uncached] calling fit-transform on queries")
+        q = model.fit_transform(q.cpu().numpy())
+        q = torch.tensor(q, dtype=torch.float16, device='cpu')
+        print("[cluster_dataset_uncached] calling fit-transform on docs")
+        X = model.transform(X)
+        X = torch.tensor(X, dtype=torch.float16, device='cpu')
+
     gc.collect()
     
     k = math.ceil(len(X) / cluster_size)
     is_sparse = (model == "bm25")
 
-    print("--> calling faiss...")
+    q = q.cpu()
+    X = X.cpu()
+
+    print("cluster_dataset_uncached] calling faiss...")
     if is_sparse:
         _, assignments = paired_kmeans_sparse(
             q=q, 
@@ -294,16 +317,19 @@ def cluster_dataset(
         query_key: str,
         document_key: str,
         cluster_size: int,
+        downscale_and_normalize: bool,
     ) -> Dict[int, List[int]]:
+    assert get_world_size() == 1, "can't cluster in DDP"
     # TODO: Turn this caching logic into a nice decorator?
     clustering_hash = get_cache_location_from_kwargs(
         # method="cluster_dataset",
         dataset_fingerprint=dataset._fingerprint,
         document_key=document_key,
         query_key=query_key,
-        batch_size=cluster_size, # TODO: Update this without invalidating cache somehow.
+        batch_size=cluster_size,
         model=model,
         query_to_doc=query_to_doc,
+        downscale_and_normalize=downscale_and_normalize,
     )
     print("[cluster_dataset] checking for cluster at file", clustering_hash)
     if os.path.exists(clustering_hash):
@@ -321,6 +347,7 @@ def cluster_dataset(
                 query_key=query_key,
                 document_key=document_key,
                 cluster_size=cluster_size,
+                downscale_and_normalize=downscale_and_normalize,
             )
         else:
             num_sub_datasets = math.ceil(len(dataset) / MAX_DATASET_LEN)
@@ -344,6 +371,7 @@ def cluster_dataset(
                     query_key=query_key,
                     document_key=document_key,
                     cluster_size=cluster_size,
+                    downscale_and_normalize=downscale_and_normalize,
                 )
                 new_clusters = set()
                 for data_idx, cluster in tqdm_if_main_worker(mini_result.items()):
@@ -370,6 +398,7 @@ def cluster_subdomains_uncached(
         cluster_size: int, 
         batch_size: int,
         model: str,
+        downscale_and_normalize: bool,
     ) -> List[Dict[int, List[int]]]:
     """Creates clusters of cluster_size and combines them into subdomain-specific batches of ~batch_size."""
     offset = 0
@@ -378,13 +407,13 @@ def cluster_subdomains_uncached(
         print("WARNING: batch size", batch_size, "is less than cluster size", cluster_size)
     
     subdomains_smallest_first = sorted(subdomains.items(), key=lambda x: len(x[1]))
-    subdomains_largest_first = sorted(subdomains.items(), key=lambda x: -len(x[1]))
+    # subdomains_largest_first = sorted(subdomains.items(), key=lambda x: -len(x[1]))
     all_cluster_assignments = []
 
-    import random
-    import time
-    random.seed(time.time())
-    random.shuffle(subdomains_smallest_first)
+    # import random
+    # import time
+    # random.seed(time.time())
+    # random.shuffle(subdomains_smallest_first)
     for j, (_, data_idxs) in enumerate(subdomains_smallest_first):
         perc = (j + 1) / len(subdomains) * 100
         print(f"({j + 1} / {len(subdomains)} -- {perc:.1f}%) selecting {len(data_idxs)} indices for clustering")
@@ -400,6 +429,7 @@ def cluster_subdomains_uncached(
             document_key="document",
             query_to_doc=query_to_doc,
             cluster_size=cluster_size,
+            downscale_and_normalize=downscale_and_normalize,
         )
         mini_cluster_assignments = collections.defaultdict(list)
         for j, raw_cluster in tqdm_if_main_worker(cluster_assignments.items(), leave=False, colour="blue"):
@@ -418,6 +448,7 @@ def cluster_subdomains(
         batch_size: int, 
         cluster_size: int,
         model: str,
+        downscale_and_normalize: bool
     ) -> List[Dict[int, List[int]]]:
     clustering_hash = get_cache_location_from_kwargs(
         method="cluster_subdomains__list",
@@ -426,6 +457,7 @@ def cluster_subdomains(
         cluster_size=cluster_size,
         model=model,
         query_to_doc=query_to_doc,
+        downscale_and_normalize=downscale_and_normalize,
     )
     print0("[cluster_subdomains] checking for cluster at file", clustering_hash)
     if os.path.exists(clustering_hash):
@@ -439,6 +471,7 @@ def cluster_subdomains(
             cluster_size=cluster_size,
             batch_size=batch_size,
             model=model,
+            downscale_and_normalize=downscale_and_normalize,
         )
         gc.collect()
         torch.cuda.empty_cache()

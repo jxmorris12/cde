@@ -134,6 +134,12 @@ class DataArguments:
             "choices": [True, False],
         }
     )
+    clustering_downscale_and_normalize: bool = field(
+        default=True,
+        metadata={
+            "help": "Whether to downscale and then normalize embeddings before clustering",
+        }
+    )
     num_hard_negatives: int = field(
         default=0,
         metadata={

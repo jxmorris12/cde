@@ -48,7 +48,7 @@ def embed_dataloader(
         else:
             # already pooled
             embeds = outputs
-        encoded_embeds.append(embeds)
+        encoded_embeds.append(embeds.cpu())
         
     if convert_to_tensor:
         return torch.cat(encoded_embeds, dim=0).cpu()
@@ -102,7 +102,7 @@ class DenseEncoder(torch.nn.Module):
         self.query_prefix = query_prefix
         self.document_prefix = document_prefix
         self.model_kwargs = {}
-        self._max_num_chars = 2048
+        self._max_num_chars = (self.max_length * 4)
 
     def tokenize_transform(
             self,
@@ -116,7 +116,6 @@ class DenseEncoder(torch.nn.Module):
             [prefix + t[:self._max_num_chars] for t in texts],
             max_length=max_length,
             padding=True,
-            # padding="max_length",
             truncation=True,
         )
         return batch_dict
@@ -167,7 +166,7 @@ class DenseEncoder(torch.nn.Module):
             else:
                 raise RuntimeError("unknown dataset format to encode")
         
-        os.environ["TOKENIZERS_PARALLELISM"] = "1"
+        os.environ["TOKENIZERS_PARALLELISM"] = "0"
         dataset.set_transform(
             functools.partial(
                 self.tokenize_transform, 
@@ -179,16 +178,17 @@ class DenseEncoder(torch.nn.Module):
         data_collator = transformers.DataCollatorWithPadding(self.tokenizer, pad_to_multiple_of=8)
         effective_batch_size = (batch_size * max(1, self.gpu_count))
         max_num_batches = int(math.ceil(len(dataset) / effective_batch_size))
+        num_workers = min(
+            max_num_batches, 
+            len(os.sched_getaffinity(0)),
+        )
+        print(f"[DenseEncoder] created dataloader with {num_workers} workers, effective_batch_size={effective_batch_size}, len(dataset)={len(dataset)}")
         return torch.utils.data.DataLoader(
             dataset,
             batch_size=effective_batch_size,
             shuffle=False,
             drop_last=False,
-            num_workers=min(
-                max_num_batches, 
-                len(os.sched_getaffinity(0)),
-                self.gpu_count * 8
-            ), 
+            num_workers=num_workers, 
             prefetch_factor=4,
             collate_fn=data_collator,
             persistent_workers=True,
@@ -222,6 +222,7 @@ class DenseEncoder(torch.nn.Module):
         self._consider_putting_model_on_device()
 
         show_progress_bar = (len(dataset) >= 128) and show_progress_bar
+        print("[DenseEncoder] encode() calling embed_dataloader")
         encoded_embeds = embed_dataloader(
             self.encoder,
             data_loader, 

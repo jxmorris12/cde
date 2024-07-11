@@ -10,7 +10,6 @@ import random
 import datasets
 import numpy as np
 import torch
-
 from spider.dataset import NomicSupervisedDataset, NomicUnsupervisedDataset
 from spider.lib import (
     cluster_dataset,
@@ -213,6 +212,7 @@ class AutoClusterSampler(FixedSubdomainSampler):
             cluster_size: int,
             shuffle: bool,
             share_negatives_between_gpus: bool,
+            downscale_and_normalize: bool,
             model: str,
             num_samples: Optional[int] = None,
             seed: int = 42,
@@ -230,6 +230,7 @@ class AutoClusterSampler(FixedSubdomainSampler):
         self.query_to_doc = query_to_doc
         self.cluster_size = cluster_size
         self.share_negatives_between_gpus = share_negatives_between_gpus
+        self.downscale_and_normalize = downscale_and_normalize
     
     @property
     def batch_assignments(self) -> Dict[int, List[int]]:
@@ -240,6 +241,7 @@ class AutoClusterSampler(FixedSubdomainSampler):
             document_key=self.dataset._query_input_ids_key,
             query_to_doc=self.query_to_doc,
             cluster_size=self.cluster_size,
+            downscale_and_normalize=self.downscale_and_normalize,
         )
         assert len(self.dataset) == len(cluster_assignments)
         batch_assignments = collections.defaultdict(list)
@@ -260,6 +262,7 @@ class AutoClusterWithinDomainSampler(FixedSubdomainSampler):
             cluster_size: int,
             shuffle: bool,
             share_negatives_between_gpus: bool,
+            downscale_and_normalize: bool,
             model: str,
             num_samples: Optional[int] = None,
             seed: int = 42,
@@ -276,6 +279,7 @@ class AutoClusterWithinDomainSampler(FixedSubdomainSampler):
         self.query_to_doc = query_to_doc
         self.batch_size = batch_size
         self.cluster_size = cluster_size
+        self.downscale_and_normalize = downscale_and_normalize
         self.share_negatives_between_gpus = share_negatives_between_gpus
         self.dataset = dataset
         self.model = model
@@ -289,6 +293,7 @@ class AutoClusterWithinDomainSampler(FixedSubdomainSampler):
             cluster_size=self.cluster_size,
             batch_size=self.batch_size,
             model=self.model,
+            downscale_and_normalize=self.downscale_and_normalize,
         )
     
     def _get_batch_lists(self) -> List[Iterable[int]]:
@@ -312,6 +317,7 @@ def get_sampler(
     cluster_size: int,
     shuffle: bool,
     share_negatives_between_gpus: bool,
+    downscale_and_normalize: bool,
     clustering_model: str,
     clustering_query_to_doc: bool = True,
     num_samples: Optional[int] = None,
@@ -340,6 +346,7 @@ def get_sampler(
             batch_size=batch_size,
             shuffle=shuffle,
             cluster_size=cluster_size,
+            downscale_and_normalize=downscale_and_normalize,
             share_negatives_between_gpus=share_negatives_between_gpus,
             query_to_doc=clustering_query_to_doc, 
             model=clustering_model,
@@ -353,6 +360,7 @@ def get_sampler(
             shuffle=shuffle,
             share_negatives_between_gpus=share_negatives_between_gpus,
             cluster_size=cluster_size,
+            downscale_and_normalize=downscale_and_normalize,
             query_to_doc=clustering_query_to_doc, 
             model=clustering_model,
             num_samples=num_samples,

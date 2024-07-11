@@ -6,6 +6,7 @@ import os
 import logging
 import os
 
+import faiss
 import datasets
 import torch
 import transformers
@@ -209,6 +210,7 @@ def main():
         share_negatives_between_gpus=training_args.ddp_share_negatives_between_gpus,
         shuffle=True,
         clustering_model=data_args.clustering_model,
+        downscale_and_normalize=data_args.clustering_downscale_and_normalize,
         clustering_query_to_doc=data_args.clustering_query_to_doc,
         seed=training_args.seed,
     )
@@ -224,6 +226,7 @@ def main():
         shuffle=False,
         clustering_model="gtr_base",
         clustering_query_to_doc=data_args.clustering_query_to_doc,
+        downscale_and_normalize=data_args.clustering_downscale_and_normalize,
         num_samples=(training_args.per_device_eval_batch_size * training_args.max_eval_batches),
     )
     print0("[main] creating val samplers")

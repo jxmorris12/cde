@@ -49,7 +49,7 @@ class TokenizerCollator(transformers.DataCollatorWithPadding):
     # TODO: Fix to use separate tokenizers
 
     def __call__(self, features: List[Dict[str, Any]]) -> Dict[str, Any]:
-        os.environ['TOKENIZERS_PARALLELISM'] = '0'
+        os.environ['TOKENIZERS_PARALLELISM'] = '1'
 
         max_num_chars = 4 * self.max_length
         query = []

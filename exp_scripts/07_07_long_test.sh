@@ -4,8 +4,8 @@
 #SBATCH --job-name=transductive
 #SBATCH --output=slurm_out/pretrain_%j.out
 #SBATCH --error=slurm_out/pretrain_%j.err
-#SBATCH --nodes=7
-#SBATCH --ntasks=7
+#SBATCH --nodes=4
+#SBATCH --ntasks=4
 #SBATCH --gres=gpu:8
 #SBATCH --cpus-per-task=64
 #SBATCH --time=3-00:00
@@ -32,8 +32,8 @@ export HF_HUB_OFFLINE=1
 
 
 srun torchrun \
-    --nnodes 7 \
+    --nnodes 4 \
     --rdzv_id $RANDOM \
     --rdzv_backend c10d \
     --rdzv_endpoint $head_node_ip:29500 \
-    --nproc_per_node 8 finetune.py --per_device_train_batch_size 256 --per_device_eval_batch_size 256 --use_wandb 1 --dataset nomic_unsupervised --sampling_strategy cluster_within_domain --num_train_epochs 40 --learning_rate 1e-5 --embedder nomic-ai/nomic-bert-2048 --clustering_model gtr_base --clustering_query_to_doc 1 --automatically_deduplicate_documents 0 --automatically_deduplicate_queries 1 --arch transductive --ddp_find_unused_parameters 0 --eval_rerank_topk 64 --lr_scheduler_type linear --warmup_steps 5600 --disable_dropout 1 --max_seq_length 512 --logging_steps 2000 --train_cluster_size 224 --eval_cluster_size 256 --use_prefix 1 --transductive_corpus_size 256 --save_steps 50000 --logit_scale 50 --max_eval_batches 4 --exp_name 2024-07-07-transductive-pretrain-transductive-long-6node --exp_group 2024-07-07-main-01--test --ddp_share_negatives_between_gpus 0 --torch_compile 0 --use_gc 1 --fp16 0 --bf16 1 --eval_steps 200000 --sampling_strategy cluster_within_domain --use_wandb 1 --max_batch_size_fits_in_memory 256
+    --nproc_per_node 8 finetune.py --per_device_train_batch_size 256 --per_device_eval_batch_size 256 --use_wandb 1 --dataset nomic_unsupervised --sampling_strategy cluster_within_domain --num_train_epochs 40 --learning_rate 1e-5 --embedder nomic-ai/nomic-bert-2048 --clustering_model gtr_base --clustering_query_to_doc 1 --automatically_deduplicate_documents 0 --automatically_deduplicate_queries 1 --arch transductive --ddp_find_unused_parameters 0 --eval_rerank_topk 64 --lr_scheduler_type linear --warmup_steps 5600 --disable_dropout 1 --max_seq_length 512 --logging_steps 2000 --train_cluster_size 224 --eval_cluster_size 256 --use_prefix 1 --transductive_corpus_size 256 --save_steps 50000 --logit_scale 50 --max_eval_batches 4 --exp_name 2024-07-08-transductive-pretrain-transductive-long-6node --exp_group 2024-07-07-main-01--test --ddp_share_negatives_between_gpus 0 --torch_compile 0 --use_gc 1 --fp16 0 --bf16 1 --eval_steps 200000 --use_wandb 1 --max_batch_size_fits_in_memory 128
