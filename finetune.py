@@ -12,7 +12,7 @@ import torch
 import transformers
 import wandb
 
-from spider.collate import DocumentQueryCollatorWithPadding, TokenizerCollator
+from spider.collate import DocumentQueryCollatorWithPadding, TokenizedCollator
 from spider.dataset import (
     load_synthetic_words_dataset, 
     BeirDataset, NomicSupervisedDataset, NomicUnsupervisedDataset
@@ -181,7 +181,7 @@ def main():
             use_prefix=data_args.use_prefix,
         )
         # Need to tokenize and collate for this dataset
-        collator_cls = TokenizerCollator
+        collator_cls = TokenizedCollator
     elif data_args.dataset == 'nomic_supervised':
         train_dataset = NomicSupervisedDataset(
             tokenizer=embedder_tokenizer,
@@ -191,7 +191,7 @@ def main():
         )
         eval_dataset = None
         # Need to tokenize and collate for this dataset
-        collator_cls = TokenizerCollator
+        collator_cls = TokenizedCollator
     else:
         raise ValueError(f'Unsupported dataset {data_args.dataset}')
     

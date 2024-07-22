@@ -354,13 +354,13 @@ class TrainingArguments(transformers.TrainingArguments):
         if self.tiny_debug:
             print0("[tiny_debug] Setting num workers to 0")
             num_workers = 0
-        self.eval_steps = int(self.eval_steps / num_devices)
-        self.save_steps = int(self.save_steps / num_devices)
+        self.eval_steps = int(self.eval_steps / num_devices * 512 / self.per_device_train_batch_size)
+        self.save_steps = int(self.save_steps / num_devices * 512 / self.per_device_train_batch_size)
         self.warmup_steps = int(self.warmup_steps / num_devices)
         print0(f"training with eval_steps = {self.eval_steps} / num_workers = {num_workers} / warmup_steps = {self.warmup_steps} / save steps = {self.save_steps} / world_size {get_world_size()}")
         ############################################################################
         self.dataloader_num_workers = num_workers
-        self.dataloader_persistent_workers = (num_workers > 0) # This may have been giving me weird deadlocks.
+        self.dataloader_persistent_workers = False # (num_workers > 0) # This may have been giving me weird deadlocks.
         self.dataloader_prefetch_factor = 4 if (num_workers > 0) else None
         self.dataloader_pin_memory = True
         today_date = datetime.date.today()

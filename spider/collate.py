@@ -39,7 +39,7 @@ def cut_padding(batch: Dict[str, torch.Tensor], pad_token: int) -> Dict[str, tor
     return batch
 
 
-class TokenizerCollator(transformers.DataCollatorWithPadding):
+class TokenizedCollator(transformers.DataCollatorWithPadding):
     tokenizer: transformers.PreTrainedTokenizerBase
     padding: Union[bool, str] = True
     max_length: Optional[int] = None
@@ -49,48 +49,28 @@ class TokenizerCollator(transformers.DataCollatorWithPadding):
     # TODO: Fix to use separate tokenizers
 
     def __call__(self, features: List[Dict[str, Any]]) -> Dict[str, Any]:
-        os.environ['TOKENIZERS_PARALLELISM'] = '1'
+        os.environ['TOKENIZERS_PARALLELISM'] = '0'
 
-        max_num_chars = 4 * self.max_length
-        query = []
-        document = []
-        random_document = []
-        negative_document = []
-
-        out_ex = {}
-        out_ex["idx"] = []
-
+        out_ex = collections.defaultdict(list)
         for ex in features:
-            query.append(ex["query"][:max_num_chars])
-            document.append(ex["document"][:max_num_chars])
-            out_ex["idx"].append(ex["idx"])
-            if "negative_document" in ex: negative_document.extend([d[:max_num_chars] for d in ex["negative_document"]])
-
-        tokenize_fn = functools.partial(
-            self.tokenizer, 
-            return_tensors="pt", 
-            padding="max_length",
-            truncation=True,
-            max_length=self.max_length
-        )
-        query_encoded = tokenize_fn(query)
-        out_ex["query_input_ids"] = query_encoded.input_ids
-        out_ex["query_attention_mask"] = query_encoded.attention_mask
+            for col in ex:
+                if isinstance(ex[col], list) and not len(ex[col]): continue
+                out_ex[col].append(ex[col])
 
 
-        document_encoded = tokenize_fn(document)
-        out_ex["document_input_ids"] = document_encoded.input_ids
-        out_ex["document_attention_mask"] = document_encoded.attention_mask
+        extra_keys = []
+        for k, v in out_ex.items():
+            if isinstance(v, list) and isinstance(v[0], int):
+                out_ex[k] = torch.tensor(v)
+            else:
+                try:
+                    out_ex[k] = torch.stack(v)
+                except TypeError:
+                    # can't stack string, etc. -- just leave em
+                    extra_keys.append(k)
 
-        if len(negative_document):
-            negative_document_encoded = tokenize_fn(negative_document)
-            out_ex["negative_document_input_ids"] = negative_document_encoded.input_ids
-            out_ex["negative_document_attention_mask"] = negative_document_encoded.attention_mask
-
-        out_ex["idx"] = torch.tensor(out_ex["idx"])
-        # print("collate __call__ [2]")
-
-        return out_ex
+        for k in extra_keys: del out_ex[k]
+        return dict(out_ex)
 
 
 class DocumentQueryCollatorWithPadding(transformers.DataCollatorWithPadding):

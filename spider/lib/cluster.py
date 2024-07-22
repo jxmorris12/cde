@@ -319,7 +319,6 @@ def cluster_dataset(
         cluster_size: int,
         downscale_and_normalize: bool,
     ) -> Dict[int, List[int]]:
-    assert get_world_size() == 1, "can't cluster in DDP"
     # TODO: Turn this caching logic into a nice decorator?
     clustering_hash = get_cache_location_from_kwargs(
         # method="cluster_dataset",
@@ -338,6 +337,7 @@ def cluster_dataset(
         # print("[cluster_dataset] opened cached cluster ... ", clustering_hash)
         return result
     else:
+        assert get_world_size() == 1, "can't cluster in DDP"
         MAX_DATASET_LEN = 100_000_000
         if len(dataset) < MAX_DATASET_LEN:
             result = cluster_dataset_uncached(

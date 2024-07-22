@@ -183,7 +183,6 @@ class RerankHelper:
             max_length=self.max_seq_length,
         )
 
-        os.environ["TOKENIZERS_PARALLELISM"] = "1"
         corpus = dataset.corpus
         # corpus: datasets.Dataset = dataset.corpus.map(
         #     tokenize_corpus_func, 

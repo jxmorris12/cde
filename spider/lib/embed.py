@@ -22,7 +22,7 @@ from spider.lib.tensor import (
 def embed_dataloader(
         encoder, 
         data_loader, col: str, 
-        show_progress_bar: bool = False, 
+        show_progress_bar: bool = True, 
         convert_to_tensor: bool = True,
         **kwargs
     ) -> List[torch.Tensor]:

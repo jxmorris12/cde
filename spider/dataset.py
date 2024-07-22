@@ -203,7 +203,26 @@ class BeirDataset(torch.utils.data.Dataset):
         return self.size
 
 
-class NomicSupervisedDataset:
+
+class TokenizerMixin:
+    def _tokenize(self, ex):
+        max_num_chars = 4 * self.max_seq_length
+        tokenize_fn = functools.partial(
+            self.tokenizer, 
+            return_tensors="pt", 
+            padding="max_length",
+            truncation=True,
+            max_length=self.max_seq_length
+        )
+        for col in ["query", "document", "negative_document"]:
+            if not len(ex.get(col, [])): continue 
+            ex_col = ex[col][:max_num_chars]
+            tokenized_col = tokenize_fn(ex_col)
+            ex[f'{col}_input_ids'] = tokenized_col.input_ids[0]
+            ex[f'{col}_attention_mask'] = tokenized_col.attention_mask[0]
+        return ex
+
+class NomicSupervisedDataset(torch.utils.data.Dataset, TokenizerMixin):
     tokenizer: transformers.AutoTokenizer
     max_seq_length: int
     num_hard_negatives: int
@@ -323,16 +342,16 @@ class NomicSupervisedDataset:
 
         num_hard_negatives = min(self.num_hard_negatives, len(ex["negative"]))
         negative_documents = [document_prefix + d for d in random.sample(ex["negative"], num_hard_negatives)]
-        return {
-                'idx': query_id,
-                ######################################################################
-                "query": query,
-                "document": document,
-                ######################################################################
-                "random_document": random_document,
-                ######################################################################
-                "negative_document": negative_documents, 
-            }
+        return self._tokenize({
+            'idx': query_id,
+            ######################################################################
+            "query": query,
+            "document": document,
+            ######################################################################
+            "random_document": random_document,
+            ######################################################################
+            "negative_document": negative_documents, 
+        })
 
 
 def get_subdomain_idxs_cached(dataset: datasets.Dataset):
@@ -353,7 +372,7 @@ def get_subdomain_idxs_cached(dataset: datasets.Dataset):
         return subdomain_idxs
         
 
-class NomicUnsupervisedDataset(torch.utils.data.Dataset):
+class NomicUnsupervisedDataset(torch.utils.data.Dataset, TokenizerMixin):
     dataset: datasets.Dataset
     tokenizer: transformers.AutoTokenizer
     max_seq_length: int
@@ -437,14 +456,14 @@ class NomicUnsupervisedDataset(torch.utils.data.Dataset):
         document = document_prefix + ex["document"]
         # random_idx = random.choice(range(len(self.dataset)))
         # print0("__collate__ call [3]")
-        return {
+        return self._tokenize({
             'idx': query_id,
             ######################################################################
             'query': query,
             'document': document,
             ######################################################################
             # 'random_document': self.dataset[random_idx]["document"],
-        }
+        })
 
 
 @functools.lru_cache()
