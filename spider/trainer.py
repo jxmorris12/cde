@@ -426,7 +426,7 @@ class CustomTrainer(transformers.Trainer):
         # Sample fewer inputs if batch size is too large
         effective_batch_size = len(dataset_inputs["input_ids"])
         transductive_corpus_size = self.args.transductive_corpus_size
-        assert transductive_corpus_size <= effective_batch_size, "cannot provide more transductive inputs than in batch"
+        # assert transductive_corpus_size <= effective_batch_size, "cannot provide more transductive inputs than in batch"
 
         # Randomly reorder dataset input ids.
         R1 = torch.randperm(effective_batch_size)[:transductive_corpus_size]

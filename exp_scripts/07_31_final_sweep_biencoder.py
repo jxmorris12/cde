@@ -21,15 +21,17 @@ executor.update_parameters(
     slurm_qos=os.environ["SLURM_QOS"]
 )
 
-command_str = "torchrun --nproc_per_node 8 finetune.py --per_device_train_batch_size {batch_size} --per_device_eval_batch_size 256 --use_wandb 1 --dataset nomic_unsupervised --sampling_strategy cluster_within_domain --num_train_epochs {epochs} --learning_rate {learning_rate} --embedder nomic-ai/nomic-bert-2048 --clustering_model gtr_base --clustering_query_to_doc 1 --automatically_deduplicate_documents 0 --automatically_deduplicate_queries 1 --arch {architecture} --ddp_find_unused_parameters 0 --eval_rerank_topk {corpus_size} --lr_scheduler_type constant_with_warmup --warmup_steps 5600 --disable_dropout 1 --max_seq_length 32 --logging_steps 2000 --train_cluster_size {cluster_size} --eval_cluster_size 256 --use_prefix 1 --transductive_corpus_size {corpus_size} --save_steps 16000 --logit_scale 50 --max_eval_batches 4 --exp_name 2024-07-22-biencoder-cluster-sweep--{batch_size}-{cluster_size} --exp_group 2024-07-22-biencoder-cluster-sweep --ddp_share_negatives_between_gpus 0 --torch_compile 0 --use_gc 1 --fp16 0 --bf16 1 --eval_steps 100000 --limit_layers 6 --sampling_strategy {sampling_strategy} --overwrite_output_dir --max_batch_size_fits_in_memory 2048" 
+command_str = "torchrun --nproc_per_node 8 finetune.py --per_device_train_batch_size {batch_size} --per_device_eval_batch_size 256 --use_wandb 1 --dataset nomic_unsupervised --sampling_strategy cluster_within_domain --num_train_epochs {epochs} --learning_rate {learning_rate} --embedder nomic-ai/nomic-bert-2048 --clustering_model gtr_base --clustering_query_to_doc 1 --automatically_deduplicate_documents 0 --automatically_deduplicate_queries 0 --arch {architecture} --ddp_find_unused_parameters 0 --eval_rerank_topk {corpus_size} --lr_scheduler_type constant_with_warmup --warmup_steps 5600 --disable_dropout 1 --max_seq_length 32 --logging_steps 2000 --train_cluster_size {cluster_size} --eval_cluster_size 256 --use_prefix 1 --transductive_corpus_size {corpus_size} --save_steps 99999999999 --logit_scale 50 --max_eval_batches 16 --exp_name 2024-07-31-final-biencoder-cluster-sweep--{batch_size}-{cluster_size} --exp_group 2024-07-31-final-biencoder-cluster-sweep --ddp_share_negatives_between_gpus 0 --torch_compile 0 --use_gc 1 --fp16 0 --bf16 1 --eval_steps 100000 --limit_layers 6 --sampling_strategy {sampling_strategy} --overwrite_output_dir --max_batch_size_fits_in_memory 4096" 
 
 args_dict = {
     "architecture": ["biencoder"],
     "sampling_strategy": ["cluster_within_domain"],
-    "corpus_size": [64],
+    "corpus_size": [512],
     ##############################################################
-    "batch_size": [2048, 4096],
-    "cluster_size": [16384, 4096, 1024, 256, 64],
+    "cluster_size": [64, 256, 1024, 4096, 16384, 131072, 131072*2, 131072*4],
+    # "cluster_size": [64],
+    "batch_size": [4096, 2048, 1024, 512, 256],
+    # "batch_size": [256],
     ##############################################################
     "epochs": [3],
     "learning_rate": [2e-5],

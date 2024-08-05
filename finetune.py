@@ -173,6 +173,7 @@ def main():
             tokenizer=embedder_tokenizer,
             max_seq_length=model_args.max_seq_length,
             use_prefix=data_args.use_prefix,
+            train_subdomain_key=data_args.train_subdomain_key,
         )
         eval_dataset = NomicSupervisedDataset(
             tokenizer=embedder_tokenizer,

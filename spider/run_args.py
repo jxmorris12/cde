@@ -76,7 +76,7 @@ class ModelArguments:
         }
     )
     logit_scale: float = field(
-        default=20,
+        default=50,
         metadata={
             "help": "temperature for contrastive learning",
         }
@@ -147,19 +147,25 @@ class DataArguments:
         }
     )
     train_cluster_size: int = field(
-        default=224,
+        default=256,
         metadata={
             "help": "Cluster size for train data",
         }
     )
+    train_subdomain_key: Optional[str] = field(
+        default=None,
+        metadata={
+            "help": "Subdomain to filter within train data (only if set)",
+        }
+    )
     eval_cluster_size: int = field(
-        default=224,
+        default=256,
         metadata={
             "help": "Cluster size for val data",
         }
     )
     use_prefix: bool = field(
-        default=False,
+        default=True,
         metadata={
             "help": "Whether to add domain-specific prefixes to data"
         }
@@ -349,7 +355,7 @@ class TrainingArguments(transformers.TrainingArguments):
             os.environ["WANDB_MODE"] = "disabled"
         ############################################################################
         num_devices = max(1, torch.cuda.device_count())
-        num_cpus = min(num_devices * 12, count_cpus())
+        num_cpus = count_cpus() * 4
         num_workers = int(num_cpus / num_devices)
         if self.tiny_debug:
             print0("[tiny_debug] Setting num workers to 0")
@@ -361,7 +367,7 @@ class TrainingArguments(transformers.TrainingArguments):
         ############################################################################
         self.dataloader_num_workers = num_workers
         self.dataloader_persistent_workers = False # (num_workers > 0) # This may have been giving me weird deadlocks.
-        self.dataloader_prefetch_factor = 4 if (num_workers > 0) else None
+        self.dataloader_prefetch_factor = 4096 if (num_workers > 0) else None
         self.dataloader_pin_memory = True
         today_date = datetime.date.today()
         formatted_date = today_date.strftime("%Y-%m-%d")

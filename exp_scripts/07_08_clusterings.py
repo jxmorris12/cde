@@ -29,7 +29,8 @@ command_str = "python finetune.py --per_device_train_batch_size {cluster_size} -
 args_dict = {
     # "dataset": ["nomic_supervised", "nomic_unsupervised"],
     "dataset": ["nomic_unsupervised"],
-    "cluster_size": [16384, 4096, 1024, 256, 64],
+    # "cluster_size": [16384, 4096, 1024, 256, 64],
+    "cluster_size": [131072*8, 131072*16, 131072*32],
 }
 combinations = list(itertools.product(*args_dict.values()))
 args_list = [{key: value for key, value in zip(args_dict.keys(), combination)} for combination in combinations]

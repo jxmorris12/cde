@@ -20,6 +20,7 @@ import torch.multiprocessing as mp
 import tqdm
 
 from spider.lib import (
+    count_cpus,
     datasets_fast_load_from_disk,
     download_url, 
     download_url_and_unzip, 
@@ -27,6 +28,7 @@ from spider.lib import (
     get_num_proc,
     get_rank,
     get_reranking_results,
+    get_world_size,
     print0
 )
 
@@ -222,6 +224,7 @@ class TokenizerMixin:
             ex[f'{col}_attention_mask'] = tokenized_col.attention_mask[0]
         return ex
 
+
 class NomicSupervisedDataset(torch.utils.data.Dataset, TokenizerMixin):
     tokenizer: transformers.AutoTokenizer
     max_seq_length: int
@@ -377,7 +380,8 @@ class NomicUnsupervisedDataset(torch.utils.data.Dataset, TokenizerMixin):
     tokenizer: transformers.AutoTokenizer
     max_seq_length: int
     use_prefix: bool
-    def __init__(self, tokenizer: transformers.AutoTokenizer, max_seq_length: int, use_prefix: bool = False):
+    train_subdomain_key: Optional[str]
+    def __init__(self, tokenizer: transformers.AutoTokenizer, max_seq_length: int, use_prefix: bool = False, train_subdomain_key: Optional[str] = None):
         print0("[NomicUnsupervisedDataset] loading dataset")
         self.dataset = (
             datasets.load_dataset(
@@ -386,15 +390,10 @@ class NomicUnsupervisedDataset(torch.utils.data.Dataset, TokenizerMixin):
                 keep_in_memory=False,
             )["train"]
         )
-        # self.dataset = self.dataset.select(range(999))
         print0("[NomicUnsupervisedDataset] loading subdomain idxs")
-        subdomain_idxs_dict = get_subdomain_idxs_cached(
-            dataset=self.dataset
-        )
-        # self.dataset = self.dataset.select(range(999))
         # TODO: Share dict between processes.
-        self.subdomain_idxs = subdomain_idxs_dict
-        # assert len(self.dataset) == 238_998_494
+        self.subdomain_idxs = get_subdomain_idxs_cached(dataset=self.dataset)
+        assert len(self.dataset) == 238_998_494
         self.tokenizer = tokenizer
         self.max_seq_length = max_seq_length
 
@@ -403,6 +402,11 @@ class NomicUnsupervisedDataset(torch.utils.data.Dataset, TokenizerMixin):
         config_yaml = yaml.safe_load(open(yaml_path, "r"))
         self.config = { row["name"]: row for row in config_yaml["datasets"] }
         self.use_prefix = use_prefix
+        self.train_subdomain_key = train_subdomain_key
+
+        if self.train_subdomain_key:
+            assert self.train_subdomain_key in self.subdomain_idxs, f"can't find key {self.train_subdomain_key} in {self.subdomain_idxs.keys()}"
+            self.subdomain_idxs = { self.train_subdomain_key: self.subdomain_idxs[self.train_subdomain_key] }
     
     def get_query_prefix(self, dataset: str) -> str:
         return self.config[dataset]["query_prefix"]
@@ -429,7 +433,11 @@ class NomicUnsupervisedDataset(torch.utils.data.Dataset, TokenizerMixin):
         pass # Not needed with smart sampler
 
     def __len__(self):
-        return len(self.dataset)
+        if self.train_subdomain_key:
+            # Support training on a single subdomain.
+            return len(self.subdomain_idxs[self.train_subdomain_key])
+        else:
+            return len(self.dataset)
     
     @property
     def _query_input_ids_key(self) -> str:
@@ -441,8 +449,8 @@ class NomicUnsupervisedDataset(torch.utils.data.Dataset, TokenizerMixin):
         """The key in the dataset for document input IDs (tokenizer-specific)."""
         return f'document_input_ids'
     
-    def __getitem__(self, query_id: int) -> Dict[str, torch.Tensor]: 
-        ex = self.dataset[query_id]
+    def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]: 
+        ex = self.dataset[idx]
         if self.use_prefix:
             query_prefix = self.get_query_prefix(ex["dataset"])
             document_prefix = self.get_document_prefix(ex["dataset"])
@@ -457,7 +465,7 @@ class NomicUnsupervisedDataset(torch.utils.data.Dataset, TokenizerMixin):
         # random_idx = random.choice(range(len(self.dataset)))
         # print0("__collate__ call [3]")
         return self._tokenize({
-            'idx': query_id,
+            'idx': idx,
             ######################################################################
             'query': query,
             'document': document,

@@ -166,7 +166,7 @@ class DenseEncoder(torch.nn.Module):
             else:
                 raise RuntimeError("unknown dataset format to encode")
         
-        os.environ["TOKENIZERS_PARALLELISM"] = "0"
+        os.environ["TOKENIZERS_PARALLELISM"] = "1"
         dataset.set_transform(
             functools.partial(
                 self.tokenize_transform, 
