@@ -355,7 +355,7 @@ class TrainingArguments(transformers.TrainingArguments):
             os.environ["WANDB_MODE"] = "disabled"
         ############################################################################
         num_devices = max(1, torch.cuda.device_count())
-        num_cpus = count_cpus() * 4
+        num_cpus = count_cpus()
         num_workers = int(num_cpus / num_devices)
         if self.tiny_debug:
             print0("[tiny_debug] Setting num workers to 0")

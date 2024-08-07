@@ -15,7 +15,7 @@ executor.update_parameters(
     timeout_min=(3 * ONE_DAY_IN_MIN), 
     gpus_per_node=8, 
     cpus_per_task=96,
-    slurm_array_parallelism=5,
+    slurm_array_parallelism=7,
     slurm_account=os.environ["SLURM_ACCT_NAME"],
     slurm_partition=os.environ["SLURM_PARTITION_NAME"], 
     slurm_qos=os.environ["SLURM_QOS"]
@@ -28,7 +28,8 @@ args_dict = {
     "sampling_strategy": ["cluster_within_domain"],
     "corpus_size": [32],
     ##############################################################
-    "cluster_size": [64, 256, 1024, 4096, 16384, 131072, 131072*2, 131072*4],
+    # "cluster_size": [64, 256, 1024, 4096, 16384, 131072, 131072*2, 131072*4],
+    "cluster_size": [131072*8, 131072*16, 131072*32],
     # "cluster_size": [64],
     "batch_size": [4096, 2048, 1024, 512, 256],
     # "batch_size": [256],

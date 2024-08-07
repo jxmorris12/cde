@@ -583,7 +583,7 @@ class CustomTrainer(transformers.Trainer):
         
         # Automatically filter out too-hard negatives.
         # TODO: Argparse for threshold
-        if self.args.hn_tune_threshold is not None:
+        if (self.args.hn_tune_threshold is not None) and (self.args.hn_tune_threshold >= 0.0):
             qd_scores = self._get_query_doc_scores(query_inputs, document_inputs)
             qd_scores = qd_scores.to(smart_labels.device)
             smart_labels_neg = qd_scores > self.args.hn_tune_threshold

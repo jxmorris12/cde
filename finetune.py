@@ -98,6 +98,10 @@ def main():
     torch.backends.cudnn.allow_tf32 = True  # allow tf32 on cudnn
     torch._dynamo.config.optimize_ddp = False
 
+    # https://github.com/pytorch/pytorch/issues/67978#issuecomment-1099316185
+    torch.backends.cudnn.benchmark = False
+    torch.backends.cudnn.deterministic = True
+
     os.environ["WANDB__SERVICE_WAIT"] = "30"
     os.environ["TOKENIZERS_PARALLELISM"] = "0"
 
