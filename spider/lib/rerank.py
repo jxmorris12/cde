@@ -206,7 +206,8 @@ class RerankHelper:
         )
         queries: datasets.Dataset = dataset.queries.map(
             tokenize_queries_func, 
-            batched=True
+            batched=True,
+            keep_in_memory=True,
         )
         queries.set_format("pt")
 
@@ -316,10 +317,10 @@ class RerankHelper:
                     )
                     corpus_dataset_embeddings = corpus_dataset_embeddings[:, None, :]
                     corpus_dataset_embeddings = corpus_dataset_embeddings.expand(-1, S, -1)
-                    dataset_embeddings = dataset_embeddings[None]
-                    dataset_embeddings = dataset_embeddings.expand(S, -1, -1)
-                    left_only = (torch.arange(S) < 1)[None, :, None].to(dataset_embeddings.device)
-                    dataset_embeddings = torch.where(left_only, corpus_dataset_embeddings, dataset_embeddings)
+                    # dataset_embeddings = dataset_embeddings[None]
+                    # dataset_embeddings = dataset_embeddings.expand(S, -1, -1)
+                    # left_only = (torch.arange(S) < 1)[None, :, None].to(dataset_embeddings.device)
+                    # dataset_embeddings = torch.where(left_only, corpus_dataset_embeddings, dataset_embeddings)
                     
                     null_dataset_embedding_document = self.transductive_input_strategy in ["null"]
                     document_embeddings = self._forward_batched(
