@@ -233,6 +233,7 @@ class RerankHelper:
 
         self.model.eval()
 
+        docs = [] # Need to initialize empty list to avoid error
         for j, query_id in tqdm_if_main_worker(
             enumerate(query_keys), total=num_eval_queries, desc=f"[{self.name}]"):
             all_topk_docs = sorted(results[query_id].items(), key=lambda item: item[1], reverse=True)
@@ -358,10 +359,10 @@ class RerankHelper:
         # print("agreement perc:", torch.tensor(agreement).float().mean())
         pair_ids = torch.tensor(pair_ids, device=device)
         rerank_scores_biencoder = torch.tensor(rerank_scores_biencoder, device=device)
-        # max_length = int(math.ceil(top_k * num_eval_queries / world_size)) * 2
+        max_length = int(math.ceil(top_k * num_eval_queries / world_size)) * 2
         # true_top_k = len(document_inputs.input_ids)
-        true_top_k = len(docs)
-        max_length = int(math.ceil(true_top_k * num_eval_queries / world_size)) * 2
+        # true_top_k = len(docs)
+        # max_length = int(math.ceil(true_top_k * num_eval_queries / world_size)) * 2
 
         # add dummy elements to make same shapes for gather.
         extra_ones_pair = (

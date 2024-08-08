@@ -15,7 +15,7 @@ executor.update_parameters(
     timeout_min=(3 * ONE_DAY_IN_MIN), 
     gpus_per_node=8, 
     cpus_per_task=96,
-    slurm_array_parallelism=7,
+    slurm_array_parallelism=8,
     slurm_account=os.environ["SLURM_ACCT_NAME"],
     slurm_partition=os.environ["SLURM_PARTITION_NAME"], 
     slurm_qos=os.environ["SLURM_QOS"]

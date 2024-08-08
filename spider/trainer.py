@@ -18,7 +18,8 @@ from spider.dataset import BeirDataset
 from spider.gradcache import GradCache
 from spider.lib import (
     gather, get_rank, get_world_size, 
-    inputs_for_key, 
+    inputs_for_key,
+    print0,
     verify_ddp_weights_equal, 
     RerankHelper, 
     TensorRunningAverages
@@ -519,6 +520,8 @@ class CustomTrainer(transformers.Trainer):
                 batch_size=(self.args.per_device_train_batch_size * 4),
             )
 
+        query_outputs = torch.nn.functional.normalize(query_outputs, p=2, dim=1)
+        doc_outputs = torch.nn.functional.normalize(doc_outputs, p=2, dim=1)
         scores = query_outputs @ doc_outputs.T
         
         return scores
@@ -582,12 +585,18 @@ class CustomTrainer(transformers.Trainer):
             smart_labels = smart_labels_doc
         
         # Automatically filter out too-hard negatives.
-        # TODO: Argparse for threshold
+        hard_negatives_metrics = {}
         if (self.args.hn_tune_threshold is not None) and (self.args.hn_tune_threshold >= 0.0):
             qd_scores = self._get_query_doc_scores(query_inputs, document_inputs)
             qd_scores = qd_scores.to(smart_labels.device)
-            smart_labels_neg = qd_scores > self.args.hn_tune_threshold
+            smart_labels_neg = qd_scores >= self.args.hn_tune_threshold
             smart_labels = smart_labels | smart_labels_neg
+            hard_negatives_metrics = {
+                "smart_hn_exceed_threshold": (qd_scores >= self.args.hn_tune_threshold).long().sum(),
+                "smart_hn_score_mean": qd_scores.mean(),
+                "smart_hn_score_max": qd_scores.max(),
+                "smart_hn_score_min": qd_scores.min(),
+            }
 
         # Aggregate labels for duplicate queries.
         num_unique_documents = document_unique_ids.unique().numel()
@@ -626,6 +635,7 @@ class CustomTrainer(transformers.Trainer):
             ###############################################################################
             "stats_one_hot_labels_sum": one_hot_labels.long().sum().detach(),
             "stats_smart_labels_sum": smart_labels.long().sum().detach(),
+            **hard_negatives_metrics,
         }
         if self.is_in_train:
             for key, val in metrics.items():
@@ -670,6 +680,10 @@ class CustomTrainer(transformers.Trainer):
             metric_key_prefix: str,
             n: int,
         ) -> Dict[str, float]:
+        if len(eval_dataset.queries) < get_world_size():
+            print0("WARNING: less than world size queries -- skipping eval.")
+            return {}
+
         # github.com/jxmorris12/tti/blob/master/trainer.py
         # github.com/beir-cellar/beir/blob/main/examples/retrieval/evaluation/reranking/evaluate_bm25_ce_reranking.py
         data_collator = self._get_collator_with_removed_columns(
@@ -695,7 +709,6 @@ class CustomTrainer(transformers.Trainer):
             transductive_n_outputs_ensemble=self.args.transductive_n_outputs_ensemble,
             transductive_input_strategy=self.args.transductive_input_strategy,
         )
-
         # Rerank top-k results using the reranker provided
         rerank_results_model = reranker.rerank(
             dataset=eval_dataset,
@@ -811,10 +824,10 @@ class CustomTrainer(transformers.Trainer):
             reset_memory()
         return all_metrics
 
-    def evaluate_retrieval_datasets(self, n: int = 128) -> Dict[str, float]:
+    def evaluate_retrieval_datasets(self, n: int = 64) -> Dict[str, float]:
         model = self.model
         all_metrics = {}
-        n = 1024
+        # n = 1024
         for eval_dataset_name, eval_dataset in self.retrieval_datasets.items():
             metric_key_prefix = f"eval_{eval_dataset_name}"
             metrics = self._retrieval_evaluate(
