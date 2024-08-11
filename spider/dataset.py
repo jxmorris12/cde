@@ -1,6 +1,7 @@
 from typing import Any, Dict, List, Optional, Tuple
 
 import collections
+import dataclasses
 import functools
 import gzip
 import json
@@ -212,7 +213,7 @@ class TokenizerMixin:
         tokenize_fn = functools.partial(
             self.tokenizer, 
             return_tensors="pt", 
-            padding="max_length",
+            padding=True,
             truncation=True,
             max_length=self.max_seq_length
         )
@@ -223,6 +224,27 @@ class TokenizerMixin:
             ex[f'{col}_input_ids'] = tokenized_col.input_ids[0]
             ex[f'{col}_attention_mask'] = tokenized_col.attention_mask[0]
         return ex
+
+
+@dataclasses.dataclass
+class GenericTokenizedDataset(TokenizerMixin):
+    max_seq_length: int
+    tokenizer: transformers.PreTrainedTokenizer
+    dataset: datasets.Dataset
+    col: str
+
+    def __len__(self) -> int:
+        return len(self.dataset)
+
+    def __getitem__(self, idx: int) -> Dict[str, Any]:
+        ex = self.dataset[idx]
+        tokenized_output = self._tokenize({
+            "document": ex[self.col],
+        })
+        return {
+            "input_ids": tokenized_output["document_input_ids"],
+            "attention_mask": tokenized_output["document_attention_mask"],
+        }
 
 
 class NomicSupervisedDataset(torch.utils.data.Dataset, TokenizerMixin):

@@ -102,23 +102,6 @@ class DenseEncoder(torch.nn.Module):
         self.query_prefix = query_prefix
         self.document_prefix = document_prefix
         self.model_kwargs = {}
-        self._max_num_chars = (self.max_length * 4)
-
-    def tokenize_transform(
-            self,
-            examples: Dict[str, List],
-            prefix: str,
-            col: str,
-            max_length: int,
-        ) -> Dict[str, torch.Tensor]:
-        texts = examples[col]
-        batch_dict = self.tokenizer(
-            [prefix + t[:self._max_num_chars] for t in texts],
-            max_length=max_length,
-            padding=True,
-            truncation=True,
-        )
-        return batch_dict
 
     def _consider_putting_model_on_device(self) -> None:
         if self.model_is_on_device:
@@ -167,31 +150,27 @@ class DenseEncoder(torch.nn.Module):
                 raise RuntimeError("unknown dataset format to encode")
         
         os.environ["TOKENIZERS_PARALLELISM"] = "1"
-        dataset.set_transform(
-            functools.partial(
-                self.tokenize_transform, 
-                prefix=prefix,
-                col=col, 
-                max_length=self.max_length,
-            )
+        from spider.dataset import GenericTokenizedDataset
+        tokenized_dataset = GenericTokenizedDataset(
+            dataset=dataset,
+            tokenizer=self.tokenizer,
+            max_seq_length=self.max_length,
+            col=col,
         )
         data_collator = transformers.DataCollatorWithPadding(self.tokenizer, pad_to_multiple_of=8)
         effective_batch_size = (batch_size * max(1, self.gpu_count))
         max_num_batches = int(math.ceil(len(dataset) / effective_batch_size))
-        num_workers = min(
-            max_num_batches, 
-            len(os.sched_getaffinity(0)),
-        )
+        num_workers = len(os.sched_getaffinity(0))
         print(f"[DenseEncoder] created dataloader with {num_workers} workers, effective_batch_size={effective_batch_size}, len(dataset)={len(dataset)}")
         return torch.utils.data.DataLoader(
-            dataset,
+            tokenized_dataset,
             batch_size=effective_batch_size,
             shuffle=False,
             drop_last=False,
             num_workers=num_workers, 
             prefetch_factor=4,
             collate_fn=data_collator,
-            persistent_workers=True,
+            persistent_workers=False,
             pin_memory=True
         )
     
@@ -204,6 +183,7 @@ class DenseEncoder(torch.nn.Module):
             prefix: str = "", 
             show_progress_bar: bool = True,
             convert_to_tensor: bool = True,
+            **kwargs, # Need this for MTEB...
         ) -> Union[torch.Tensor, np.ndarray]:
         """ Returns a list of embeddings for the given sentences.
         Args:

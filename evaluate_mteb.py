@@ -49,15 +49,15 @@ TASK_LIST_RETRIEVAL = [
 # TASK_LIST_RETRIEVAL = ["FiQA2018"]
 
 
-# TASK_LIST_RETRIEVAL = [
-#     "ArguAna",
-#     "FiQA2018", 
-#     "NFCorpus", 
-#     "SCIDOCS", 
-#     "SciFact", 
-#     "Touche2020",
-#     "TRECCOVID", 
-# ] # Small datasets.
+TASK_LIST_RETRIEVAL = [
+    "ArguAna",
+    "FiQA2018", 
+    "NFCorpus", 
+    "SCIDOCS", 
+    "SciFact", 
+    "Touche2020",
+    "TRECCOVID", 
+] # Small datasets.
 
 
 # TASK_LIST_RETRIEVAL = ["QuoraRetrieval"]
@@ -112,28 +112,10 @@ def main():
             streaming=False,
             keep_in_memory=False,
         ).load(split=split)
-        cluster_matches = cluster_dataset(
-            dataset=corpus_ds,
-            model="gtr_base",
-            query_key="text",
-            document_key="text",
-            query_to_doc=True,
-            cluster_size=256,
-        )
-        cluster_assignments = collections.defaultdict(list)
-        for k, v in cluster_matches.items():
-            cluster_assignments[v[0]].append(k)
+
         ##################################################
-        all_documents = list(corpus.values())
-        all_dataset_embeddings = []
         random.seed(52)
-        ##################################################
-        corpus_document_ids = []
-        while len(corpus_document_ids) < 256:
-            cluster_idx = random.choice(list(cluster_assignments.keys()))
-            corpus_document_ids.extend(cluster_assignments[cluster_idx])
-        corpus_document_ids = random.shuffle(corpus_document_ids)[:256]
-        corpus_documents = [corpus_ds[id] for id in corpus_document_ids]
+        corpus_documents = random.choices(list(corpus.values()), k=trainer.model.config.transductive_corpus_size)
         ##################################################
         corpus_documents = [
             mteb_encoder.document_prefix + '{} {}'.format(doc.get('title', ''), doc['text']).strip() 
@@ -167,6 +149,8 @@ def main():
         )
         print(task)
         print("\t", results)
+        if len(results):
+            print("NDCG@10 =>", results[0].to_dict()['scores']['test'][0]['ndcg_at_10'])
         print()
     
 
