@@ -2,7 +2,11 @@ from typing import Tuple
 
 import gc
 
-import faiss
+try:
+    import faiss
+except ImportError as e:
+    print("Error loading faiss:", e)
+    faiss = None
 import torch
 
 

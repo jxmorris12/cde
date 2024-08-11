@@ -6,7 +6,6 @@ import os
 import logging
 import os
 
-import faiss
 import datasets
 import torch
 import transformers
@@ -284,7 +283,7 @@ def main():
             entity="jack-morris",
             project="tti-nomic-7",
             name=wandb_run_id,
-            resume=(checkpoint is not None),
+            resume=False, # (checkpoint is not None),
     )
         wandb.config.update(
             {

@@ -8,7 +8,7 @@ import torch
 
 from spider.lib import cluster_dataset
 from spider.lib.embed import DenseEncoder
-from spider.lib.model_configs import MODEL_FOLDER_DICT, ARGS_STR_DICT
+from spider.lib.model_configs import MODEL_FOLDER_DICT
 from spider.lib.utils import analyze_utils
 
 from mteb import MTEB
@@ -77,10 +77,8 @@ def parse_args() -> argparse.ArgumentParser:
 def main():
     args = parse_args()
     model_folder = MODEL_FOLDER_DICT[args.model_key]
-    args_str = ARGS_STR_DICT[args.model_key]
     trainer, (model_args, data_args, training_args) = analyze_utils.load_trainer_from_checkpoint_and_args(
         model_folder=model_folder,
-        args_str=args_str,
         load_from_checkpoint=True,
         return_args=True
     )

@@ -6,7 +6,7 @@ import pandas as pd
 import tqdm
 
 from spider.lib.misc import md5_hash_kwargs
-from spider.lib.model_configs import MODEL_FOLDER_DICT, ARGS_STR_DICT
+from spider.lib.model_configs import MODEL_FOLDER_DICT
 from spider.lib.utils import analyze_utils
 
 
@@ -91,22 +91,11 @@ def setup_eval_cmd_parser(parser: argparse.ArgumentParser) -> argparse.ArgumentP
 
 def evaluate_model(args):
     model_folder = MODEL_FOLDER_DICT[args.model_key]
-    args_str = ARGS_STR_DICT.get(args.model_key)
 
     save_folder = os.path.join(root_save_folder, args.model_key)
     os.makedirs(save_folder, exist_ok=True)
     args_dict = dict(vars(args))
     args_dict.pop("func")
-
-    ##########################################
-    # Remove defaults from new args to preserve caching
-    if args_dict["transductive_input_strategy"] == "topk":
-        args_dict.pop("transductive_input_strategy")
-    if args_dict["transductive_n_outputs_ensemble"] == 1:
-        args_dict.pop("transductive_n_outputs_ensemble")
-    if args_dict["embedder_rerank"] == "sentence-transformers/gtr-t5-base":
-        args_dict.pop("embedder_rerank")
-    ##########################################
 
     args_dict["datasets"] = tuple(beir_dataset_names)
     save_hash = md5_hash_kwargs(**args_dict)
@@ -116,10 +105,8 @@ def evaluate_model(args):
         print(f"found cached results at {save_path}")
         exit()
 
-    args_str += f' --embedder_rerank "{args.embedder_rerank}"'
     trainer = analyze_utils.load_trainer_from_checkpoint_and_args(
         model_folder=model_folder,
-        args_str=args_str,
         beir_dataset_names=beir_dataset_names,
         load_from_checkpoint=True, # Set to false for random predictions
     )

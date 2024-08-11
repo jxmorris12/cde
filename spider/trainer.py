@@ -509,14 +509,14 @@ class CustomTrainer(transformers.Trainer):
         with torch.no_grad():
             query_outputs = forward_batched(
                 model=self._hn_filter_model,
-                input_ids=query_inputs["input_ids"],
-                attention_mask=query_inputs["attention_mask"],
-                batch_size=(self.args.per_device_train_batch_size * 2),
+                input_ids=query_inputs["input_ids"][:, :128],
+                attention_mask=query_inputs["attention_mask"][:, :128],
+                batch_size=(self.args.per_device_train_batch_size * 4),
             )
             doc_outputs = forward_batched(
                 model=self._hn_filter_model,
-                input_ids=document_inputs["input_ids"],
-                attention_mask=document_inputs["attention_mask"],
+                input_ids=document_inputs["input_ids"][:, :128],
+                attention_mask=document_inputs["attention_mask"][:, :128],
                 batch_size=(self.args.per_device_train_batch_size * 4),
             )
 
@@ -567,7 +567,7 @@ class CustomTrainer(transformers.Trainer):
             all_idx = torch.cat((all_idx, hn_idx), dim=0)
             one_hot_labels = self.consider_gather(inputs["idx"])[:, None] == self.consider_gather(all_idx)[None, :]
         else:
-            # doing this without a gather because that gather takes forever with large batches for some reason.
+            # doing this without a gather because that takes forever with large batches.
             batch_size = document_first_tokens.shape[0]
             one_hot_labels = torch.eye(batch_size, device=self.args.device, dtype=torch.bool)
 
@@ -589,13 +589,18 @@ class CustomTrainer(transformers.Trainer):
         if (self.args.hn_tune_threshold is not None) and (self.args.hn_tune_threshold >= 0.0):
             qd_scores = self._get_query_doc_scores(query_inputs, document_inputs)
             qd_scores = qd_scores.to(smart_labels.device)
-            smart_labels_neg = qd_scores >= self.args.hn_tune_threshold
+
+            if self.args.hn_tune_threshold == 1.0:
+                smart_labels_neg = qd_scores >= qd_scores.diag()[:, None]
+            else:
+                smart_labels_neg = qd_scores >= self.args.hn_tune_threshold
             smart_labels = smart_labels | smart_labels_neg
             hard_negatives_metrics = {
                 "smart_hn_exceed_threshold": (qd_scores >= self.args.hn_tune_threshold).long().sum(),
                 "smart_hn_score_mean": qd_scores.mean(),
                 "smart_hn_score_max": qd_scores.max(),
                 "smart_hn_score_min": qd_scores.min(),
+                "smart_hn_neg_mean": smart_labels_neg.float().mean(),
             }
 
         # Aggregate labels for duplicate queries.
@@ -827,7 +832,7 @@ class CustomTrainer(transformers.Trainer):
     def evaluate_retrieval_datasets(self, n: int = 64) -> Dict[str, float]:
         model = self.model
         all_metrics = {}
-        # n = 1024
+        n = 1024
         for eval_dataset_name, eval_dataset in self.retrieval_datasets.items():
             metric_key_prefix = f"eval_{eval_dataset_name}"
             metrics = self._retrieval_evaluate(

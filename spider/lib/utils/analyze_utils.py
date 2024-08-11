@@ -2,13 +2,12 @@ from typing import Optional, List
 
 import logging
 import os
-import shlex
 
 import torch
 import transformers
 import wandb
 
-from spider.collate import TokenizerCollator
+from spider.collate import TokenizedCollator
 from spider.dataset import BeirDataset
 from spider.lib import load_embedder_and_tokenizer, ModelConfig
 from spider.model import get_model_class
@@ -16,10 +15,8 @@ from spider.run_args import ModelArguments, DataArguments, TrainingArguments
 from spider.trainer import CustomTrainer
 
 
-# Helps with debugging.
 def load_trainer_from_checkpoint_and_args(
         model_folder: str, 
-        args_str: str = "", 
         beir_dataset_names: Optional[List[str]] = None,
         load_from_checkpoint: bool = True,
         return_args: bool = False
@@ -32,15 +29,9 @@ def load_trainer_from_checkpoint_and_args(
     checkpoint_path = transformers.trainer_utils.get_last_checkpoint(
         model_folder
     )
-    if len(args_str) > 0:
-        parser = transformers.HfArgumentParser((ModelArguments, DataArguments, TrainingArguments))
-        model_args, data_args, training_args = (
-            parser.parse_args_into_dataclasses(
-                shlex.split(args_str))
-        )
-    elif os.path.exists(os.path.join(model_folder, "data_args.bin")):
-        data_args = torch.load(open(os.path.join(model_folder, "data_args.bin"), "rb"))
-        model_args = torch.load(open(os.path.join(model_folder, "model_args.bin"), "rb"))
+    if os.path.exists(os.path.join(checkpoint_path, "data_args.bin")):
+        data_args = torch.load(open(os.path.join(checkpoint_path, "data_args.bin"), "rb"))
+        model_args = torch.load(open(os.path.join(checkpoint_path, "model_args.bin"), "rb"))
         training_args = torch.load(open(os.path.join(checkpoint_path, "training_args.bin"), "rb"))
         model_args.embedding_output_dim = None # backwards compatibility :-)
         training_args.accelerator_config.gradient_accumulation_kwargs = None # backwards compatibility :-)
@@ -54,7 +45,7 @@ def load_trainer_from_checkpoint_and_args(
         # print("//", training_args.distributed_state.device)
         # TODO: Make this work proprly with DDP.
     else:
-        raise RuntimeError("must pass args_str or have data_args.bin and model_args.bin available to load from disk")
+        raise RuntimeError("must have data_args.bin and model_args.bin available to load from disk")
     transformers.set_seed(training_args.seed)
     logging.basicConfig(
         format='%(asctime)s - %(message)s',
@@ -103,7 +94,7 @@ def load_trainer_from_checkpoint_and_args(
             dataset_backbone=dataset_backbone,
         )
 
-    collator = TokenizerCollator(
+    collator = TokenizedCollator(
         tokenizer=embedder_tokenizer,
         padding='longest',
         return_tensors='pt',
@@ -115,6 +106,8 @@ def load_trainer_from_checkpoint_and_args(
         data_collator=collator,
         model=model,
         args=training_args,
+        data_args=data_args,
+        model_args=model_args,
         train_dataset=None,
         eval_dataset=None,
         embedder_tokenizer=embedder_tokenizer,
