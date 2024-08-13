@@ -121,7 +121,7 @@ class DataArguments:
         }
     )
     clustering_model: str = field(
-        default="bm25",
+        default="gtr_base",
         metadata={
             "help": "Model to use for clustering",
             "choices": ["bm25", "gtr_base"],

@@ -213,11 +213,11 @@ class TokenizerMixin:
         tokenize_fn = functools.partial(
             self.tokenizer, 
             return_tensors="pt", 
-            padding=True,
+            padding="max_length",
             truncation=True,
             max_length=self.max_seq_length
         )
-        for col in ["query", "document", "negative_document"]:
+        for col in ["query", "document", "negative_document", "text"]:
             if not len(ex.get(col, [])): continue 
             ex_col = ex[col][:max_num_chars]
             tokenized_col = tokenize_fn(ex_col)
@@ -246,6 +246,55 @@ class GenericTokenizedDataset(TokenizerMixin):
             "attention_mask": tokenized_output["document_attention_mask"],
         }
 
+class FineWebEdu(torch.utils.data.Dataset, TokenizerMixin):
+    tokenizer: transformers.AutoTokenizer
+    max_seq_length: int
+    num_hard_negatives: int
+    use_prefix: bool
+    def __init__(self, tokenizer: transformers.AutoTokenizer, max_seq_length: int):
+        self.dataset = datasets.load_dataset(
+            "HuggingFaceFW/fineweb-edu", "sample-100BT",
+            keep_in_memory=False,
+            num_proc=32,
+        )["train"]
+        # self.dataset = self.dataset.select(range(999))
+        self.subdomain_idxs = { 0: range(len(self.dataset)) }
+        self.tokenizer = tokenizer
+        self.max_seq_length = max_seq_length
+
+        self._query_input_ids_key = "text"
+        self._document_input_ids_key = "text"
+
+    def __hash__(self) -> int:
+        return hash(self.__reduce__())
+
+    def __reduce__(self) -> Tuple:
+        # this function isn't quite right, but works
+        # for caching in streamlit :-)
+        return (
+            self.max_seq_length,
+            self._fingerprint,
+            self.tokenizer.name_or_path,
+        )
+
+    @property
+    def _fingerprint(self) -> str:
+        return self.dataset._fingerprint
+
+    def reset_dataset_idx(self) -> int:
+        pass # Not needed with smart sampler
+
+    def __len__(self):
+        return len(self.dataset)
+    
+    def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]: 
+        ex = self.dataset[idx]
+        
+        return self._tokenize({
+            'idx': idx,
+            ######################################################################
+            "text": ex["text"],
+        })
 
 class NomicSupervisedDataset(torch.utils.data.Dataset, TokenizerMixin):
     tokenizer: transformers.AutoTokenizer

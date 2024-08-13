@@ -7,6 +7,7 @@ datasets/
 log_test/
 logs/
 log_submitit
+log_submitit*
 notebooks/
 saves
 saves/

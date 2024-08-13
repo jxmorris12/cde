@@ -30,9 +30,9 @@ def load_trainer_from_checkpoint_and_args(
         model_folder
     )
     if os.path.exists(os.path.join(checkpoint_path, "data_args.bin")):
-        data_args = torch.load(open(os.path.join(checkpoint_path, "data_args.bin"), "rb"))
-        model_args = torch.load(open(os.path.join(checkpoint_path, "model_args.bin"), "rb"))
-        training_args = torch.load(open(os.path.join(checkpoint_path, "training_args.bin"), "rb"))
+        data_args = torch.load(open(os.path.join(checkpoint_path, "data_args.bin"), "rb"), weights_only=False)
+        model_args = torch.load(open(os.path.join(checkpoint_path, "model_args.bin"), "rb"), weights_only=False)
+        training_args = torch.load(open(os.path.join(checkpoint_path, "training_args.bin"), "rb"), weights_only=False)
         model_args.embedding_output_dim = None # backwards compatibility :-)
         training_args.accelerator_config.gradient_accumulation_kwargs = None # backwards compatibility :-)
         training_args.use_wandb = 0

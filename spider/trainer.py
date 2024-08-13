@@ -832,7 +832,7 @@ class CustomTrainer(transformers.Trainer):
     def evaluate_retrieval_datasets(self, n: int = 64) -> Dict[str, float]:
         model = self.model
         all_metrics = {}
-        n = 1024
+        # n = 1024
         for eval_dataset_name, eval_dataset in self.retrieval_datasets.items():
             metric_key_prefix = f"eval_{eval_dataset_name}"
             metrics = self._retrieval_evaluate(

@@ -49,15 +49,15 @@ TASK_LIST_RETRIEVAL = [
 # TASK_LIST_RETRIEVAL = ["FiQA2018"]
 
 
-TASK_LIST_RETRIEVAL = [
-    "ArguAna",
-    "FiQA2018", 
-    "NFCorpus", 
-    "SCIDOCS", 
-    "SciFact", 
-    "Touche2020",
-    "TRECCOVID", 
-] # Small datasets.
+# TASK_LIST_RETRIEVAL = [
+#     # "ArguAna",
+#     # "NFCorpus", 
+#     "SCIDOCS", 
+#     "TRECCOVID", 
+#     "SciFact", 
+#     "FiQA2018", 
+#     "Touche2020",
+# ] # Small datasets.
 
 
 # TASK_LIST_RETRIEVAL = ["QuoraRetrieval"]
@@ -142,7 +142,7 @@ def main():
         results = evaluation.run(
             mteb_encoder, 
             output_folder=os.path.join("results_mteb", args.model_key),
-            batch_size=1024, 
+            batch_size=512, 
             corpus_chunk_size=500_000,
             verbosity=2,
             eval_splits=[split]
