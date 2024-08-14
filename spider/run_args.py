@@ -276,7 +276,12 @@ class TrainingArguments(transformers.TrainingArguments):
         }
     )
 
-    lr_scheduler_type: str = "constant_with_warmup"
+    lr_scheduler_type: str = field(
+        default="constant_with_warmup",
+        metadata={
+            "help": "Type of scheduler to use"
+        }
+    )
     warmup_steps: int = field(
         default=8_000,
         metadata={

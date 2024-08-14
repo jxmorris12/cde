@@ -253,9 +253,11 @@ class FineWebEdu(torch.utils.data.Dataset, TokenizerMixin):
     use_prefix: bool
     def __init__(self, tokenizer: transformers.AutoTokenizer, max_seq_length: int):
         self.dataset = datasets.load_dataset(
+            # "HuggingFaceFW/fineweb-edu", "sample-350BT",
             "HuggingFaceFW/fineweb-edu", "sample-100BT",
             keep_in_memory=False,
-            num_proc=32,
+            download_config=datasets.DownloadConfig(resume_download=True),
+            num_proc=64,
         )["train"]
         # self.dataset = self.dataset.select(range(999))
         self.subdomain_idxs = { 0: range(len(self.dataset)) }

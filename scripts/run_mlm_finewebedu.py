@@ -1,4 +1,4 @@
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union, Tuple
 
 import copy
 import functools
@@ -11,11 +11,8 @@ import torch
 import transformers
 import wandb
 
-from spider.collate import DocumentQueryCollatorWithPadding, TokenizedCollator
-from spider.dataset import (
-    load_synthetic_words_dataset, 
-    BeirDataset, NomicSupervisedDataset, NomicUnsupervisedDataset
-)
+from spider.collate import TokenizedCollator
+from spider.dataset import FineWebEdu
 from spider.lib import (
     get_rank, get_world_size, 
     load_embedder_and_tokenizer, 
@@ -26,8 +23,112 @@ from spider.lib import (
 from spider.model import get_model_class
 from spider.run_args import ModelArguments, DataArguments, TrainingArguments
 from spider.sampler import get_sampler
-from spider.trainer import CustomTrainer
 
+
+# 
+# sample command:
+# > torchrun --nproc_per_node 8 scripts/run_mlm_finewebedu.py \
+#     --exp_name fineweb-test --exp_group fineweb-test-group \
+#     --learning_rate 5e-4 --adam_beta2 0.98 \
+#     --per_device_train_batch_size 128 --gradient_accumulation_steps 8 \
+#     --ddp_find_unused_parameters 0 --logging_steps 40 --use_wandb 1 \
+#     --disable_dropout 0 --bf16 1 --transductive_corpus_size 512 \
+#     --lr_scheduler_type linear
+# 
+
+class MlmTrainer(transformers.Trainer):
+
+    def __init__(self, args, data_args, model_args, tokenizer, train_sampler_fn, **kwargs):
+        super().__init__(**kwargs)
+        self.args = args
+        self.data_args = data_args
+        self.model_args = model_args
+        self.tokenizer = tokenizer
+        self._train_sampler_fn = train_sampler_fn
+
+        # track classifier head in here since we'll get rid of it anyway.
+        if hasattr(self.model, "second_stage_model"):
+            config = self.model.second_stage_model.backbone.config
+        else:
+            config = self.model.embedder.config
+
+        self.classifier = torch.nn.Linear(
+            config.n_embd, config.vocab_size
+        )
+        self.classifier.to(args.device)
+
+        self.mlm_probability = 0.3
+    
+    def _get_train_sampler(self) -> torch.utils.data.Sampler:
+        return self._train_sampler_fn()
+    
+    def torch_mask_tokens(self, inputs: Any, special_tokens_mask: Optional[Any] = None) -> Tuple[Any, Any]:
+        """
+        Prepare masked tokens inputs/labels for masked language modeling: 80% MASK, 10% random, 10% original.
+        """
+        labels = inputs.clone()
+        # We sample a few tokens in each sequence for MLM training (with probability `self.mlm_probability`)
+        probability_matrix = torch.full(labels.shape, self.mlm_probability)
+        if special_tokens_mask is None:
+            special_tokens_mask = [
+                self.tokenizer.get_special_tokens_mask(val, already_has_special_tokens=True) for val in labels.tolist()
+            ]
+            special_tokens_mask = torch.tensor(special_tokens_mask, dtype=torch.bool)
+        else:
+            special_tokens_mask = special_tokens_mask.bool()
+
+        probability_matrix.masked_fill_(special_tokens_mask, value=0.0)
+        masked_indices = torch.bernoulli(probability_matrix).bool()
+        labels[~masked_indices] = -100  # We only compute loss on masked tokens
+
+        # 80% of the time, we replace masked input tokens with tokenizer.mask_token ([MASK])
+        indices_replaced = torch.bernoulli(torch.full(labels.shape, 0.8)).bool() & masked_indices
+        inputs[indices_replaced] = self.tokenizer.convert_tokens_to_ids(self.tokenizer.mask_token)
+
+        # 10% of the time, we replace masked input tokens with random word
+        indices_random = torch.bernoulli(torch.full(labels.shape, 0.5)).bool() & masked_indices & ~indices_replaced
+        random_words = torch.randint(len(self.tokenizer), labels.shape, dtype=torch.long, device=self.args.device)
+        inputs[indices_random] = random_words[indices_random]
+
+        # The rest of the time (10% of the time) we keep the masked input tokens unchanged
+        return inputs, labels
+        
+    def compute_loss(
+        self,
+        model: transformers.PreTrainedModel,
+        inputs: Dict[str, torch.Tensor],
+        return_outputs: bool = False,
+    ) -> Union[Tuple[torch.Tensor, Dict[str, torch.Tensor]], torch.Tensor]:
+
+        # Rename keys
+        input_ids = inputs.pop("text_input_ids")
+        input_ids, labels = self.torch_mask_tokens(input_ids)
+
+        inputs["input_ids"] = input_ids
+        inputs["attention_mask"] = inputs.pop("text_attention_mask")
+
+        # Sample fewer inputs if batch size is too large
+        effective_batch_size = len(inputs["input_ids"])
+        transductive_corpus_size = self.args.transductive_corpus_size
+
+        # Randomly reorder dataset input ids.
+        R1 = torch.randperm(effective_batch_size)[:transductive_corpus_size]
+        outputs = model(
+            input_ids=inputs["input_ids"],
+            attention_mask=inputs["attention_mask"],
+            dataset_input_ids=inputs["input_ids"][R1],
+            dataset_attention_mask=inputs["attention_mask"][R1],
+            output_hidden_states=True,
+        )
+        logits = self.classifier(outputs["hidden_states"])
+
+        mlm_loss = torch.nn.functional.cross_entropy(
+            logits.reshape(-1, logits.shape[-1]), 
+            labels.reshape(-1), 
+            ignore_index=-100
+        )
+
+        return mlm_loss
 
 logger = logging.getLogger(__name__)
 
@@ -126,85 +227,12 @@ def main():
         model_args.embedder,
     )
 
-    if training_args.tiny_debug: 
-        datasets.logging.set_verbosity_info()
-        beir_dataset_names = [ 'arguana' ]
-        training_args.max_eval_batches = 1
-    else:
-        beir_dataset_names = [
-            # https://github.com/beir-cellar/beir/blob/f062f038c4bfd19a8ca942a9910b1e0d218759d4/examples/dataset/download_dataset.py#L13
-            'arguana',
-            # 'webis-touche2020',
-            'quora',
-            'nfcorpus',
-            'scidocs', 
-            'scifact',
-            'trec-covid',
-            # 'signal1m',
-            'fiqa',
-            # 'trec-news',  
-            'msmarco',
-        #############################################
-            'nq',
-            # 'cqadupstack',
-        #############################################
-            #  'bioasq', # huge (14m samples)
-            #  'robust04',   
-            #  'fever', # JSON parse error
-            #  'dbpedia-entity',
-            #  'hotpotqa',
-            # 'climate-fever', # pyarrow.lib.ArrowIndexError: array slice would exceed array length
-        ]
+    train_dataset = FineWebEdu(
+        tokenizer=embedder_tokenizer,
+        max_seq_length=model_args.max_seq_length,
+    )
 
-    beir_dict = {
-        d: BeirDataset(
-            dataset=d, 
-            embedder_rerank=model_args.embedder_rerank,
-            use_prefix=data_args.use_prefix,
-        ) 
-        for d in sorted(beir_dataset_names)
-    }
-    retrieval_datasets = {
-        **{f"BeIR/{k}": v for k,v in beir_dict.items()}
-    }
 
-    if data_args.dataset == 'synthetic_words':
-        train_dataset, eval_dataset = load_synthetic_words_dataset()
-        collator_cls = DocumentQueryCollatorWithPadding
-    elif data_args.dataset == 'nomic_unsupervised':
-        train_dataset = NomicUnsupervisedDataset(
-            tokenizer=embedder_tokenizer,
-            max_seq_length=model_args.max_seq_length,
-            use_prefix=data_args.use_prefix,
-            train_subdomain_key=data_args.train_subdomain_key,
-        )
-        eval_dataset = NomicSupervisedDataset(
-            tokenizer=embedder_tokenizer,
-            num_hard_negatives=0,
-            max_seq_length=model_args.max_seq_length,
-            use_prefix=data_args.use_prefix,
-        )
-        # Need to tokenize and collate for this dataset
-        collator_cls = TokenizedCollator
-    elif data_args.dataset == 'nomic_supervised':
-        train_dataset = NomicSupervisedDataset(
-            tokenizer=embedder_tokenizer,
-            num_hard_negatives=data_args.num_hard_negatives,
-            max_seq_length=model_args.max_seq_length,
-            use_prefix=data_args.use_prefix,
-        )
-        eval_dataset = None
-        # Need to tokenize and collate for this dataset
-        collator_cls = TokenizedCollator
-    else:
-        raise ValueError(f'Unsupported dataset {data_args.dataset}')
-    
-
-    if training_args.ddp_share_negatives_between_gpus:
-        effective_train_batch_size = (training_args.per_device_train_batch_size * get_world_size())
-    else:
-        effective_train_batch_size = (training_args.per_device_train_batch_size)
-    print0(f"[*] loading sampler with effective_train_batch_size = {effective_train_batch_size}")
     train_sampler_fn = functools.partial(
         get_sampler,
         dataset=train_dataset,
@@ -218,27 +246,6 @@ def main():
         clustering_query_to_doc=data_args.clustering_query_to_doc,
         seed=training_args.seed,
     )
-    # breakpoint()
-    data_args_eval = copy.copy(data_args)
-    data_args_eval.sampling_strategy = "domain" # always set this for eval
-    eval_sampler_fn = functools.partial(
-        get_sampler,
-        dataset=(eval_dataset or train_dataset),
-        batch_size=training_args.per_device_eval_batch_size,
-        share_negatives_between_gpus=training_args.ddp_share_negatives_between_gpus,
-        cluster_size=data_args.eval_cluster_size,
-        shuffle=False,
-        clustering_model="gtr_base",
-        clustering_query_to_doc=data_args.clustering_query_to_doc,
-        downscale_and_normalize=data_args.clustering_downscale_and_normalize,
-        num_samples=(training_args.per_device_eval_batch_size * training_args.max_eval_batches),
-    )
-    print0("[main] creating val samplers")
-    eval_sampler_fns = {
-        "cluster_within_domain": functools.partial(eval_sampler_fn, sampling_strategy="cluster_within_domain"),
-        "domain": functools.partial(eval_sampler_fn, sampling_strategy="domain"),
-        "random": functools.partial(eval_sampler_fn, sampling_strategy="random"),
-    }
     model_args.transductive_corpus_size = training_args.transductive_corpus_size
     model_config = ModelConfig(**vars(model_args))
     model_cls = get_model_class(model_args.architecture)
@@ -268,7 +275,7 @@ def main():
         issue_warnings_after_load(load_result)
 
     print0("[main] creating collator")
-    collator = collator_cls(
+    collator = TokenizedCollator(
         tokenizer=embedder_tokenizer,
         padding='longest',
         return_tensors='pt',
@@ -281,10 +288,10 @@ def main():
         print0("starting wandb run with name", wandb_run_id)
         wandb.init(
             entity="jack-morris",
-            project="tti-nomic-7",
+            project="contextual-pretrain-0",
             name=wandb_run_id,
             resume=False, # (checkpoint is not None),
-    )
+        )
         wandb.config.update(
             {
                 **vars(model_args),
@@ -293,27 +300,22 @@ def main():
             },
             allow_val_change=True,
         )
-        wandb.watch(model)
     
 
     print0("[main] creating trainer")
     if get_rank() == 0:
         # Print info stats for training on main worker
         transformers.logging.set_verbosity_info()
-
-    trainer = CustomTrainer(
+    
+    trainer = MlmTrainer(
         data_collator=collator,
         model=model,
         args=training_args,
         data_args=data_args,
         model_args=model_args,
         train_dataset=train_dataset,
-        # eval_dataset=eval_dataset,
-        eval_dataset=None,
-        embedder_tokenizer=embedder_tokenizer,
+        tokenizer=embedder_tokenizer,
         train_sampler_fn=train_sampler_fn,
-        eval_sampler_fns=eval_sampler_fns,
-        retrieval_datasets=retrieval_datasets,
     )
     logging.info("train() loaded checkpoint %s", checkpoint)
     print0("[main] trainer.train()")

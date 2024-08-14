@@ -3,6 +3,7 @@ import argparse
 import transformers
 
 from spider.dataset import FineWebEdu
+from spider.lib import cluster_dataset
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
@@ -12,6 +13,8 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 def main():
+    args = parse_args()
+
     tokenizer = transformers.AutoTokenizer.from_pretrained(args.model_name)
     dataset = FineWebEdu(
         tokenizer=tokenizer,
@@ -19,7 +22,7 @@ def main():
     )
     print(f"[***] Clustering {len(dataset)} docs...")
     cluster_results = cluster_dataset(
-        dataset=dataset,
+        dataset=dataset.dataset,
         model="gtr_base",
         query_key=dataset._document_input_ids_key,
         document_key=dataset._query_input_ids_key,

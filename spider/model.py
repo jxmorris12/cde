@@ -66,6 +66,7 @@ class BiEncoder(transformers.PreTrainedModel):
             dataset_input_ids: Optional[torch.Tensor] = None,
             dataset_attention_mask: Optional[torch.Tensor] = None,
             token_type_ids = None,
+            output_hidden_states: bool = False,
         ) -> torch.Tensor:
         """
         query_embedding (float torch.Tensor) - shape (batch_size, embedding_dim)
@@ -86,12 +87,19 @@ class BiEncoder(transformers.PreTrainedModel):
         outputs = (
             self.embedder(
                 input_ids=input_ids,
-                attention_mask=attention_mask).last_hidden_state
+                attention_mask=attention_mask,
+            ).last_hidden_state
         )
         document_embeddings = mean_pool(outputs, attention_mask)
-        # return
         output = self.mlp(document_embeddings)
-        return output
+
+        if output_hidden_states:
+            return {
+                "hidden_states": outputs,
+                "pooled": output,
+            }
+        else:
+            return output
 
 
 class TwoEmbeddersWithMLP(transformers.PreTrainedModel):
@@ -239,7 +247,8 @@ class DatasetConditionedBiencoder(transformers.PreTrainedModel):
             input_ids: torch.Tensor,
             attention_mask: torch.Tensor,
             dataset_embeddings: torch.Tensor,
-            null_dataset_embedding: bool = False
+            null_dataset_embedding: bool = False,
+            output_hidden_states: bool = False,
         ) -> torch.Tensor:
         if not isinstance(dataset_embeddings, torch.Tensor):
             dataset_embeddings = torch.tensor(dataset_embeddings)
@@ -278,6 +287,8 @@ class DatasetConditionedBiencoder(transformers.PreTrainedModel):
         soft_prompt = self.prompt_projection(soft_prompt).reshape((1, self.n_soft_prompt, self.hidden_size))
         soft_prompt = soft_prompt.expand((batch_size, -1, -1)) # -> (b, 4+b, d) # soft_prompt.repeat((len(input_ids), 1, 1))  
         soft_prompt = torch.cat((dataset_embeddings, soft_prompt), dim=1)
+
+        print("soft_prompt.shape:", soft_prompt.shape)
 
         if self.training and self.randomize_dataset_sequence_order:
             randomized_order = torch.stack(
@@ -320,9 +331,15 @@ class DatasetConditionedBiencoder(transformers.PreTrainedModel):
         # average with original vectors
         # TODO: Argparse for pooling strategy.
         # output_vectors = torch.cat((soft_prompt_pooled, output_pooled), dim=1) # (b, d) + (b, d) -> (b, 2d)
-        output_vectors = output_pooled
-        output = self.output_projection(output_vectors) # (b, 2d) -> (b, d)
-        return output
+        output = self.output_projection(output_pooled) # (b, 2d) -> (b, d)
+
+        if output_hidden_states:
+            return {
+                "hidden_states": output_vectors,
+                "pooled": output,
+            }
+        else:
+            return output
 
 
 class DatasetTransformer(transformers.PreTrainedModel):
@@ -361,6 +378,7 @@ class DatasetTransformer(transformers.PreTrainedModel):
             attention_mask: torch.Tensor,
             dataset_input_ids: Optional[torch.Tensor],
             dataset_attention_mask: Optional[torch.Tensor],
+            output_hidden_states: bool = False,
         ) -> torch.Tensor:
         """
         input_ids (long torch.Tensor) – ids of input tokens
@@ -374,6 +392,7 @@ class DatasetTransformer(transformers.PreTrainedModel):
             input_ids=input_ids,
             attention_mask=attention_mask,
             dataset_embeddings=dataset_embeddings,
+            output_hidden_states=output_hidden_states,
         )
 
 
