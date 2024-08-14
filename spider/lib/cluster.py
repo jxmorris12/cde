@@ -80,14 +80,10 @@ def embed_for_clustering(
         num_gpus = torch.cuda.device_count()
         if get_rank() == 0:
             print(f"Embedding {len(dataset)} queries with {num_gpus} GPUs...")
-
         model = DenseEncoder("sentence-transformers/gtr-t5-base")
 
         # https://github.com/UKPLab/sentence-transformers/blob/87f4180d7d197d4a471d627afc788b62a81c0214/sentence_transformers/SentenceTransformer.py#L392
         print("[embed_with_cache] computing query embeddings")
-
-        dataset = dataset.add_column("idx", range(len(dataset)))
-        print("[embed_with_cache] computing lengths")
         dataset.set_format("pt")
         print("[embed_with_cache] embedding queries")
         query_embeddings = embed_with_cache(
@@ -101,8 +97,6 @@ def embed_for_clustering(
         print("[embed_with_cache] halving query embeddings")
         query_embeddings = query_embeddings["embeds"].half().cpu()
         assert not query_embeddings.isnan().any(), "got nan query embeddings"
-        query_output_idxs = dataset["idx"]
-        corpus_output_idxs = dataset["idx"]
     
         if document_key == query_key:
             print(f"[embed_with_cache] repeating corpus_embeddings num_gpus={num_gpus}")
@@ -123,13 +117,14 @@ def embed_for_clustering(
 
         assert not corpus_embeddings.isnan().any(), "got nan corpus embeddings"
 
-        qidxs = torch.zeros(len(dataset), dtype=torch.long)
-        qidxs[query_output_idxs] = torch.arange(len(dataset), dtype=torch.long)
-        cidxs = torch.zeros(len(dataset), dtype=torch.long)
-        cidxs[corpus_output_idxs] = torch.arange(len(dataset), dtype=torch.long)
-        ##################################################################
-        query_embeddings = query_embeddings[qidxs]
-        corpus_embeddings = corpus_embeddings[cidxs]
+        
+        # qidxs = torch.zeros(len(dataset), dtype=torch.long)
+        # qidxs[query_output_idxs] = torch.arange(len(dataset), dtype=torch.long)
+        # cidxs = torch.zeros(len(dataset), dtype=torch.long)
+        # cidxs[corpus_output_idxs] = torch.arange(len(dataset), dtype=torch.long)
+        # ##################################################################
+        # query_embeddings = query_embeddings[qidxs]
+        # corpus_embeddings = corpus_embeddings[cidxs]
         avg_sim = (corpus_embeddings[:100] @ query_embeddings[:100].T).diag().mean()
         print(f"[embed_with_cache] returning all embeddings => avg_sim={avg_sim:.2f}")
         return query_embeddings, corpus_embeddings
@@ -274,16 +269,17 @@ def cluster_dataset_uncached(
     if downscale_and_normalize:
         model = Pipeline(
             [
-                ('svd', TruncatedSVD(n_components=128)),
+                ('svd', TruncatedSVD(n_components=128, random_state=42)),
                 ('normalizer', Normalizer(copy=False))
             ]
         )
-        print("[cluster_dataset_uncached] calling fit-transform on queries")
-        q_small = q[:1_000_000, :].cpu().numpy()
+        print("[cluster_dataset_uncached] calling fit on queries")
+        q_small = q[:100_000, :].cpu().numpy()
         model.fit(q_small)
+        print("[cluster_dataset_uncached] calling transform on queries")
         q = model.transform(q.cpu().numpy())
         q = torch.tensor(q, dtype=torch.float16, device='cpu')
-        print("[cluster_dataset_uncached] calling fit-transform on docs")
+        print("[cluster_dataset_uncached] calling transform on docs")
         X = model.transform(X)
         X = torch.tensor(X, dtype=torch.float16, device='cpu')
 
@@ -345,7 +341,8 @@ def cluster_dataset(
         return result
     else:
         assert get_world_size() == 1, "can't cluster in DDP"
-        MAX_DATASET_LEN = 5_000_000
+        # MAX_DATASET_LEN = 1_000_000
+        MAX_DATASET_LEN = 50_000_000
         # MAX_DATASET_LEN = 20_000_000
         if len(dataset) < MAX_DATASET_LEN:
             result = cluster_dataset_uncached(
@@ -360,12 +357,18 @@ def cluster_dataset(
         else:
             num_shards = math.ceil(len(dataset) / MAX_DATASET_LEN)
             print(f"[cluster_dataset] splitting into {num_shards} datasets of max length {MAX_DATASET_LEN}")
+            dataset = dataset.add_column("sub_idx", range(len(dataset)))
             dataset = dataset.shuffle(seed=42)
             result = {}
             offset = 0
             for i in range(num_shards):
                 print(f"[cluster_dataset] selecting shard {i} / {num_shards}")
-                mini_dataset = dataset.shard(num_shards=num_shards, index=i, contiguous=True)
+                mini_dataset = dataset.shard(
+                    num_shards=num_shards, 
+                    index=i, 
+                    contiguous=True, 
+                    keep_in_memory=True
+                )
                 mini_result = cluster_dataset_uncached(
                     dataset=mini_dataset,
                     model=model,
@@ -376,11 +379,12 @@ def cluster_dataset(
                     downscale_and_normalize=downscale_and_normalize,
                 )
                 new_clusters = set()
+                mini_dataset_sub_idx = mini_dataset["sub_idx"]
                 for data_idx, cluster in tqdm_if_main_worker(mini_result.items()):
                     if isinstance(cluster, list): cluster = cluster[0]
                     if isinstance(cluster, torch.Tensor): cluster = cluster.item()
                     new_clusters.add(cluster)
-                    true_data_idx = mini_dataset[data_idx]["sub_idx"]
+                    true_data_idx = mini_dataset_sub_idx[data_idx]
                     result[true_data_idx] = cluster + offset
                 offset += len(new_clusters)
                 

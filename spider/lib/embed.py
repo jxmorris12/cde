@@ -275,7 +275,7 @@ def embed_with_cache(
         return { "embeds": embeddings }
 
     datasets_list = []
-    max_dataset_size = 1_000_000
+    max_dataset_size = 10_000_000
     i = 0
     while i < len(embeddings):
         print("[embed_with_cache] creating dataset from dict // i =", i)
@@ -288,5 +288,6 @@ def embed_with_cache(
     print("[embed_with_cache] concatenating datasets")
     d = datasets.concatenate_datasets(datasets_list)
     d.set_format("pt")
+    print("[embed_with_cache] saving datasets")
     d.save_to_disk(cache_path)
     return d
