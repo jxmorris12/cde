@@ -57,7 +57,7 @@ def embed_for_clustering(
         model: str,
         query_to_doc: bool,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-    # return torch.randn(len(dataset), 512), torch.randn(len(dataset), 512)
+    # return torch.randn(len(dataset), 768), torch.randn(len(dataset), 768)
     if model == "bm25":
         document_input_ids = dataset[document_key]
         document_input_ids = [pad_to_length(t) for t in tqdm_if_main_worker(document_input_ids)]
@@ -95,7 +95,7 @@ def embed_for_clustering(
             dataset_fingerprint + "_queries", 
             dataset,
             query_key,
-            save_to_disk=False,
+            save_to_disk=True,
             batch_size=2048,
         )
         print("[embed_with_cache] halving query embeddings")
@@ -104,17 +104,22 @@ def embed_for_clustering(
         query_output_idxs = dataset["idx"]
         corpus_output_idxs = dataset["idx"]
     
-        print(f"[embed_with_cache] computing corpus_embeddings num_gpus={num_gpus}")
-        corpus_embeddings = embed_with_cache(
-            "sentence-transformers/gtr-t5-base", 
-            dataset._fingerprint + "_documents", 
-            dataset,
-            document_key,
-            save_to_disk=False,
-            batch_size=2048,
-        )
-        corpus_embeddings = corpus_embeddings["embeds"].half().cpu()
-        print("[embed_with_cache] got corpus embeddings, remapping")
+        if document_key == query_key:
+            print(f"[embed_with_cache] repeating corpus_embeddings num_gpus={num_gpus}")
+            corpus_embeddings = query_embeddings
+
+        else:
+            print(f"[embed_with_cache] computing corpus_embeddings num_gpus={num_gpus}")
+            corpus_embeddings = embed_with_cache(
+                "sentence-transformers/gtr-t5-base", 
+                dataset._fingerprint + "_documents", 
+                dataset,
+                document_key,
+                save_to_disk=True,
+                batch_size=2048,
+            )
+            corpus_embeddings = corpus_embeddings["embeds"].half().cpu()
+            print("[embed_with_cache] got corpus embeddings, remapping")
 
         assert not corpus_embeddings.isnan().any(), "got nan corpus embeddings"
 
@@ -126,7 +131,7 @@ def embed_for_clustering(
         query_embeddings = query_embeddings[qidxs]
         corpus_embeddings = corpus_embeddings[cidxs]
         avg_sim = (corpus_embeddings[:100] @ query_embeddings[:100].T).diag().mean()
-        print(f"[embed_with_cache] returning all embeddings / avg_sim={avg_sim:.2f}")
+        print(f"[embed_with_cache] returning all embeddings => avg_sim={avg_sim:.2f}")
         return query_embeddings, corpus_embeddings
     else:
         raise ValueError(f"model {model} not supported")
@@ -274,7 +279,9 @@ def cluster_dataset_uncached(
             ]
         )
         print("[cluster_dataset_uncached] calling fit-transform on queries")
-        q = model.fit_transform(q.cpu().numpy())
+        q_small = q[:1_000_000, :].cpu().numpy()
+        model.fit(q_small)
+        q = model.transform(q.cpu().numpy())
         q = torch.tensor(q, dtype=torch.float16, device='cpu')
         print("[cluster_dataset_uncached] calling fit-transform on docs")
         X = model.transform(X)
@@ -338,7 +345,8 @@ def cluster_dataset(
         return result
     else:
         assert get_world_size() == 1, "can't cluster in DDP"
-        MAX_DATASET_LEN = 100_000_000
+        MAX_DATASET_LEN = 5_000_000
+        # MAX_DATASET_LEN = 20_000_000
         if len(dataset) < MAX_DATASET_LEN:
             result = cluster_dataset_uncached(
                 dataset=dataset,
@@ -350,20 +358,14 @@ def cluster_dataset(
                 downscale_and_normalize=downscale_and_normalize,
             )
         else:
-            num_sub_datasets = math.ceil(len(dataset) / MAX_DATASET_LEN)
-            print(f"[cluster_dataset] splitting into {num_sub_datasets} datasets of max length {MAX_DATASET_LEN}")
-            dataset = dataset.add_column("sub_idx", range(len(dataset)))
-            dataset = dataset.shuffle(seed=42, keep_in_memory=True)
-            i = 0
+            num_shards = math.ceil(len(dataset) / MAX_DATASET_LEN)
+            print(f"[cluster_dataset] splitting into {num_shards} datasets of max length {MAX_DATASET_LEN}")
+            dataset = dataset.shuffle(seed=42)
             result = {}
             offset = 0
-            while i < len(dataset):
-                j = (i // MAX_DATASET_LEN) + 1
-                print(f"[cluster_dataset] selecting sub-dataset {j} / {num_sub_datasets}")
-                mini_dataset = dataset.select(
-                    range(i, min(i + MAX_DATASET_LEN, len(dataset)))
-                )
-                mini_dataset = mini_dataset.flatten_indices(keep_in_memory=True)
+            for i in range(num_shards):
+                print(f"[cluster_dataset] selecting shard {i} / {num_shards}")
+                mini_dataset = dataset.shard(num_shards=num_shards, index=i, contiguous=True)
                 mini_result = cluster_dataset_uncached(
                     dataset=mini_dataset,
                     model=model,
@@ -384,7 +386,6 @@ def cluster_dataset(
                 
                 gc.collect()
                 torch.cuda.empty_cache()
-                i += MAX_DATASET_LEN
         gc.collect()
         torch.cuda.empty_cache()
         pickle.dump(result, open(clustering_hash, "wb"))
