@@ -218,7 +218,6 @@ def main():
         clustering_query_to_doc=data_args.clustering_query_to_doc,
         seed=training_args.seed,
     )
-    # breakpoint()
     data_args_eval = copy.copy(data_args)
     data_args_eval.sampling_strategy = "domain" # always set this for eval
     eval_sampler_fn = functools.partial(
@@ -242,7 +241,7 @@ def main():
     model_args.transductive_corpus_size = training_args.transductive_corpus_size
     model_config = ModelConfig(**vars(model_args))
     model_cls = get_model_class(model_args.architecture)
-    if model_args.architecture == 'biencoder':
+    if model_args.architecture in ['biencoder', 'dataset_prefix_biencoder']:
         model = model_cls(
             config=model_config,
             embedder=embedder,

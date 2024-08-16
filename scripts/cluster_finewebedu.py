@@ -24,8 +24,8 @@ def main():
     cluster_results = cluster_dataset(
         dataset=dataset.dataset,
         model="gtr_base",
-        query_key=dataset._document_input_ids_key,
-        document_key=dataset._query_input_ids_key,
+        document_key=dataset._document_input_ids_key,
+        query_key=dataset._query_input_ids_key,
         query_to_doc=True,
         cluster_size=args.cluster_size,
         downscale_and_normalize=True,

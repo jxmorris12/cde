@@ -222,7 +222,7 @@ class DenseEncoder(torch.nn.Module):
         self._consider_putting_model_on_device()
 
         show_progress_bar = (len(dataset) >= 128) and show_progress_bar
-        print("[DenseEncoder] encode() calling embed_dataloader")
+        print(f"[DenseEncoder] encode() calling embed_dataloader (convert_to_tensor={convert_to_tensor})")
         encoded_embeds = embed_dataloader(
             self.encoder,
             data_loader, 
@@ -231,6 +231,7 @@ class DenseEncoder(torch.nn.Module):
             show_progress_bar=show_progress_bar,
             **self.model_kwargs
         )
+        print("[DenseEncoder] encode() done calling embed_dataloader")
         if isinstance(dataset, datasets.Dataset):
             num_cleaned_cache_files = dataset.cleanup_cache_files()
             if num_cleaned_cache_files: 

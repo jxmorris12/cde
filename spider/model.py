@@ -5,7 +5,7 @@ import torch
 import transformers
 
 from spider.lib.dist import print0
-from spider.lib.tensor import mean_pool
+from spider.lib.tensor import mean_pool, mean_pool_3d
 
 
 def limit_layers(model: transformers.PreTrainedModel, n_layers: int) -> None:
@@ -47,6 +47,10 @@ class BiEncoder(transformers.PreTrainedModel):
         #     print0(f"using torch.compile() on embedder of type `{embedder.config.model_type}`")
         #     self.embedder = torch.compile(self.embedder) 
         self.hidden_size = self.embedder.config.hidden_size
+
+
+        # Allow pooling to multiple tokens per document
+        self.tokens_per_document = vars(config).get("transductive_tokens_per_document", 1)
         self.mlp = torch.nn.Sequential(
             torch.nn.Linear(self.hidden_size, self.hidden_size),
             torch.nn.GELU(),
@@ -90,7 +94,21 @@ class BiEncoder(transformers.PreTrainedModel):
                 attention_mask=attention_mask,
             ).last_hidden_state
         )
-        document_embeddings = mean_pool(outputs, attention_mask)
+
+        if self.tokens_per_document > 1:
+            document_embeddings = None
+            batch_size, seq_length, output_dim = outputs.shape
+            assert seq_length % self.tokens_per_document == 0 # TODO: Pad to nearest multiple
+
+            outputs = outputs.reshape(
+                (batch_size, seq_length // self.tokens_per_document, self.tokens_per_document, output_dim)
+            )
+
+            attention_mask = attention_mask.reshape((batch_size, -1, self.tokens_per_document))
+            document_embeddings = mean_pool_3d(outputs, attention_mask)
+            document_embeddings = document_embeddings.reshape((batch_size * self.tokens_per_document, output_dim))
+        else:
+            document_embeddings = mean_pool(outputs, attention_mask)
         output = self.mlp(document_embeddings)
 
         if output_hidden_states:
@@ -210,20 +228,23 @@ class DatasetConditionedBiencoder(transformers.PreTrainedModel):
         self.n_soft_prompt = 8
         self.hidden_size = dataset_backbone.config.hidden_size
 
+        self.tokens_per_document = vars(config).get("transductive_tokens_per_document", 1)
+      
         disable_transductive_rotary_embedding = vars(config).get("disable_transductive_rotary_embedding", True)
         if self.backbone.config.model_type.startswith("nomic") and disable_transductive_rotary_embedding:
             # We only want to apply positional embeddings to the
             # *text* portion of the backbone network.
             self.backbone.config.rotary_start_pos = 0.0
             rotary_disabled = 0
+
+            rotary_start_pos = self.num_corpus_tokens
             for module in self.backbone.modules():
                 if hasattr(module, "rotary_emb_dim"):
-                    module.rotary_start_pos = config.transductive_corpus_size
+                    module.rotary_start_pos = rotary_start_pos
                     rotary_disabled += 1
-            print0(f"modified {rotary_disabled} rotary modules – set rotary_start_pos to {config.transductive_corpus_size}")
+            print0(f"modified {rotary_disabled} rotary modules – set rotary_start_pos to {rotary_start_pos}")
 
-        # TODO: Argparse, ablate, and potentially remove the soft prompt portion
-        # of this model.
+       
         self.prompt_projection = torch.nn.Sequential(
             torch.nn.Linear(self.embedding_dim, self.hidden_size),
             torch.nn.ReLU(),
@@ -241,6 +262,10 @@ class DatasetConditionedBiencoder(transformers.PreTrainedModel):
                 torch.randn(self.embedding_dim) * 0.01,
                 requires_grad = True
             )
+        
+    @property
+    def num_corpus_tokens(self) -> int:
+        return self.config.transductive_corpus_size * self.tokens_per_document
     
     def forward(
             self, 
@@ -259,10 +284,11 @@ class DatasetConditionedBiencoder(transformers.PreTrainedModel):
         dataset_embeddings = dataset_embeddings.to(input_ids.device)
         dataset_embeddings = dataset_embeddings.to(torch.float32)
 
-        if dataset_embeddings.shape[1] > self.config.transductive_corpus_size:
+        if dataset_embeddings.shape[1] > self.num_corpus_tokens:
             # If too many dataset embeddings are passed in, just take the first N until
             # we have the proper number.
-            dataset_embeddings = dataset_embeddings[:, :self.config.transductive_corpus_size, :]
+            dataset_embeddings = dataset_embeddings[:, :self.num_corpus_tokens, :]
+        
         batch_size = input_ids.shape[0]
         _, corpus_size, _hidden_dim = dataset_embeddings.shape
         if _ == 1:
@@ -300,9 +326,6 @@ class DatasetConditionedBiencoder(transformers.PreTrainedModel):
             randomized_order = randomized_order.to(soft_prompt.device)
             soft_prompt = soft_prompt.gather(1, randomized_order[..., None].expand_as(soft_prompt))
         
-        # from spider.lib.dist import get_rank
-        # if get_rank() == 0: breakpoint()
-        
         inputs_embeds = self.backbone.embeddings(input_ids) # (b, s) -> (b, s, d)
         inputs_embeds = torch.cat((soft_prompt, inputs_embeds), dim=1) # (v, 4+b+s, d)
 
@@ -332,6 +355,63 @@ class DatasetConditionedBiencoder(transformers.PreTrainedModel):
         output = self.output_projection(output_pooled) # (b, 2d) -> (b, d)
 
         if output_hidden_states:
+            return {
+                "hidden_states": output_vectors,
+                "pooled": output,
+            }
+        else:
+            return output
+
+
+
+class DatasetPrefixBiencoder(transformers.PreTrainedModel):
+    def __init__(
+            self, 
+            config, #: transformers.PreTrainedConfig, 
+            embedder: transformers.PreTrainedModel, 
+        ):
+        super().__init__(config=config)
+        self.embedder = embedder
+        self.hidden_size = self.embedder.config.hidden_size
+
+        disable_transductive_rotary_embedding = vars(config).get("disable_transductive_rotary_embedding", True)
+        self.output_projection = torch.nn.Sequential(
+            torch.nn.Linear(self.hidden_size, self.hidden_size),
+            torch.nn.ReLU(),
+            torch.nn.Linear(self.hidden_size, self.config.embedding_output_dim or self.hidden_size)
+        )
+    
+    def forward(
+            self, 
+            input_ids: torch.Tensor,
+            attention_mask: torch.Tensor,
+            dataset_input_ids: torch.Tensor,
+            dataset_attention_mask: torch.Tensor,
+            output_hidden_states: bool = False,
+        ) -> torch.Tensor:
+        R = torch.randint(low=0, high=len(dataset_input_ids), size=(len(input_ids),), device=dataset_input_ids.device)
+        
+        dataset_input_ids = dataset_input_ids[R]
+        input_ids = torch.cat((dataset_input_ids, input_ids), dim=1)
+
+        dataset_attention_mask = torch.ones_like(dataset_attention_mask, device=dataset_attention_mask.device)
+        input_attention_mask = torch.cat((dataset_attention_mask, attention_mask), dim=1)
+        output_attention_mask = torch.cat(
+            (torch.zeros_like(dataset_input_ids), attention_mask), dim=1
+        )
+
+        output = self.embedder(
+            input_ids=input_ids,
+            attention_mask=input_attention_mask,
+        ) 
+        
+        output_vectors = output.last_hidden_state
+        output_pooled = mean_pool(output_vectors, output_attention_mask)
+        output = self.output_projection(output_pooled) # (b, 2d) -> (b, d)
+
+        if output_hidden_states:
+            S_d = dataset_attention_mask.shape[1]
+            output_vectors = output_vectors[:, S_d:, :]
             return {
                 "hidden_states": output_vectors,
                 "pooled": output,
@@ -401,5 +481,7 @@ def get_model_class(name: str):
         return DatasetTransformer
     elif name == 'biencoder':
         return BiEncoder
+    elif name == "dataset_prefix_biencoder":
+        return DatasetPrefixBiencoder
     else:
         raise ValueError(f'unknown model cls {name}')

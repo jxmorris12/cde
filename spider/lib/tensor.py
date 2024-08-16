@@ -7,6 +7,16 @@ import torch
 from .dist import gather_sum, get_rank, get_world_size
 
 
+
+def mean_pool_3d(
+    hidden_states: torch.Tensor, attention_mask: torch.Tensor
+) -> torch.Tensor:
+    B, S, T, D = hidden_states.shape
+    unmasked_outputs = hidden_states * attention_mask[..., None]
+    pooled_outputs = unmasked_outputs.sum(dim=1) / attention_mask.sum(dim=1)[..., None]
+    # assert pooled_outputs == (B, T, D)
+    return pooled_outputs
+
 def mean_pool(
     hidden_states: torch.Tensor, attention_mask: torch.Tensor
 ) -> torch.Tensor:

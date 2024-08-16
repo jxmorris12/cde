@@ -66,7 +66,7 @@ class ModelArguments:
     architecture: str = field(
         default="biencoder",
         metadata = {
-            "choices": ["biencoder", "query_independent_dt", "transductive", "transductive__encoder_decoder", "two_head_mlp"],
+            "choices": ["biencoder", "dataset_prefix_biencoder", "query_independent_dt", "transductive", "transductive__encoder_decoder", "two_head_mlp"],
         }
     )
     limit_layers: Optional[int] = field(
@@ -99,6 +99,12 @@ class ModelArguments:
             "help": "Sequence dropout val for transductive model"
         }
     )
+    transductive_tokens_per_document: int = field(
+        default=1,
+        metadata={
+            "help": "Number of tokens per document for transductive model"
+        }
+    )
 
 
 @dataclass
@@ -128,10 +134,9 @@ class DataArguments:
         }
     )
     clustering_query_to_doc: bool = field(
-        default=False,
+        default=True,
         metadata={
             "help": "Whether to use query-doc weightings for clustering, or just queries",
-            "choices": [True, False],
         }
     )
     clustering_downscale_and_normalize: bool = field(
@@ -345,6 +350,10 @@ class TrainingArguments(transformers.TrainingArguments):
                 "`DistributedDataParallel`."
             )
         },
+    )
+    mlm_probability: float = field(
+        default=0.30, 
+        metadata={"help": "Ratio of tokens to mask for MLM training."}
     )
     def __setattr__(self, name, value):
         super(transformers.TrainingArguments, self).__setattr__(name, value)

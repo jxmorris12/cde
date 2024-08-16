@@ -57,6 +57,7 @@ def embed_for_clustering(
         model: str,
         query_to_doc: bool,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
+    print("[embed_for_clustering] called with model", model, "/ keys", document_key, query_key)
     # return torch.randn(len(dataset), 768), torch.randn(len(dataset), 768)
     if model == "bm25":
         document_input_ids = dataset[document_key]
@@ -341,8 +342,9 @@ def cluster_dataset(
         return result
     else:
         assert get_world_size() == 1, "can't cluster in DDP"
+        MAX_DATASET_LEN = 50_000
         # MAX_DATASET_LEN = 1_000_000
-        MAX_DATASET_LEN = 50_000_000
+        # MAX_DATASET_LEN = 50_000_000
         # MAX_DATASET_LEN = 20_000_000
         if len(dataset) < MAX_DATASET_LEN:
             result = cluster_dataset_uncached(
@@ -387,11 +389,13 @@ def cluster_dataset(
                     true_data_idx = mini_dataset_sub_idx[data_idx]
                     result[true_data_idx] = cluster + offset
                 offset += len(new_clusters)
+                breakpoint()
                 
                 gc.collect()
                 torch.cuda.empty_cache()
         gc.collect()
         torch.cuda.empty_cache()
+        breakpoint()
         pickle.dump(result, open(clustering_hash, "wb"))
         return result
 

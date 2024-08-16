@@ -10,7 +10,7 @@ import random
 import datasets
 import numpy as np
 import torch
-from spider.dataset import NomicSupervisedDataset, NomicUnsupervisedDataset
+from spider.dataset import FineWebEdu, NomicSupervisedDataset, NomicUnsupervisedDataset
 from spider.lib import (
     cluster_dataset,
     cluster_subdomains,
@@ -140,14 +140,12 @@ class FixedSubdomainSampler(RandomSampler):
         )
         assert hasattr(self.dataset, 'subdomain_idxs')
         self.share_negatives_between_gpus = share_negatives_between_gpus
-        self.batch_assignments = self.dataset.subdomain_idxs
         g = torch.Generator()
         g.manual_seed(self.seed + self.epoch)
         if shuffle:
             np_gen = np.random.default_rng(self.seed)
             for k in tqdm_if_main_worker(self.batch_assignments.keys(), desc="Shuffling clusters", colour="red"):
                 np_gen.shuffle(self.batch_assignments[k])
-        assert sum(map(len, self.batch_assignments.values())) == len(dataset)
     
     def _get_batch_lists(self) -> List[Iterable[int]]:
         """List of sub-batches which will be flattened and reshaped into the full clusters."""
@@ -203,7 +201,7 @@ class FixedSubdomainSampler(RandomSampler):
 
 
 class AutoClusterSampler(FixedSubdomainSampler):
-    dataset: NomicDataset
+    dataset: Union[NomicDataset, FineWebEdu]
     def __init__(
             self, 
             dataset: NomicDataset,
@@ -276,6 +274,9 @@ class AutoClusterWithinDomainSampler(FixedSubdomainSampler):
             share_negatives_between_gpus=share_negatives_between_gpus,
             seed=seed,
         )
+        self.batch_assignments = self.dataset.subdomain_idxs
+        assert sum(map(len, self.batch_assignments.values())) == len(dataset)
+        
         self.query_to_doc = query_to_doc
         self.batch_size = batch_size
         self.cluster_size = cluster_size

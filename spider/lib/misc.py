@@ -385,9 +385,14 @@ class TensorRunningAverages:
 def load_embedder_and_tokenizer(name: str) -> Tuple:
     if name.startswith("nomic") or (name == "bert-base-uncased"):
         from spider.lib.nomic_bert import NomicBertModel
-        model = NomicBertModel.from_pretrained(
-            name, add_pooling_layer=False
-        )
+        if name.endswith("--from-scratch"):
+            name = name.replace("--from-scratch", "")
+            config = transformers.AutoConfig.from_pretrained(name, trust_remote_code=True)
+            model = NomicBertModel._from_config(config)
+        else:
+            model = NomicBertModel.from_pretrained(
+                name, add_pooling_layer=False
+            )
         tokenizer = transformers.AutoTokenizer.from_pretrained(name)
     elif name in ["gtr-base", "gtr_base"]:
         model = transformers.AutoModel.from_pretrained(

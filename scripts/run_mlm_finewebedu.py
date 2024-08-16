@@ -57,7 +57,7 @@ class MlmTrainer(transformers.Trainer):
         )
         self.classifier.to(args.device)
 
-        self.mlm_probability = 0.3
+        self.mlm_probability = args.mlm_probability
     
     def _get_train_sampler(self) -> torch.utils.data.Sampler:
         return self._train_sampler_fn()
@@ -102,6 +102,8 @@ class MlmTrainer(transformers.Trainer):
 
         # Rename keys
         input_ids = inputs.pop("text_input_ids")
+        unmasked_input_ids = input_ids.clone()
+
         input_ids, labels = self.torch_mask_tokens(input_ids)
 
         inputs["input_ids"] = input_ids
@@ -116,7 +118,8 @@ class MlmTrainer(transformers.Trainer):
         outputs = model(
             input_ids=inputs["input_ids"],
             attention_mask=inputs["attention_mask"],
-            dataset_input_ids=inputs["input_ids"][R1],
+            dataset_input_ids=unmasked_input_ids[R1],
+            # dataset_input_ids=input_ids["input_ids"][R1],
             dataset_attention_mask=inputs["attention_mask"][R1],
             output_hidden_states=True,
         )
@@ -217,6 +220,7 @@ def main():
 
     parser = transformers.HfArgumentParser((ModelArguments, DataArguments, TrainingArguments))
     model_args, data_args, training_args = parser.parse_args_into_dataclasses()
+    training_args.eval_strategy = "no"
     transformers.set_seed(training_args.seed)
     logging.basicConfig(
         format='%(asctime)s - %(message)s',
@@ -249,7 +253,7 @@ def main():
     model_args.transductive_corpus_size = training_args.transductive_corpus_size
     model_config = ModelConfig(**vars(model_args))
     model_cls = get_model_class(model_args.architecture)
-    if model_args.architecture == 'biencoder':
+    if model_args.architecture in ['biencoder', 'dataset_prefix_biencoder']:
         model = model_cls(
             config=model_config,
             embedder=embedder,

@@ -4,6 +4,7 @@ import functools
 import os
 import random
 
+import datasets
 import torch
 
 from spider.lib import cluster_dataset
@@ -50,8 +51,8 @@ TASK_LIST_RETRIEVAL = [
 
 
 # TASK_LIST_RETRIEVAL = [
-#     # "ArguAna",
-#     # "NFCorpus", 
+#     "ArguAna",
+#     "NFCorpus", 
 #     "SCIDOCS", 
 #     "TRECCOVID", 
 #     "SciFact", 
@@ -83,6 +84,8 @@ def main():
         return_args=True
     )
     trainer.model.eval()
+
+    datasets.enable_caching()
     mteb_encoder = DenseEncoder(
         model_name_or_path=trainer.model.config.embedder,
         encoder=trainer.model.second_stage_model,
