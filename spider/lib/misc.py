@@ -472,3 +472,25 @@ def shuffle_batches_multiproc(g: torch.Generator, list_of_tensors: List[torch.Te
         all_indices.extend(result)
         pbar.update()
     return all_indices
+
+
+def exit_if_running_or_finished_wandb(
+        project_name: str,
+        exp_group: str, exp_name: str
+    ) -> None:
+    print("Checking if experiment is already running...")
+
+    running_runs = api.runs(
+        path="tti-nomic-7",
+        filters={
+            "display_name": exp_name,
+            "state": "Finished",
+            "config.exp_group": exp_group,
+        }  
+    )
+    print("Found", len(running_runs), f"runs with name {display_name} and group {exp_group} in {project_name}.")
+
+    if len(running_runs) > 0:
+        print("Exiting because experiment is already running or completed.")
+        sys.exit(0)
+    

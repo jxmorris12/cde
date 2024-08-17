@@ -14,7 +14,12 @@ def mean_pool_3d(
     B, S, T, D = hidden_states.shape
     unmasked_outputs = hidden_states * attention_mask[..., None]
     pooled_outputs = unmasked_outputs.sum(dim=1) / attention_mask.sum(dim=1)[..., None]
-    # assert pooled_outputs == (B, T, D)
+
+    # fix for gradient flow: fill empty rows with the mean of the rest of the sequence
+    sequence_means = hidden_states.reshape((B, S * T, D)).mean(dim=1, keepdim=True)
+    pooled_outputs = pooled_outputs.where((attention_mask.sum(dim=-1, keepdim=True) == 0), sequence_means)
+
+    assert pooled_outputs.shape == (B, T, D)
     return pooled_outputs
 
 def mean_pool(

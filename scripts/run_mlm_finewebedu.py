@@ -130,6 +130,7 @@ class MlmTrainer(transformers.Trainer):
             labels.reshape(-1), 
             ignore_index=-100
         )
+        # print(f"mlm_loss: {mlm_loss}")
 
         return mlm_loss
 
@@ -278,7 +279,7 @@ def main():
         load_result = model.load_state_dict(state_dict, strict=False)
         issue_warnings_after_load(load_result)
 
-    print0("[main] creating collator")
+    print0("[run_mlm_fineweb] creating collator")
     collator = TokenizedCollator(
         tokenizer=embedder_tokenizer,
         padding='longest',
@@ -306,7 +307,7 @@ def main():
         )
     
 
-    print0("[main] creating trainer")
+    print0("[run_mlm_fineweb] creating trainer")
     if get_rank() == 0:
         # Print info stats for training on main worker
         transformers.logging.set_verbosity_info()
@@ -322,11 +323,8 @@ def main():
         train_sampler_fn=train_sampler_fn,
     )
     logging.info("train() loaded checkpoint %s", checkpoint)
-    print0("[main] trainer.train()")
-
-    # trainer.evaluate_retrieval_datasets()
+    print0("[run_mlm_fineweb] trainer.train()")
     trainer.train(resume_from_checkpoint=checkpoint)
-    trainer.evaluate_retrieval_datasets()
 
 
 if __name__ == '__main__':

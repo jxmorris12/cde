@@ -12,6 +12,7 @@ import transformers
 
 from spider.lib import (
     count_cpus,
+    exit_if_running_or_finished_wandb,
     get_rank, 
     get_world_size, 
     print0,
@@ -103,6 +104,13 @@ class ModelArguments:
         default=1,
         metadata={
             "help": "Number of tokens per document for transductive model"
+        }
+    )
+    biencoder_pooling_strategy: str = field(
+        default="mean",
+        metadata={
+            "help": "Pooling strategy for biencoder",
+            "choices": ["mean", "max"]
         }
     )
 
@@ -220,10 +228,6 @@ class TrainingArguments(transformers.TrainingArguments):
         default=2e-5,
         metadata={"help": "The initial learning rate for AdamW on the backbone model."}
     )
-    use_wandb: bool = field(
-        default=False, metadata={"help": "Whether or not to log to Weights & Biases."}
-    )
-    report_to: str = "wandb"
     remove_unused_columns: Optional[bool] = field(
         default=False, metadata={"help": "Remove columns not required by the model when using an nlp.Dataset."}
     )
@@ -355,6 +359,15 @@ class TrainingArguments(transformers.TrainingArguments):
         default=0.30, 
         metadata={"help": "Ratio of tokens to mask for MLM training."}
     )
+    wandb_exit_if_running_or_finished: bool = field(
+        default=False,
+        metadata={"help": "Whether to only run if previous run crashed"}
+    )
+    use_wandb: bool = field(
+        default=False, metadata={"help": "Whether or not to log to Weights & Biases."}
+    )
+    report_to: str = "wandb"
+
     def __setattr__(self, name, value):
         super(transformers.TrainingArguments, self).__setattr__(name, value)
 
@@ -395,3 +408,10 @@ class TrainingArguments(transformers.TrainingArguments):
         ############################################################################
         # self.metric_for_best_model = "loss"
         self.greater_is_better = False
+        ############################################################################
+        if self.wandb_exit_if_running_or_finished:
+            exit_if_running_or_finished_wandb(
+                project_name="tti-nomic-7",
+                exp_name=self.exp_name,
+                exp_group=self.exp_group
+            )

@@ -62,6 +62,7 @@ class BiEncoder(transformers.PreTrainedModel):
             disable_dropout(self)
 
         self.embedding_dim = self.embedder.config.hidden_size
+        self.pooling_strategy = vars(config).get("pooling_strategy", "mean")
 
     def forward(
             self, 
@@ -105,10 +106,16 @@ class BiEncoder(transformers.PreTrainedModel):
             )
 
             attention_mask = attention_mask.reshape((batch_size, -1, self.tokens_per_document))
-            document_embeddings = mean_pool_3d(outputs, attention_mask)
+            if self.pooling_strategy == "mean":
+                document_embeddings = mean_pool_3d(outputs, attention_mask)
+            else:
+                document_embeddings = document_embeddings.max(dim=1)
             document_embeddings = document_embeddings.reshape((batch_size * self.tokens_per_document, output_dim))
         else:
-            document_embeddings = mean_pool(outputs, attention_mask)
+            if self.pooling_strategy == "mean":
+                document_embeddings = mean_pool(outputs, attention_mask)
+            else:
+                document_embeddings = document_embeddings.max(dim=1)
         output = self.mlp(document_embeddings)
 
         if output_hidden_states:
@@ -263,6 +270,11 @@ class DatasetConditionedBiencoder(transformers.PreTrainedModel):
                 requires_grad = True
             )
         
+        # self.input_ln = torch.nn.LayerNorm(
+        #     self.hidden_size, 
+        #     eps=self.backbone.config.layer_norm_epsilon
+        # )
+                
     @property
     def num_corpus_tokens(self) -> int:
         return self.config.transductive_corpus_size * self.tokens_per_document
@@ -328,6 +340,8 @@ class DatasetConditionedBiencoder(transformers.PreTrainedModel):
         
         inputs_embeds = self.backbone.embeddings(input_ids) # (b, s) -> (b, s, d)
         inputs_embeds = torch.cat((soft_prompt, inputs_embeds), dim=1) # (v, 4+b+s, d)
+
+        # inputs_embeds = self.input_ln(inputs_embeds)
 
         backbone_attention_mask = torch.ones(
             soft_prompt.shape[0:2],

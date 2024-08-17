@@ -253,8 +253,8 @@ class FineWebEdu(torch.utils.data.Dataset, TokenizerMixin):
     use_prefix: bool
     def __init__(self, tokenizer: transformers.AutoTokenizer, max_seq_length: int):
         self.dataset = datasets.load_dataset(
-            # "HuggingFaceFW/fineweb-edu", "sample-350BT",
-            "HuggingFaceFW/fineweb-edu", "sample-100BT",
+            "HuggingFaceFW/fineweb-edu", "sample-350BT",
+            # "HuggingFaceFW/fineweb-edu", "sample-100BT",
             # "HuggingFaceFW/fineweb-edu", "sample-10BT",
             keep_in_memory=False,
             download_config=datasets.DownloadConfig(resume_download=True),
