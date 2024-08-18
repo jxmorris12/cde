@@ -479,16 +479,18 @@ def exit_if_running_or_finished_wandb(
         exp_group: str, exp_name: str
     ) -> None:
     print("Checking if experiment is already running...")
+    import wandb
 
+    api = wandb.Api()
     running_runs = api.runs(
         path="tti-nomic-7",
         filters={
             "display_name": exp_name,
-            "state": "Finished",
+            "state": {"$regex": "Running|Finished"},
             "config.exp_group": exp_group,
         }  
     )
-    print("Found", len(running_runs), f"runs with name {display_name} and group {exp_group} in {project_name}.")
+    print("Found", len(running_runs), f"runs with name {exp_name} and group {exp_group} in {project_name}.")
 
     if len(running_runs) > 0:
         print("Exiting because experiment is already running or completed.")
