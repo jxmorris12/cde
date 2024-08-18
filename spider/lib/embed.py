@@ -51,7 +51,7 @@ def embed_dataloader(
         encoded_embeds.append(embeds.cpu())
         
     if convert_to_tensor:
-        return torch.cat(encoded_embeds, dim=0, device=embed_device)
+        return torch.cat(encoded_embeds, dim=0).to(embed_device)
     else:
         encoded_embeds = [embeds.cpu().float().numpy() for embeds in encoded_embeds]
         output_array = np.concatenate(encoded_embeds, axis=0)

@@ -497,5 +497,3 @@ def exit_if_running_or_finished_wandb(
         print("Exiting because experiment is already running or completed.")
         sys.exit(0)
     
-    breakpoint()
-    

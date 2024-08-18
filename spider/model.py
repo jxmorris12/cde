@@ -476,6 +476,7 @@ class DatasetTransformer(transformers.PreTrainedModel):
         input_ids (long torch.Tensor) – ids of input tokens
         attention_mask (bool torch.Tensor)
         """
+        # breakpoint()
         dataset_embeddings = self.first_stage_model(
             input_ids=dataset_input_ids, 
             attention_mask=dataset_attention_mask

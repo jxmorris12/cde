@@ -4,7 +4,7 @@ import math
 
 import torch
 
-from .dist import gather_sum, get_rank, get_world_size
+from .dist import gather_sum, get_rank, get_world_size, print0
 
 
 
@@ -13,7 +13,7 @@ def mean_pool_3d(
 ) -> torch.Tensor:
     B, S, T, D = hidden_states.shape
     unmasked_outputs = hidden_states * attention_mask[..., None]
-    pooled_outputs = unmasked_outputs.sum(dim=1) / attention_mask.sum(dim=1)[..., None]
+    pooled_outputs = unmasked_outputs.sum(dim=1) / (attention_mask.sum(dim=1)[..., None] + 1e-9)
 
     # fix for gradient flow: fill empty rows with the mean of the rest of the sequence
     sequence_means = (
@@ -21,9 +21,14 @@ def mean_pool_3d(
             .mean(dim=1, keepdim=True)
             .expand(-1, T, -1)
     )
-    pooled_outputs = pooled_outputs.where((attention_mask.sum(dim=1)[..., None] == 0), sequence_means)
+    try:
+        pooled_outputs = pooled_outputs.where((attention_mask.sum(dim=1)[..., None] == 0), sequence_means)
+        # print0("zero windows =>", (attention_mask.sum(dim=1) == 0).sum().item())
+        assert pooled_outputs.shape == (B, T, D)
 
-    assert pooled_outputs.shape == (B, T, D)
+    except RuntimeError:
+        breakpoint()
+
     return pooled_outputs
 
 def mean_pool(

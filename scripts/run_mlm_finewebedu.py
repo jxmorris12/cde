@@ -115,6 +115,7 @@ class MlmTrainer(transformers.Trainer):
 
         # Randomly reorder dataset input ids.
         R1 = torch.randperm(effective_batch_size)[:transductive_corpus_size]
+
         outputs = model(
             input_ids=inputs["input_ids"],
             attention_mask=inputs["attention_mask"],
