@@ -102,14 +102,15 @@ class BiEncoder(transformers.PreTrainedModel):
             assert seq_length % self.tokens_per_document == 0 # TODO: Pad to nearest multiple
 
             outputs = outputs.reshape(
-                (batch_size, seq_length // self.tokens_per_document, self.tokens_per_document, output_dim)
+                (batch_size,  self.tokens_per_document, seq_length // self.tokens_per_document, output_dim)
             )
 
-            attention_mask = attention_mask.reshape((batch_size, -1, self.tokens_per_document))
+            attention_mask = attention_mask.reshape((batch_size, self.tokens_per_document, -1))
             if self.pooling_strategy == "mean":
                 document_embeddings = mean_pool_3d(outputs, attention_mask)
             else:
                 document_embeddings = document_embeddings.max(dim=1)
+            
             document_embeddings = document_embeddings.reshape((batch_size * self.tokens_per_document, output_dim))
         else:
             if self.pooling_strategy == "mean":
