@@ -21,7 +21,6 @@ def mean_pool_3d(
             .mean(dim=1, keepdim=True)
             .expand(-1, T, -1)
     )
-
     pooled_outputs = pooled_outputs.where((attention_mask.sum(dim=1)[..., None] == 0), sequence_means)
 
     assert pooled_outputs.shape == (B, T, D)
