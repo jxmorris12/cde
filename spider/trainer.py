@@ -303,6 +303,10 @@ class CustomTrainer(transformers.Trainer):
         e1 = self.consider_gather(e1)
         e2 = self.consider_gather(e2)
 
+        assert len(e1.shape) == 2
+        assert len(e2.shape) == 2
+        assert e1.shape[1] == e2.shape[1]
+
         e1 = e1 / e1.norm(p=2, dim=1, keepdim=True) # Query
         e2 = e2 / e2.norm(p=2, dim=1, keepdim=True) # Document
         scores = e1 @ e2.T
@@ -426,7 +430,10 @@ class CustomTrainer(transformers.Trainer):
     
         # Sample fewer inputs if batch size is too large
         effective_batch_size = len(dataset_inputs["input_ids"])
-        transductive_corpus_size = self.args.transductive_corpus_size
+        transductive_corpus_size = (
+            self.model.config.transductive_corpus_size * 
+            self.model.config.transductive_tokens_per_document
+        )
         # assert transductive_corpus_size <= effective_batch_size, "cannot provide more transductive inputs than in batch"
 
         # Randomly reorder dataset input ids.

@@ -301,11 +301,13 @@ class DatasetConditionedBiencoder(transformers.PreTrainedModel):
         batch_size = input_ids.shape[0]
         if self.tokens_per_document > 1:
             # Choose N random documents to fill our context window with.
+            # This logic is a little confusing but allows us to sample a
+            # different batch *per-dataset*
             assert dataset_embeddings.shape[1] == self.tokens_per_document
             R = torch.randint(
                 low=0, 
                 high=len(dataset_embeddings), 
-                size=(len(input_ids), self.config.transductive_corpus_size), 
+                size=(batch_size, self.config.transductive_corpus_size), 
                 device=dataset_embeddings.device
             )
             # TODO make this deterministic somehow for evaluation?

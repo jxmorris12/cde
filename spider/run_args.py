@@ -113,6 +113,9 @@ class ModelArguments:
             "choices": ["mean", "max"]
         }
     )
+    def __post_init__(self):
+        if self.transductive_tokens_per_document > 1:
+            assert self.architecture == "transductive", "transductive_tokens_per_document only works with transductive architecture"
 
 
 @dataclass
