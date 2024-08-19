@@ -111,7 +111,7 @@ class BiEncoder(transformers.PreTrainedModel):
             else:
                 document_embeddings = document_embeddings.max(dim=1)
             
-            document_embeddings = document_embeddings.reshape((batch_size * self.tokens_per_document, output_dim))
+            document_embeddings = document_embeddings.reshape((batch_size, self.tokens_per_document, output_dim))
         else:
             if self.pooling_strategy == "mean":
                 document_embeddings = mean_pool(outputs, attention_mask)
@@ -296,13 +296,26 @@ class DatasetConditionedBiencoder(transformers.PreTrainedModel):
             dataset_embeddings = dataset_embeddings[None, :, :] # (b, d) -> (1, b, d)
         dataset_embeddings = dataset_embeddings.to(input_ids.device)
         dataset_embeddings = dataset_embeddings.to(torch.float32)
+    
+
+        batch_size = input_ids.shape[0]
+        if self.tokens_per_document > 1:
+            # Choose N random documents to fill our context window with.
+            assert dataset_embeddings.shape[1] == self.tokens_per_document
+            R = torch.randint(
+                low=0, 
+                high=len(dataset_embeddings), 
+                size=(len(input_ids), self.config.transductive_corpus_size), 
+                device=dataset_embeddings.device
+            )
+            # TODO make this deterministic somehow for evaluation?
+            dataset_embeddings = dataset_embeddings[R].reshape((batch_size, self.num_corpus_tokens, self.hidden_size))
 
         if dataset_embeddings.shape[1] > self.num_corpus_tokens:
             # If too many dataset embeddings are passed in, just take the first N until
             # we have the proper number.
             dataset_embeddings = dataset_embeddings[:, :self.num_corpus_tokens, :]
         
-        batch_size = input_ids.shape[0]
         _, corpus_size, _hidden_dim = dataset_embeddings.shape
         if _ == 1:
             # Auto-expand for a batch.

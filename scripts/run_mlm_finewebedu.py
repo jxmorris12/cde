@@ -111,10 +111,10 @@ class MlmTrainer(transformers.Trainer):
 
         # Sample fewer inputs if batch size is too large
         effective_batch_size = len(inputs["input_ids"])
-        transductive_corpus_size = self.args.transductive_corpus_size
+        full_transductive_corpus_size = self.model.config.transductive_corpus_size * self.model.config.transductive_tokens_per_document
 
         # Randomly reorder dataset input ids.
-        R1 = torch.randperm(effective_batch_size)[:transductive_corpus_size]
+        R1 = torch.randperm(effective_batch_size)[:full_transductive_corpus_size]
 
         outputs = model(
             input_ids=inputs["input_ids"],

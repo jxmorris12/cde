@@ -153,7 +153,7 @@ def main():
         print(task)
         print("\t", results)
         if len(results):
-            print("NDCG@10 =>", results[0].to_dict()['scores']['test'][0]['ndcg_at_10'])
+            print("NDCG@10 =>", results[0].to_dict()['scores'][split][0]['ndcg_at_10'])
         print()
     
 
