@@ -111,7 +111,6 @@ class FlashMHA(nn.Module):
             {"cu_seqlens": cu_seqlens, "max_seqlen": max_seqlen, **kwargs}
         )
         batch, seqlen = x.shape[:2]
-        breakpoint()
           
         q = self.Wq(x if mixer_subset is None else x[:, mixer_subset])
         kv = self.Wkv(x_kv if x_kv is not None else x)

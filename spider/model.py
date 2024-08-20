@@ -7,6 +7,9 @@ import transformers
 from spider.lib.dist import print0
 from spider.lib.tensor import mean_pool, mean_pool_3d
 
+from spider.lib.contextual_bert import ContextualBertModel
+from spider.lib.contextual_bert.configuration import ContextualBertConfig
+
 
 def limit_layers(model: transformers.PreTrainedModel, n_layers: int) -> None:
     if hasattr(model, 'transformer'):
@@ -50,7 +53,7 @@ class BiEncoder(transformers.PreTrainedModel):
 
 
         # Allow pooling to multiple tokens per document
-        self.tokens_per_document = vars(config).get("transductive_tokens_per_document", 1)
+        self.transductive_tokens_per_document = vars(config).get("transductive_tokens_per_document", 1)
         self.mlp = torch.nn.Sequential(
             torch.nn.Linear(self.hidden_size, self.hidden_size),
             torch.nn.GELU(),
@@ -96,22 +99,22 @@ class BiEncoder(transformers.PreTrainedModel):
             ).last_hidden_state
         )
 
-        if self.tokens_per_document > 1:
+        if self.transductive_tokens_per_document > 1:
             document_embeddings = None
             batch_size, seq_length, output_dim = outputs.shape
-            assert seq_length % self.tokens_per_document == 0 # TODO: Pad to nearest multiple
+            assert seq_length % self.transductive_tokens_per_document == 0 # TODO: Pad to nearest multiple
 
             outputs = outputs.reshape(
-                (batch_size,  self.tokens_per_document, seq_length // self.tokens_per_document, output_dim)
+                (batch_size,  self.transductive_tokens_per_document, seq_length // self.transductive_tokens_per_document, output_dim)
             )
 
-            attention_mask = attention_mask.reshape((batch_size, self.tokens_per_document, -1))
+            attention_mask = attention_mask.reshape((batch_size, self.transductive_tokens_per_document, -1))
             if self.pooling_strategy == "mean":
                 document_embeddings = mean_pool_3d(outputs, attention_mask)
             else:
                 document_embeddings = document_embeddings.max(dim=1)
             
-            document_embeddings = document_embeddings.reshape((batch_size, self.tokens_per_document, output_dim))
+            document_embeddings = document_embeddings.reshape((batch_size, self.transductive_tokens_per_document, output_dim))
         else:
             if self.pooling_strategy == "mean":
                 document_embeddings = mean_pool(outputs, attention_mask)
@@ -236,7 +239,7 @@ class DatasetConditionedBiencoder(transformers.PreTrainedModel):
         self.n_soft_prompt = 8
         self.hidden_size = dataset_backbone.config.hidden_size
 
-        self.tokens_per_document = vars(config).get("transductive_tokens_per_document", 1)
+        self.transductive_tokens_per_document = vars(config).get("transductive_tokens_per_document", 1)
       
         disable_transductive_rotary_embedding = vars(config).get("disable_transductive_rotary_embedding", True)
         if self.backbone.config.model_type.startswith("nomic") and disable_transductive_rotary_embedding:
@@ -278,7 +281,7 @@ class DatasetConditionedBiencoder(transformers.PreTrainedModel):
                 
     @property
     def num_corpus_tokens(self) -> int:
-        return self.config.transductive_corpus_size * self.tokens_per_document
+        return self.config.transductive_corpus_size * self.transductive_tokens_per_document
     
     def forward(
             self, 
@@ -297,13 +300,12 @@ class DatasetConditionedBiencoder(transformers.PreTrainedModel):
         dataset_embeddings = dataset_embeddings.to(input_ids.device)
         dataset_embeddings = dataset_embeddings.to(torch.float32)
     
-
         batch_size = input_ids.shape[0]
-        if self.tokens_per_document > 1:
+        if self.transductive_tokens_per_document > 1:
             # Choose N random documents to fill our context window with.
             # This logic is a little confusing but allows us to sample a
             # different batch *per-dataset*
-            assert dataset_embeddings.shape[1] == self.tokens_per_document
+            assert dataset_embeddings.shape[1] == self.transductive_tokens_per_document
             R = torch.randint(
                 low=0, 
                 high=len(dataset_embeddings), 
@@ -391,7 +393,6 @@ class DatasetConditionedBiencoder(transformers.PreTrainedModel):
             }
         else:
             return output
-
 
 
 class DatasetPrefixBiencoder(transformers.PreTrainedModel):
@@ -484,7 +485,7 @@ class DatasetTransformer(transformers.PreTrainedModel):
             self.second_stage_model.backbone.embeddings.word_embeddings.weight = (
                 self.first_stage_model.embedder.embeddings.word_embeddings.weight
             )
-        
+
     def forward(
             self, 
             input_ids: torch.Tensor,
@@ -509,14 +510,96 @@ class DatasetTransformer(transformers.PreTrainedModel):
         )
 
 
+class ContextualCrossAttention(transformers.PreTrainedModel):
+    embedder: transformers.PreTrainedModel
+    dataset_backbone: transformers.PreTrainedModel
+    def __init__(
+            self, 
+            config,
+            embedder: transformers.PreTrainedModel, 
+        ):
+        super().__init__(config=config)
+
+        if config.limit_layers:
+            print0(f"Limiting layers to {config.limit_layers}")
+            limit_layers(embedder, config.limit_layers)
+        
+        biencoder_config = copy.deepcopy(config)
+        biencoder_config.embedding_output_dim = None
+        self.first_stage_model = BiEncoder(
+            config=biencoder_config,
+            embedder=embedder
+        )
+        self.second_stage_model = ContextualBertModel(ContextualBertConfig())
+        self.transductive_tokens_per_document = vars(config).get("transductive_tokens_per_document", 1)
+        self.temp = config.logit_scale
+        if config.disable_dropout:
+            disable_dropout(self)
+    
+    @property
+    def num_corpus_tokens(self) -> int:
+        return self.config.transductive_corpus_size * self.transductive_tokens_per_document
+    
+    def forward(
+            self, 
+            input_ids: torch.Tensor,
+            attention_mask: torch.Tensor,
+            dataset_input_ids: Optional[torch.Tensor],
+            dataset_attention_mask: Optional[torch.Tensor],
+            output_hidden_states: bool = False,
+        ) -> torch.Tensor:
+        """
+        input_ids (long torch.Tensor) – ids of input tokens
+        attention_mask (bool torch.Tensor)
+        """
+        dataset_embeddings = self.first_stage_model(
+            input_ids=dataset_input_ids, 
+            attention_mask=dataset_attention_mask
+        )
+        # TODO: Deduplicate code below from other transductive model class
+        if len(dataset_embeddings.shape) == 2:
+            # Auto-expand for a batch.
+            dataset_embeddings = dataset_embeddings[None, :, :] # (b, d) -> (1, b, d)
+        dataset_embeddings = dataset_embeddings.to(input_ids.device)
+        dataset_embeddings = dataset_embeddings.to(torch.float32)
+        if self.transductive_tokens_per_document > 1:
+            # Choose N random documents to fill our context window with.
+            # This logic is a little confusing but allows us to sample a
+            # different batch *per-dataset*
+            assert dataset_embeddings.shape[1] == self.transductive_tokens_per_document
+            R = torch.randint(
+                low=0, 
+                high=len(dataset_embeddings), 
+                size=(batch_size, self.config.transductive_corpus_size), 
+                device=dataset_embeddings.device
+            )
+            # TODO make this deterministic somehow for evaluation?
+            dataset_embeddings = dataset_embeddings[R].reshape((batch_size, self.num_corpus_tokens, self.hidden_size))
+
+        if dataset_embeddings.shape[1] > self.num_corpus_tokens:
+            # If too many dataset embeddings are passed in, just take the first N until
+            # we have the proper number.
+            dataset_embeddings = dataset_embeddings[:, :self.num_corpus_tokens, :]
+
+        batch_size = input_ids.shape[0]
+        dataset_embeddings = dataset_embeddings.expand((batch_size, -1, -1))
+        return self.second_stage_model(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            encoder_hidden_states=dataset_embeddings,
+        )
+
+
 def get_model_class(name: str):
     if name == 'two_head_mlp':
         return TwoEmbeddersWithMLP
-    elif name in ['query_independent_dt', 'transductive']: # first name is the old one
+    elif name in 'transductive': 
         return DatasetTransformer
     elif name == 'biencoder':
         return BiEncoder
     elif name == "dataset_prefix_biencoder":
         return DatasetPrefixBiencoder
+    elif name == "contextual_cross_attention":
+        return ContextualCrossAttention
     else:
         raise ValueError(f'unknown model cls {name}')
