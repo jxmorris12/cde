@@ -57,7 +57,8 @@ def test_contextual_cross_attention():
             attention_mask=tokens["attention_mask"],
             dataset_input_ids=tokens_dataset["input_ids"],
             dataset_attention_mask=tokens_dataset["attention_mask"],
+            output_hidden_states=True,
         )
     
-    assert output.last_hidden_state.shape == (2, 6, 768)
+    assert output["hidden_states"].shape == (2, 6, 768)
         

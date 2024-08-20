@@ -535,6 +535,12 @@ class ContextualCrossAttention(transformers.PreTrainedModel):
         self.temp = config.logit_scale
         if config.disable_dropout:
             disable_dropout(self)
+        self.hidden_size = self.second_stage_model.config.hidden_size
+        self.output_projection = torch.nn.Sequential(
+            torch.nn.Linear(self.hidden_size, self.hidden_size),
+            torch.nn.ReLU(),
+            torch.nn.Linear(self.hidden_size, self.hidden_size)
+        )
     
     @property
     def num_corpus_tokens(self) -> int:
@@ -583,11 +589,23 @@ class ContextualCrossAttention(transformers.PreTrainedModel):
 
         batch_size = input_ids.shape[0]
         dataset_embeddings = dataset_embeddings.expand((batch_size, -1, -1))
-        return self.second_stage_model(
+        output = self.second_stage_model(
             input_ids=input_ids,
             attention_mask=attention_mask,
             encoder_hidden_states=dataset_embeddings,
         )
+        
+        output_vectors = output.last_hidden_state
+        output_pooled = mean_pool(output_vectors, attention_mask)
+        output = self.output_projection(output_pooled) # (b, 2d) -> (b, d)
+
+        if output_hidden_states:
+            return {
+                "hidden_states": output_vectors,
+                "pooled": output,
+            }
+        else:
+            return output
 
 
 def get_model_class(name: str):

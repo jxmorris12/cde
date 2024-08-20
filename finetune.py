@@ -242,7 +242,7 @@ def main():
     model_args.transductive_corpus_size = training_args.transductive_corpus_size
     model_config = ModelConfig(**vars(model_args))
     model_cls = get_model_class(model_args.architecture)
-    if model_args.architecture in ['biencoder', 'dataset_prefix_biencoder']:
+    if model_args.architecture in ['biencoder', 'dataset_prefix_biencoder', 'contextual_cross_attention']:
         model = model_cls(
             config=model_config,
             embedder=embedder,
