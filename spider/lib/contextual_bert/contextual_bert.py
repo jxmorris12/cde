@@ -134,7 +134,9 @@ class ContextualBlock(nn.Module):
         output_attentions: Optional[bool] = False,
         use_cache: Optional[bool] = False,
         cu_seqlens: Optional[torch.Tensor] = None,
+        cu_seqlens_k: Optional[torch.Tensor] = None,
         max_seq_len: Optional[int] = None,
+        max_seqlen_k: Optional[int] = None,
         encoder_hidden_states: Optional[torch.Tensor] = None,
     ):
         r"""Pass the input through the encoder layer.
@@ -218,9 +220,10 @@ class ContextualBlock(nn.Module):
             hidden_states = self.cross_attn(
                 x=hidden_states, 
                 x_kv=encoder_hidden_states,
-                attention_mask=attention_mask,
                 cu_seqlens=cu_seqlens,
+                cu_seqlens_k=cu_seqlens_k,
                 max_seqlen=max_seq_len,
+                max_seqlen_k=max_seqlen_k,
             )
 
            
@@ -266,9 +269,10 @@ class ContextualBlock(nn.Module):
             hidden_states = self.cross_attn(
                 x=hidden_states, 
                 x_kv=encoder_hidden_states,
-                attention_mask=attention_mask,
                 cu_seqlens=cu_seqlens,
+                cu_seqlens_k=cu_seqlens_k,
                 max_seqlen=max_seq_len,
+                max_seqlen_k=max_seqlen_k,
             )
             
             # Do MLP
@@ -434,46 +438,30 @@ class ContextualBertEncoder(nn.Module):
         hidden_states2 = None
         residual = None
 
+        assert encoder_hidden_states.shape[0] == hidden_states.shape[0]
+
         batch, seqlen = hidden_states.shape[:2]
-        hidden_states, indices, cu_seqlens, max_seqlen_in_batch = unpad_input(hidden_states, attention_mask)
+        hidden_states, indices, cu_seqlens, max_seq_len = unpad_input(hidden_states, attention_mask)
+        encoder_attention_mask = torch.ones(encoder_hidden_states.shape[0:2], dtype=torch.bool, device=encoder_hidden_states.device)
+        encoder_hidden_states, encoder_indices, cu_seqlens_k, max_seqlen_k = unpad_input(encoder_hidden_states, encoder_attention_mask)
+
         for i, layer in enumerate(self.layers):
-            if self.gradient_checkpointing and self.training:
-
-                def create_custom_forward(module):
-                    def custom_forward(*inputs):
-                        # None for past_key_value
-                        return module(*inputs)
-
-                    return custom_forward
-
-                hidden_states, hidden_states2, residual = torch.utils.checkpoint.checkpoint(
-                    create_custom_forward(layer),
-                    hidden_states,
-                    hidden_states2,
-                    residual,
-                    attention_mask,
-                    None,
-                    None,
-                    is_padded_inputs,
-                    use_reentrant=False,
-                    encoder_hidden_states=encoder_hidden_states,
-                )
-
-            else:
-                hidden_states, hidden_states2, residual = layer(
-                    hidden_states,
-                    hidden_states2,
-                    residual,
-                    attention_mask,
-                    position_ids,
-                    None,
-                    is_padded_inputs,
-                    output_attentions,
-                    use_cache,
-                    cu_seqlens=cu_seqlens,
-                    max_seq_len=max_seqlen_in_batch,
-                    encoder_hidden_states=encoder_hidden_states,
-                )
+            hidden_states, hidden_states2, residual = layer(
+                hidden_states,
+                hidden_states2,
+                residual,
+                attention_mask,
+                position_ids,
+                None,
+                is_padded_inputs,
+                output_attentions,
+                use_cache,
+                cu_seqlens=cu_seqlens,
+                max_seq_len=max_seq_len,
+                encoder_hidden_states=encoder_hidden_states,
+                cu_seqlens_k=cu_seqlens_k,
+                max_seqlen_k=max_seqlen_k,
+            )
         hidden_states = pad_input(hidden_states, indices, batch, seqlen)
         return hidden_states
 
