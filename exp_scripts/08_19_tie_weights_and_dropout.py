@@ -21,15 +21,17 @@ executor.update_parameters(
     slurm_qos=os.environ["SLURM_QOS"]
 )
 
-command_str = "torchrun --nproc_per_node 8 finetune.py --per_device_train_batch_size {batch_size} --per_device_eval_batch_size 256 --use_wandb 1 --dataset nomic_unsupervised --sampling_strategy cluster_within_domain --num_train_epochs {epochs} --learning_rate {learning_rate} --embedder nomic-ai/nomic-bert-2048 --clustering_model gtr_base --clustering_query_to_doc 1 --automatically_deduplicate_documents 0 --automatically_deduplicate_queries 0 --arch {architecture} --ddp_find_unused_parameters 0 --eval_rerank_topk {corpus_size} --lr_scheduler_type constant_with_warmup --warmup_steps 5600 --disable_dropout 1 --max_seq_length 32 --logging_steps 2000 --train_cluster_size {cluster_size} --eval_cluster_size 256 --use_prefix 1 --transductive_corpus_size {corpus_size} --save_steps 99999999999 --logit_scale 50 --max_eval_batches 16 --exp_name 2024-08-14-filter-transductvie-cluster-sweep--{batch_size}-{cluster_size} --exp_group 2024-08-14-filter-transductive-cluster-sweep --ddp_share_negatives_between_gpus 0 --torch_compile 0 --use_gc 1 --fp16 0 --bf16 1 --eval_steps 400000 --limit_layers 6 --sampling_strategy {sampling_strategy} --overwrite_output_dir --max_batch_size_fits_in_memory 2048 --wandb_exit_if_running_or_finished 1 --hn_tune_threshold 1.0" 
+command_str = "torchrun --nproc_per_node 8 finetune.py --per_device_train_batch_size {batch_size} --per_device_eval_batch_size 256 --use_wandb 1 --dataset nomic_unsupervised --sampling_strategy cluster_within_domain --num_train_epochs {epochs} --learning_rate {learning_rate} --embedder nomic-ai/nomic-bert-2048 --clustering_model gtr_base --clustering_query_to_doc 1 --automatically_deduplicate_documents 0 --automatically_deduplicate_queries 0 --arch {architecture} --ddp_find_unused_parameters 0 --eval_rerank_topk {corpus_size} --lr_scheduler_type constant_with_warmup --warmup_steps 5600 --disable_dropout 1 --max_seq_length 32 --logging_steps 2000 --train_cluster_size {cluster_size} --eval_cluster_size 256 --use_prefix 1 --transductive_corpus_size {corpus_size} --save_steps 99999999999 --logit_scale 50 --max_eval_batches 16 --exp_name 2024-08-19--transductive-{transductive_tie_token_embeddings}--dropout{disable_dropout} --exp_group 2024-08-19-transductive-dropout-sweep --ddp_share_negatives_between_gpus 0 --torch_compile 0 --use_gc 1 --fp16 0 --bf16 1 --eval_steps 400000 --limit_layers 6 --sampling_strategy {sampling_strategy} --overwrite_output_dir --max_batch_size_fits_in_memory 1024 --wandb_exit_if_running_or_finished 1 --transductive_tie_token_embeddings {transductive_tie_token_embeddings} --disable_dropout {disable_dropout}" 
 
 args_dict = {
     "architecture": ["transductive"],
     "sampling_strategy": ["cluster_within_domain"],
     "corpus_size": [32],
     ##############################################################
-    "cluster_size": [64, 256, 1024, 4096, 16384, 131072, 131072*2, 131072*4, 131072*8, 131072*16, 131072*32],
-    "batch_size": [4096, 2048, 1024, 512, 256],
+    "cluster_size": [256],
+    "batch_size": [1024],
+    "disable_dropout": [0, 1],
+    "transductive_tie_token_embeddings": [0, 1],
     ##############################################################
     "epochs": [3],
     "learning_rate": [2e-5],
