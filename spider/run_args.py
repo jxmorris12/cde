@@ -113,6 +113,12 @@ class ModelArguments:
             "choices": ["mean", "max"]
         }
     )
+    transductive_tie_token_embeddings: bool = field(
+        default=False,
+        metadata={
+            "help": "Whether to tie token embeddings for transductive model"
+        }
+    )
     def __post_init__(self):
         if self.transductive_tokens_per_document > 1:
             assert self.architecture == "transductive", "transductive_tokens_per_document only works with transductive architecture"
