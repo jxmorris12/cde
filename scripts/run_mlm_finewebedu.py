@@ -49,9 +49,9 @@ class MlmTrainer(transformers.Trainer):
         # track classifier head in here since we'll get rid of it anyway.
         if hasattr(self.model, "second_stage_model"):
             try:
-                config = self.model.second_stage_model.config
-            except AttributeError:
                 config = self.model.second_stage_model.backbone.config
+            except AttributeError:
+                config = self.model.second_stage_model.config
         else:
             config = self.model.embedder.config
 

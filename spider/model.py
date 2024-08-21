@@ -35,7 +35,7 @@ def disable_dropout(model: torch.nn.Module):
 class ContextualModelMixin(nn.Module):
     @property
     def num_corpus_tokens(self) -> int:
-        return self.config.transductive_corpus_size * self.transductive_tokens_per_document
+        return self.transductive_corpus_size * self.transductive_tokens_per_document
 
     def contextual_init(self):
         self.n_soft_prompt = 8
@@ -44,6 +44,7 @@ class ContextualModelMixin(nn.Module):
             torch.nn.ReLU(),
             torch.nn.Linear(self.hidden_size, self.hidden_size * self.n_soft_prompt)
         )
+        self.transductive_corpus_size = vars(self.config).get("transductive_corpus_size", 1)
         self.transductive_tokens_per_document = vars(self.config).get("transductive_tokens_per_document", 1)
         self.randomize_dataset_sequence_order = False
         self.sequence_dropout_prob = vars(self.config).get("transductive_sequence_dropout_prob", 0.0)
@@ -336,6 +337,7 @@ class DatasetConditionedBiencoder(transformers.PreTrainedModel, ContextualModelM
         )
               
         disable_transductive_rotary_embedding = vars(config).get("disable_transductive_rotary_embedding", True)
+        self.contextual_init()
         if self.backbone.config.model_type.startswith("nomic") and disable_transductive_rotary_embedding:
             # We only want to apply positional embeddings to the
             # *text* portion of the backbone network.
@@ -348,7 +350,6 @@ class DatasetConditionedBiencoder(transformers.PreTrainedModel, ContextualModelM
                     module.rotary_start_pos = rotary_start_pos
                     rotary_disabled += 1
             print0(f"modified {rotary_disabled} rotary modules – set rotary_start_pos to {rotary_start_pos}")
-        self.contextual_init()
                 
     @property
     def num_corpus_tokens(self) -> int:
@@ -372,6 +373,8 @@ class DatasetConditionedBiencoder(transformers.PreTrainedModel, ContextualModelM
             dtype=torch.long,
             device=soft_prompt.device,
         )
+        inputs_embeds = self.backbone.embeddings(input_ids) # (b, s) -> (b, s, d)
+        inputs_embeds = torch.cat((soft_prompt, inputs_embeds), dim=1) # (v, 4+b+s, d)
         attention_mask = torch.cat((backbone_attention_mask, attention_mask), dim=1)
         output = self.backbone(
             inputs_embeds=inputs_embeds,

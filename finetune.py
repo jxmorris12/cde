@@ -318,7 +318,7 @@ def main():
     logging.info("train() loaded checkpoint %s", checkpoint)
     print0("[main] trainer.train()")
 
-    # trainer.evaluate_retrieval_datasets()
+    trainer.evaluate_retrieval_datasets()
     trainer.train(resume_from_checkpoint=checkpoint)
     trainer.evaluate_retrieval_datasets()
 
