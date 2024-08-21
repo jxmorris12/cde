@@ -26,6 +26,7 @@ from transformers.models.bert.modeling_bert import (
 
 from .attention import FlashMHA
 from .configuration import ContextualBertConfig
+
 from spider.lib.nomic_bert.attention import FlashAttention
 from spider.lib.nomic_bert.block import MLP, GatedMLP
 from spider.lib.nomic_bert.embedding import BertEmbeddings
@@ -74,7 +75,7 @@ class ContextualBlock(nn.Module):
         See more: https://github.com/Dao-AILab/flash-attention/issues/216#issuecomment-1546638138
         """
         super().__init__()
-        self.prenorm = config.prenorm
+        self.prenorm = False
         self.fused_dropout_add_ln = config.fused_dropout_add_ln
 
         self.attn = FlashAttention(config)
@@ -111,6 +112,10 @@ class ContextualBlock(nn.Module):
         )
         self.norm1 = norm_cls(config.n_embd)
         self.norm2 = norm_cls(config.n_embd)
+
+        self.cross_attn_norm_1 = norm_cls(config.n_embd)
+        self.cross_attn_norm_2 = norm_cls(config.n_embd)
+
         self.dropout2 = nn.Dropout(config.resid_pdrop)
         self.residual_in_fp32 = getattr(config, "residual_in_fp32", False)
 
@@ -151,154 +156,71 @@ class ContextualBlock(nn.Module):
         fused_add_norm_fn = (
             dropout_add_rms_norm if RMSNorm and isinstance(self.norm1, RMSNorm) else dropout_add_layer_norm
         )
-        if self.prenorm:
-            if not self.fused_dropout_add_ln:
-                dropped = self.drop_path1(self.dropout1(hidden_states))
-                residual = (dropped + residual) if residual is not None else dropped
-                hidden_states = self.norm1(residual.to(dtype=self.norm1.weight.dtype))
-            else:
-                if isinstance(self.drop_path1, nn.Identity) or self.drop_path1.p == 0 or not self.training:
-                    rowscale1 = None
-                else:
-                    rowscale1 = self.drop_path1(
-                        torch.ones(
-                            hidden_states.shape[:-1],
-                            device=hidden_states.device,
-                            dtype=hidden_states.dtype,
-                        )
-                    )
-                hidden_states, residual = fused_add_norm_fn(
-                    hidden_states,
-                    residual,
-                    self.norm1.weight,
-                    self.norm1.bias,
-                    self.dropout1.p if self.training else 0.0,
-                    self.norm1.eps,
-                    rowscale=rowscale1,
-                    prenorm=True,
-                    residual_in_fp32=self.residual_in_fp32,
-                )
-            hidden_states = self.attn(
-                hidden_states,
-                attention_mask=attention_mask,
-                is_padded_inputs=is_padded_inputs,
-                cu_seqlens=cu_seqlens,
-                max_seq_len=max_seq_len,
+    
+        assert residual is None
+        attn_outputs = self.attn(
+            hidden_states,
+            attention_mask=attention_mask,
+            is_padded_inputs=is_padded_inputs,
+            cu_seqlens=cu_seqlens,
+            max_seq_len=max_seq_len,
+        )
+        if not self.fused_dropout_add_ln:
+            hidden_states = self.norm1(
+                (self.drop_path1(self.dropout1(attn_outputs)) + hidden_states).to(dtype=self.norm1.weight.dtype)
             )
-            if not self.fused_dropout_add_ln:
-                if self.layer_scale:
-                    hidden_states = hidden_states * self.ls1
-
-                dropped = self.drop_path2(self.dropout2(hidden_states))
-                residual = (dropped + residual) if residual is not None else dropped
-                hidden_states = self.norm2(residual.to(dtype=self.norm2.weight.dtype))
-            else:
-                if isinstance(self.drop_path2, nn.Identity) or self.drop_path2.p == 0 or not self.training:
-                    rowscale2 = None
-                else:
-                    rowscale2 = self.drop_path2(
-                        torch.ones(
-                            hidden_states.shape[:-1],
-                            device=hidden_states.device,
-                            dtype=hidden_states.dtype,
-                        )
-                    )
-                hidden_states, residual = fused_add_norm_fn(
-                    hidden_states,
-                    residual,
-                    self.norm2.weight,
-                    self.norm2.bias,
-                    self.dropout2.p if self.training else 0.0,
-                    self.norm2.eps,
-                    rowscale=rowscale2,
-                    layerscale=None if not self.layer_scale else self.ls1,
-                    prenorm=True,
-                    residual_in_fp32=self.residual_in_fp32,
-                )
-            
-            # Do cross attention with `encoder_hidden_states`
-            hidden_states = self.cross_attn(
-                x=hidden_states, 
-                x_kv=encoder_hidden_states,
-                cu_seqlens=cu_seqlens,
-                cu_seqlens_k=cu_seqlens_k,
-                max_seqlen=max_seq_len,
-                max_seqlen_k=max_seqlen_k,
-            )
-
-           
-            # Do MLP
-            hidden_states = self.mlp(hidden_states)
-
-            if self.layer_scale:
-                hidden_states = hidden_states * self.ls2
-
-            return hidden_states, None, residual
         else:
-            assert residual is None
-            attn_outputs = self.attn(
+            if isinstance(self.drop_path1, nn.Identity) or self.drop_path1.p == 0 or not self.training:
+                rowscale1 = None
+            else:
+                rowscale1 = self.drop_path1(
+                    torch.ones(attn_outputs.shape[:-1], device=attn_outputs.device, dtype=attn_outputs.dtype)
+                )
+            hidden_states = fused_add_norm_fn(
+                attn_outputs,
                 hidden_states,
-                attention_mask=attention_mask,
-                is_padded_inputs=is_padded_inputs,
-                cu_seqlens=cu_seqlens,
-                max_seq_len=max_seq_len,
+                self.norm1.weight,
+                self.norm1.bias,
+                self.dropout1.p if self.training else 0.0,
+                self.norm1.eps,
+                rowscale=rowscale1,
+                prenorm=False,
             )
-            if not self.fused_dropout_add_ln:
-                hidden_states = self.norm1(
-                    (self.drop_path1(self.dropout1(attn_outputs)) + hidden_states).to(dtype=self.norm1.weight.dtype)
-                )
-            else:
-                if isinstance(self.drop_path1, nn.Identity) or self.drop_path1.p == 0 or not self.training:
-                    rowscale1 = None
-                else:
-                    rowscale1 = self.drop_path1(
-                        torch.ones(attn_outputs.shape[:-1], device=attn_outputs.device, dtype=attn_outputs.dtype)
-                    )
-                hidden_states = fused_add_norm_fn(
-                    attn_outputs,
-                    hidden_states,
-                    self.norm1.weight,
-                    self.norm1.bias,
-                    self.dropout1.p if self.training else 0.0,
-                    self.norm1.eps,
-                    rowscale=rowscale1,
-                    prenorm=False,
-                )
-            
-            # Do cross attention with `encoder_hidden_states`
-            hidden_states = self.cross_attn(
-                x=hidden_states, 
-                x_kv=encoder_hidden_states,
-                cu_seqlens=cu_seqlens,
-                cu_seqlens_k=cu_seqlens_k,
-                max_seqlen=max_seq_len,
-                max_seqlen_k=max_seqlen_k,
+        
+        # Do cross attention with `encoder_hidden_states`
+        # hidden_states = self.cross_attn(
+        #     x=hidden_states, 
+        #     x_kv=encoder_hidden_states,
+        #     cu_seqlens=cu_seqlens,
+        #     cu_seqlens_k=cu_seqlens_k,
+        #     max_seqlen=max_seq_len,
+        #     max_seqlen_k=max_seqlen_k,
+        # )
+        
+        # Do MLP
+        mlp_out = self.mlp(hidden_states)
+        if not self.fused_dropout_add_ln:
+            hidden_states = self.norm2(
+                (self.drop_path2(self.dropout2(mlp_out)) + hidden_states).to(dtype=self.norm2.weight.dtype)
             )
-            
-            # Do MLP
-            mlp_out = self.mlp(hidden_states)
-            if not self.fused_dropout_add_ln:
-                hidden_states = self.norm2(
-                    (self.drop_path2(self.dropout2(mlp_out)) + hidden_states).to(dtype=self.norm2.weight.dtype)
-                )
+        else:
+            if isinstance(self.drop_path2, nn.Identity) or self.drop_path2.p == 0 or not self.training:
+                rowscale2 = None
             else:
-                if isinstance(self.drop_path2, nn.Identity) or self.drop_path2.p == 0 or not self.training:
-                    rowscale2 = None
-                else:
-                    rowscale2 = self.drop_path2(
-                        torch.ones(mlp_out.shape[:-1], device=mlp_out.device, dtype=mlp_out.dtype)
-                    )
-                hidden_states = fused_add_norm_fn(
-                    mlp_out,
-                    hidden_states,
-                    self.norm2.weight,
-                    self.norm2.bias,
-                    self.dropout2.p if self.training else 0.0,
-                    self.norm2.eps,
-                    rowscale=rowscale2,
-                    prenorm=False,
+                rowscale2 = self.drop_path2(
+                    torch.ones(mlp_out.shape[:-1], device=mlp_out.device, dtype=mlp_out.dtype)
                 )
-            return hidden_states, None, None
+            hidden_states = fused_add_norm_fn(
+                mlp_out,
+                hidden_states,
+                self.norm2.weight,
+                self.norm2.bias,
+                self.dropout2.p if self.training else 0.0,
+                self.norm2.eps,
+                rowscale=rowscale2,
+                prenorm=False,
+            )
+        return hidden_states, None, None
 
 
 class ContextualBertPreTrainedModel(PreTrainedModel):
@@ -345,7 +267,7 @@ class ContextualBertPreTrainedModel(PreTrainedModel):
         if config is None:
             config = cls.config_class.from_pretrained(model_name)
         remove_cls = cls != ContextualBertForPreTraining
-        remove_bert_prefix = cls != ContextualBertForPreTraining and cls != ContextualBertForSequenceClassification
+        remove_bert_prefix = cls != ContextualBertForPreTraining
         ignore_mismatched_shapes = kwargs.pop("ignore_mismatched_sizes", False)
         num_labels = kwargs.pop("num_labels", None)
         rotary_scaling_factor = kwargs.pop("rotary_scaling_factor", None)
@@ -360,9 +282,8 @@ class ContextualBertPreTrainedModel(PreTrainedModel):
             model = cls(config, *inputs, add_pooling_layer=kwargs.pop("add_pooling_layer"))
         else:
             model = cls(config, *inputs)
+
         # TODO: fix this
-        # Assuming we know what we're doing when loading from disk
-        # Prob a bad assumption but i'm tired and want to train this asap
         if os.path.exists(model_name):
             model_path = f"{model_name}/pytorch_model.bin"
             if os.path.exists(model_path):
@@ -389,8 +310,8 @@ class ContextualBertPreTrainedModel(PreTrainedModel):
             if ignore_mismatched_shapes:
                 state_dict = filter_shapes(state_dict, model)
 
-            load_return = model.load_state_dict(state_dict, strict=strict)
-        logger.warning(load_return)
+            load_return = model.load_state_dict(state_dict, strict=False)
+        # logger.warning(load_return)
         return model
 
     def _set_gradient_checkpointing(self, module, value=False):
@@ -442,8 +363,9 @@ class ContextualBertEncoder(nn.Module):
 
         batch, seqlen = hidden_states.shape[:2]
         hidden_states, indices, cu_seqlens, max_seq_len = unpad_input(hidden_states, attention_mask)
-        encoder_attention_mask = torch.ones(encoder_hidden_states.shape[0:2], dtype=torch.bool, device=encoder_hidden_states.device)
-        encoder_hidden_states, encoder_indices, cu_seqlens_k, max_seqlen_k = unpad_input(encoder_hidden_states, encoder_attention_mask)
+        # encoder_attention_mask = torch.ones(encoder_hidden_states.shape[0:2], dtype=torch.bool, device=encoder_hidden_states.device)
+        # encoder_hidden_states, encoder_indices, cu_seqlens_k, max_seqlen_k = unpad_input(encoder_hidden_states, encoder_attention_mask)
+        cu_seqlens_k, max_seqlen_k = None, None
 
         for i, layer in enumerate(self.layers):
             hidden_states, hidden_states2, residual = layer(

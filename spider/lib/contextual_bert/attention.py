@@ -4,8 +4,9 @@ import torch.nn.functional as F
 from einops import rearrange
 from functools import partial
 
-from flash_attn.ops.fused_dense import FusedDense
+from spider.lib.nomic_bert.embedding import BertEmbeddings, DynamicNTKRotaryEmbedding, VarLengthRotaryEmbedding
 
+from flash_attn.ops.fused_dense import FusedDense
 from flash_attn.modules.mha import FlashCrossAttention
 
 class FlashMHA(nn.Module):

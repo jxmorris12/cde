@@ -530,7 +530,8 @@ class ContextualCrossAttention(transformers.PreTrainedModel):
             config=biencoder_config,
             embedder=embedder
         )
-        self.second_stage_model = ContextualBertModel(ContextualBertConfig())
+        self.second_stage_model = ContextualBertModel.from_pretrained("nomic-ai/nomic-bert-2048")
+        # self.second_stage_model = ContextualBertModel._from_config(config)
         self.transductive_tokens_per_document = vars(config).get("transductive_tokens_per_document", 1)
         self.temp = config.logit_scale
         if config.disable_dropout:
@@ -558,6 +559,7 @@ class ContextualCrossAttention(transformers.PreTrainedModel):
         input_ids (long torch.Tensor) – ids of input tokens
         attention_mask (bool torch.Tensor)
         """
+        batch_size = input_ids.shape[0]
         dataset_embeddings = self.first_stage_model(
             input_ids=dataset_input_ids, 
             attention_mask=dataset_attention_mask
@@ -597,15 +599,15 @@ class ContextualCrossAttention(transformers.PreTrainedModel):
         
         output_vectors = output.last_hidden_state
         output_pooled = mean_pool(output_vectors, attention_mask)
-        output = self.output_projection(output_pooled) # (b, 2d) -> (b, d)
+        pooled_output = self.output_projection(output_pooled) # (b, 2d) -> (b, d)
 
         if output_hidden_states:
             return {
                 "hidden_states": output_vectors,
-                "pooled": output,
+                "pooled": pooled_output,
             }
         else:
-            return output
+            return pooled_output
 
 
 def get_model_class(name: str):

@@ -121,7 +121,7 @@ class ModelArguments:
     )
     def __post_init__(self):
         if self.transductive_tokens_per_document > 1:
-            assert self.architecture == "transductive", "transductive_tokens_per_document only works with transductive architecture"
+            assert self.architecture in ["transductive", "contextual_cross_attention"], "transductive_tokens_per_document only works with transductive architectures"
 
 
 @dataclass

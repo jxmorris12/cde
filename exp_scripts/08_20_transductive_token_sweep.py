@@ -41,7 +41,7 @@ args_list = [{key: value for key, value in zip(args_dict.keys(), combination)} f
 jobs = []
 with executor.batch():
     for idx, args in enumerate(args_list):
-        args["corpus_size"] = 64 / args["transductive_tokens_per_document"]
+        args["corpus_size"] = int(64 // args["transductive_tokens_per_document"])
         print(f"Job {idx+1}/{len(args_list)}:", args)
         result_command = command_str.format(**args)
         function = submitit.helpers.CommandFunction(shlex.split(result_command))
