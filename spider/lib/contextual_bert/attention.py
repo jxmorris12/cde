@@ -39,22 +39,12 @@ class FlashMHA(nn.Module):
 
         self.rotary_emb_dim = self.head_dim * config.rotary_emb_fraction
         if self.rotary_emb_dim > 0:
-            if config.rotary_scaling_factor:
-                self.rotary_emb = DynamicNTKRotaryEmbedding(
-                    dim=self.rotary_emb_dim,
-                    base=config.rotary_emb_base,
-                    scale_base=config.rotary_emb_scale_base,
-                    interleaved=config.rotary_emb_interleaved,
-                    rotary_scaling_factor=config.rotary_scaling_factor,
-                    max_position_embeddings=config.max_trained_positions,
-                )
-            else:
-                self.rotary_emb = VarLengthRotaryEmbedding(
-                    dim=self.rotary_emb_dim,
-                    base=config.rotary_emb_base,
-                    scale_base=config.rotary_emb_scale_base,
-                    interleaved=config.rotary_emb_interleaved,
-                )
+            self.rotary_emb = VarLengthRotaryEmbedding(
+                dim=self.rotary_emb_dim,
+                base=config.rotary_emb_base,
+                scale_base=config.rotary_emb_scale_base,
+                interleaved=config.rotary_emb_interleaved,
+            )
 
         fused_bias_fc = config.fused_bias_fc
         if fused_bias_fc and FusedDense is None:
@@ -120,8 +110,14 @@ class FlashMHA(nn.Module):
         kv = rearrange(kv, "... (two hkv d) -> ... two hkv d", two=2, d=self.head_dim)
     
         if self.rotary_emb_dim > 0:
-            q, kv = self.rotary_emb(
-                q, kv, seqlen_offset=0, max_seqlen=None
+            # We don't put rotary on kv.
+            # TODO: Consider this as an option, maybe?
+            q = self.rotary_emb(
+                qkv=q, 
+                kv=None, 
+                seqlen_offset=0, 
+                cu_seqlens=cu_seqlens, 
+                max_seqlen=max_seqlen,
             )
         
         context = self.inner_cross_attn(

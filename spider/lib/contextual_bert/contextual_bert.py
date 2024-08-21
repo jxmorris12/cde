@@ -363,9 +363,8 @@ class ContextualBertEncoder(nn.Module):
 
         batch, seqlen = hidden_states.shape[:2]
         hidden_states, indices, cu_seqlens, max_seq_len = unpad_input(hidden_states, attention_mask)
-        # encoder_attention_mask = torch.ones(encoder_hidden_states.shape[0:2], dtype=torch.bool, device=encoder_hidden_states.device)
-        # encoder_hidden_states, encoder_indices, cu_seqlens_k, max_seqlen_k = unpad_input(encoder_hidden_states, encoder_attention_mask)
-        cu_seqlens_k, max_seqlen_k = None, None
+        encoder_attention_mask = torch.ones(encoder_hidden_states.shape[0:2], dtype=torch.bool, device=encoder_hidden_states.device)
+        encoder_hidden_states, encoder_indices, cu_seqlens_k, max_seqlen_k = unpad_input(encoder_hidden_states, encoder_attention_mask)
 
         for i, layer in enumerate(self.layers):
             hidden_states, hidden_states2, residual = layer(

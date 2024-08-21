@@ -200,36 +200,53 @@ class VarLengthRotaryEmbedding(RotaryEmbedding):
                     seqlen_offsets=seqlen_offset,
                 )
             elif cu_seqlens is not None and max_seqlen is not None:
-                q = qkv[:, 0]
-                k = qkv[:, 1]
-                q_rot = apply_rotary_emb_func(
-                    q,
-                    self._cos_cached,
-                    self._sin_cached,
-                    interleaved=self.interleaved,
-                    seqlen_offsets=seqlen_offset,
-                    cu_seqlens=cu_seqlens,
-                    max_seqlen=max_seqlen,
-                )
-                k_rot = apply_rotary_emb_func(
-                    k,
-                    self._cos_cached,
-                    self._sin_cached,
-                    interleaved=self.interleaved,
-                    seqlen_offsets=seqlen_offset,
-                    cu_seqlens=cu_seqlens,
-                    max_seqlen=max_seqlen,
-                )
-                return torch.stack([q_rot, k_rot, qkv[:, 2]], dim=1)
+                if qkv.ndim == 4:
+                    q = qkv[:, 0]
+                    k = qkv[:, 1]
+                    q_rot = apply_rotary_emb_func(
+                        q,
+                        self._cos_cached,
+                        self._sin_cached,
+                        interleaved=self.interleaved,
+                        seqlen_offsets=seqlen_offset,
+                        cu_seqlens=cu_seqlens,
+                        max_seqlen=max_seqlen,
+                    )
+                    k_rot = apply_rotary_emb_func(
+                        k,
+                        self._cos_cached,
+                        self._sin_cached,
+                        interleaved=self.interleaved,
+                        seqlen_offsets=seqlen_offset,
+                        cu_seqlens=cu_seqlens,
+                        max_seqlen=max_seqlen,
+                    )
+                    return torch.stack([q_rot, k_rot, qkv[:, 2]], dim=1)
+                else:
+                    return apply_rotary_emb_func(
+                        qkv,
+                        self._cos_cached,
+                        self._sin_cached,
+                        interleaved=self.interleaved,
+                        seqlen_offsets=seqlen_offset,
+                        cu_seqlens=cu_seqlens,
+                        max_seqlen=max_seqlen,
+                    )
             else:
+                # apply_rotary_emb_func(q,
+                # self._cos_cached,self._sin_cached,interleaved=self.interleaved,
+                # inplace=True,seqlen_offsets=seqlen_offset,
+                # cu_seqlens=cu_seqlens,max_seqlen=max_seqlen,)
                 return apply_rotary_emb_qkv_(
                     qkv,
                     self._cos_cached,
                     self._sin_cached,
                     self._cos_k_cached,
                     self._sin_k_cached,
+                    inplace=True,
                     interleaved=self.interleaved,
                     seqlen_offsets=seqlen_offset,
+                    max_seqlen=max_seqlen,
                 )
         else:
             q = qkv
@@ -241,24 +258,15 @@ class VarLengthRotaryEmbedding(RotaryEmbedding):
                 inplace=True,
                 seqlen_offsets=seqlen_offset,
                 cu_seqlens=cu_seqlens,
-                max_seq_len=max_seqlen,
+                max_seqlen=max_seqlen,
             )
-            if self.scale is None:
-                kv = apply_rotary_emb_kv_(
-                    kv,
-                    self._cos_cached,
-                    self._sin_cached,
-                    interleaved=self.interleaved,
-                    seqlen_offsets=seqlen_offset,
-                )
-            else:
-                kv = apply_rotary_emb_kv_(
-                    kv,
-                    self._cos_k_cached,
-                    self._sin_k_cached,
-                    interleaved=self.interleaved,
-                    seqlen_offsets=seqlen_offset,
-                )
+            kv = apply_rotary_emb_kv_(
+                kv,
+                self._cos_cached,
+                self._sin_cached,
+                interleaved=self.interleaved,
+                seqlen_offsets=seqlen_offset,
+            )
             return q, kv
 
 
