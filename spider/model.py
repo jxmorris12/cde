@@ -1,7 +1,8 @@
-from typing import Optional
+from typing import Dict, Optional, Union
 
 import copy
 import torch
+import torch.nn as nn
 import transformers
 
 from spider.lib.dist import print0
@@ -31,6 +32,103 @@ def disable_dropout(model: torch.nn.Module):
         f"Disabled {len(dropout_modules)} dropout modules from model type {type(model)}"
     )
 
+class ContextualModelMixin(nn.Module):
+    @property
+    def num_corpus_tokens(self) -> int:
+        return self.config.transductive_corpus_size * self.transductive_tokens_per_document
+
+    def contextual_init(self):
+        self.n_soft_prompt = 8
+        self.prompt_projection = torch.nn.Sequential(
+            torch.nn.Linear(self.hidden_size, self.hidden_size),
+            torch.nn.ReLU(),
+            torch.nn.Linear(self.hidden_size, self.hidden_size * self.n_soft_prompt)
+        )
+        self.transductive_tokens_per_document = vars(self.config).get("transductive_tokens_per_document", 1)
+        self.randomize_dataset_sequence_order = False
+        self.sequence_dropout_prob = vars(self.config).get("transductive_sequence_dropout_prob", 0.0)
+        if self.sequence_dropout_prob > 0.0:
+            self.sequence_dropout_null_embedding = torch.nn.Parameter(
+                torch.randn(self.hidden_size) * 0.01,
+                requires_grad = True
+            )       
+        self.output_projection = torch.nn.Sequential(
+            torch.nn.Linear(self.hidden_size, self.hidden_size),
+            torch.nn.ReLU(),
+            torch.nn.Linear(self.hidden_size, self.hidden_size)
+        )
+
+    def _prepare_dataset_embeddings(
+            self, 
+            input_ids: torch.Tensor, dataset_embeddings: torch.Tensor,
+            null_dataset_embedding: bool = False,
+        ) -> torch.Tensor:
+        if not isinstance(dataset_embeddings, torch.Tensor):
+            dataset_embeddings = torch.tensor(dataset_embeddings)
+
+        if len(dataset_embeddings.shape) == 2:
+            # Auto-expand for a batch.
+            dataset_embeddings = dataset_embeddings[None, :, :] # (b, d) -> (1, b, d)
+        dataset_embeddings = dataset_embeddings.to(input_ids.device)
+        dataset_embeddings = dataset_embeddings.to(torch.float32)
+    
+        batch_size = input_ids.shape[0]
+        if self.transductive_tokens_per_document > 1:
+            # Choose N random documents to fill our context window with.
+            # This logic is a little confusing but allows us to sample a
+            # different batch *per-dataset*
+            assert dataset_embeddings.shape[1] == self.transductive_tokens_per_document
+            R = torch.randint(
+                low=0, 
+                high=len(dataset_embeddings), 
+                size=(batch_size, self.config.transductive_corpus_size), 
+                device=dataset_embeddings.device
+            )
+            # TODO make this deterministic somehow for evaluation?
+            dataset_embeddings = dataset_embeddings[R].reshape((batch_size, self.num_corpus_tokens, self.hidden_size))
+
+        if dataset_embeddings.shape[1] > self.num_corpus_tokens:
+            # If too many dataset embeddings are passed in, just take the first N until
+            # we have the proper number.
+            dataset_embeddings = dataset_embeddings[:, :self.num_corpus_tokens, :]
+        
+        _, corpus_size, _hidden_size = dataset_embeddings.shape
+        if _ == 1:
+            # Auto-expand for a batch.
+            dataset_embeddings = dataset_embeddings.expand((batch_size, -1, -1))
+
+        if self.training and self.sequence_dropout_prob > 0.0:
+            sequence_dropout_mask = (
+                torch.rand((batch_size, corpus_size), device=dataset_embeddings.device) < self.sequence_dropout_prob
+            )
+            null_embeddings = self.sequence_dropout_null_embedding[None, None].expand(batch_size, corpus_size, -1)
+            dataset_embeddings = torch.where(
+                sequence_dropout_mask[..., None], null_embeddings, dataset_embeddings
+            )
+        elif null_dataset_embedding:
+            null_embeddings = self.sequence_dropout_null_embedding[None, None].expand(batch_size, corpus_size, -1)
+            dataset_embeddings = null_embeddings
+        
+        # backbone_max_seq_length = self.backbone.config.max_trained_positions
+        # assert batch_size + (2 * self.n_soft_prompt + corpus_size) <= backbone_max_seq_length, "too many hard negatives for backbone model"
+        soft_prompt = torch.ones((1, self.hidden_size), device=dataset_embeddings.device, dtype=torch.float32)
+        soft_prompt = self.prompt_projection(soft_prompt).reshape((1, self.n_soft_prompt, self.hidden_size))
+        soft_prompt = soft_prompt.expand((len(dataset_embeddings), -1, -1)) # -> (b, 4+b, d) # soft_prompt.repeat((len(input_ids), 1, 1))  
+        soft_prompt = torch.cat((dataset_embeddings, soft_prompt), dim=1)
+
+        if self.training and self.randomize_dataset_sequence_order:
+            randomized_order = torch.stack(
+                [
+                    torch.cat(
+                        (
+                            torch.randperm(corpus_size, device=soft_prompt.device), 
+                            torch.arange(self.n_soft_prompt, device=soft_prompt.device) + corpus_size
+                        ), dim=0) 
+                        for _ in range(batch_size)])
+            randomized_order = randomized_order.to(soft_prompt.device)
+            soft_prompt = soft_prompt.gather(1, randomized_order[..., None].expand_as(soft_prompt))
+        
+        return soft_prompt
 
 class BiEncoder(transformers.PreTrainedModel):
     embedder: transformers.PreTrainedModel
@@ -50,8 +148,6 @@ class BiEncoder(transformers.PreTrainedModel):
         #     print0(f"using torch.compile() on embedder of type `{embedder.config.model_type}`")
         #     self.embedder = torch.compile(self.embedder) 
         self.hidden_size = self.embedder.config.hidden_size
-
-
         # Allow pooling to multiple tokens per document
         self.transductive_tokens_per_document = vars(config).get("transductive_tokens_per_document", 1)
         self.mlp = torch.nn.Sequential(
@@ -63,8 +159,6 @@ class BiEncoder(transformers.PreTrainedModel):
 
         if config.disable_dropout:
             disable_dropout(self)
-
-        self.embedding_dim = self.embedder.config.hidden_size
         self.pooling_strategy = vars(config).get("pooling_strategy", "mean")
 
     def forward(
@@ -226,7 +320,7 @@ class TwoEmbeddersWithMLP(transformers.PreTrainedModel):
         return outputs
 
 
-class DatasetConditionedBiencoder(transformers.PreTrainedModel):
+class DatasetConditionedBiencoder(transformers.PreTrainedModel, ContextualModelMixin):
     def __init__(
             self, 
             config,
@@ -234,13 +328,13 @@ class DatasetConditionedBiencoder(transformers.PreTrainedModel):
         ):
         super().__init__(config=config)
         self.backbone = dataset_backbone
-        self.embedding_dim = dataset_backbone.config.hidden_size
         self.hidden_size = self.backbone.config.hidden_size
-        self.n_soft_prompt = 8
         self.hidden_size = dataset_backbone.config.hidden_size
-
-        self.transductive_tokens_per_document = vars(config).get("transductive_tokens_per_document", 1)
-      
+        self.input_ln = torch.nn.LayerNorm(
+            self.hidden_size, 
+            eps=self.backbone.config.layer_norm_epsilon
+        )
+              
         disable_transductive_rotary_embedding = vars(config).get("disable_transductive_rotary_embedding", True)
         if self.backbone.config.model_type.startswith("nomic") and disable_transductive_rotary_embedding:
             # We only want to apply positional embeddings to the
@@ -254,30 +348,7 @@ class DatasetConditionedBiencoder(transformers.PreTrainedModel):
                     module.rotary_start_pos = rotary_start_pos
                     rotary_disabled += 1
             print0(f"modified {rotary_disabled} rotary modules – set rotary_start_pos to {rotary_start_pos}")
-
-       
-        self.prompt_projection = torch.nn.Sequential(
-            torch.nn.Linear(self.embedding_dim, self.hidden_size),
-            torch.nn.ReLU(),
-            torch.nn.Linear(self.hidden_size, self.hidden_size * self.n_soft_prompt)
-        )
-        self.output_projection = torch.nn.Sequential(
-            torch.nn.Linear(self.hidden_size, self.hidden_size),
-            torch.nn.ReLU(),
-            torch.nn.Linear(self.hidden_size, self.config.embedding_output_dim or self.hidden_size)
-        )
-        self.randomize_dataset_sequence_order = False
-        self.sequence_dropout_prob = vars(config).get("transductive_sequence_dropout_prob", 0.0)
-        if self.sequence_dropout_prob > 0.0:
-            self.sequence_dropout_null_embedding = torch.nn.Parameter(
-                torch.randn(self.embedding_dim) * 0.01,
-                requires_grad = True
-            )
-        
-        # self.input_ln = torch.nn.LayerNorm(
-        #     self.hidden_size, 
-        #     eps=self.backbone.config.layer_norm_epsilon
-        # )
+        self.contextual_init()
                 
     @property
     def num_corpus_tokens(self) -> int:
@@ -288,79 +359,14 @@ class DatasetConditionedBiencoder(transformers.PreTrainedModel):
             input_ids: torch.Tensor,
             attention_mask: torch.Tensor,
             dataset_embeddings: torch.Tensor,
-            null_dataset_embedding: bool = False,
             output_hidden_states: bool = False,
+            null_dataset_embedding: bool = False,
         ) -> torch.Tensor:
-        if not isinstance(dataset_embeddings, torch.Tensor):
-            dataset_embeddings = torch.tensor(dataset_embeddings)
-
-        if len(dataset_embeddings.shape) == 2:
-            # Auto-expand for a batch.
-            dataset_embeddings = dataset_embeddings[None, :, :] # (b, d) -> (1, b, d)
-        dataset_embeddings = dataset_embeddings.to(input_ids.device)
-        dataset_embeddings = dataset_embeddings.to(torch.float32)
-    
-        batch_size = input_ids.shape[0]
-        if self.transductive_tokens_per_document > 1:
-            # Choose N random documents to fill our context window with.
-            # This logic is a little confusing but allows us to sample a
-            # different batch *per-dataset*
-            assert dataset_embeddings.shape[1] == self.transductive_tokens_per_document
-            R = torch.randint(
-                low=0, 
-                high=len(dataset_embeddings), 
-                size=(batch_size, self.config.transductive_corpus_size), 
-                device=dataset_embeddings.device
-            )
-            # TODO make this deterministic somehow for evaluation?
-            dataset_embeddings = dataset_embeddings[R].reshape((batch_size, self.num_corpus_tokens, self.hidden_size))
-
-        if dataset_embeddings.shape[1] > self.num_corpus_tokens:
-            # If too many dataset embeddings are passed in, just take the first N until
-            # we have the proper number.
-            dataset_embeddings = dataset_embeddings[:, :self.num_corpus_tokens, :]
-        
-        _, corpus_size, _hidden_dim = dataset_embeddings.shape
-        if _ == 1:
-            # Auto-expand for a batch.
-            dataset_embeddings = dataset_embeddings.expand((batch_size, -1, -1))
-
-        if self.training and self.sequence_dropout_prob > 0.0:
-            sequence_dropout_mask = (
-                torch.rand((batch_size, corpus_size), device=dataset_embeddings.device) < self.sequence_dropout_prob
-            )
-            null_embeddings = self.sequence_dropout_null_embedding[None, None].expand(batch_size, corpus_size, -1)
-            dataset_embeddings = torch.where(
-                sequence_dropout_mask[..., None], null_embeddings, dataset_embeddings
-            )
-        elif null_dataset_embedding:
-            null_embeddings = self.sequence_dropout_null_embedding[None, None].expand(batch_size, corpus_size, -1)
-            dataset_embeddings = null_embeddings
-        
-        # backbone_max_seq_length = self.backbone.config.max_trained_positions
-        # assert batch_size + (2 * self.n_soft_prompt + corpus_size) <= backbone_max_seq_length, "too many hard negatives for backbone model"
-        soft_prompt = torch.ones((1, self.embedding_dim), device=dataset_embeddings.device, dtype=torch.float32)
-        soft_prompt = self.prompt_projection(soft_prompt).reshape((1, self.n_soft_prompt, self.hidden_size))
-        soft_prompt = soft_prompt.expand((batch_size, -1, -1)) # -> (b, 4+b, d) # soft_prompt.repeat((len(input_ids), 1, 1))  
-        soft_prompt = torch.cat((dataset_embeddings, soft_prompt), dim=1)
-
-        if self.training and self.randomize_dataset_sequence_order:
-            randomized_order = torch.stack(
-                [
-                    torch.cat(
-                        (
-                            torch.randperm(corpus_size, device=soft_prompt.device), 
-                            torch.arange(self.n_soft_prompt, device=soft_prompt.device) + corpus_size
-                        ), dim=0) 
-                        for _ in range(batch_size)])
-            randomized_order = randomized_order.to(soft_prompt.device)
-            soft_prompt = soft_prompt.gather(1, randomized_order[..., None].expand_as(soft_prompt))
-        
-        inputs_embeds = self.backbone.embeddings(input_ids) # (b, s) -> (b, s, d)
-        inputs_embeds = torch.cat((soft_prompt, inputs_embeds), dim=1) # (v, 4+b+s, d)
-
-        # inputs_embeds = self.input_ln(inputs_embeds)
-
+        soft_prompt = self._prepare_dataset_embeddings(
+            input_ids=input_ids,
+            dataset_embeddings=dataset_embeddings,
+            null_dataset_embedding=null_dataset_embedding,
+        )
         backbone_attention_mask = torch.ones(
             soft_prompt.shape[0:2],
             dtype=torch.long,
@@ -395,7 +401,7 @@ class DatasetConditionedBiencoder(transformers.PreTrainedModel):
             return output
 
 
-class DatasetPrefixBiencoder(transformers.PreTrainedModel):
+class DatasetPrefixBiencoder(transformers.PreTrainedModel, ContextualModelMixin):
     def __init__(
             self, 
             config, #: transformers.PreTrainedConfig, 
@@ -404,13 +410,7 @@ class DatasetPrefixBiencoder(transformers.PreTrainedModel):
         super().__init__(config=config)
         self.embedder = embedder
         self.hidden_size = self.embedder.config.hidden_size
-
-        disable_transductive_rotary_embedding = vars(config).get("disable_transductive_rotary_embedding", True)
-        self.output_projection = torch.nn.Sequential(
-            torch.nn.Linear(self.hidden_size, self.hidden_size),
-            torch.nn.ReLU(),
-            torch.nn.Linear(self.hidden_size, self.config.embedding_output_dim or self.hidden_size)
-        )
+        self.contextual_init()
     
     def forward(
             self, 
@@ -510,6 +510,49 @@ class DatasetTransformer(transformers.PreTrainedModel):
         )
 
 
+class ContextualBertWrapper(transformers.PreTrainedModel, ContextualModelMixin):
+    def __init__(self, config):
+        super().__init__(config=config)
+        self.config = config
+        # TODO: Save config to disk with a new name to avoid this.
+        second_stage_config = transformers.AutoConfig.from_pretrained(
+            "nomic-ai/nomic-bert-2048", trust_remote_code=True)
+        self.backbone = ContextualBertModel._from_config(second_stage_config)
+        self.transductive_tokens_per_document = vars(self.config).get("transductive_tokens_per_document", 1)
+        self.hidden_size = self.backbone.config.hidden_size
+        self.contextual_init()
+    
+    def forward(
+            self, 
+            input_ids: torch.Tensor,
+            attention_mask: torch.Tensor,
+            dataset_embeddings: torch.Tensor,
+            output_hidden_states: bool = False,
+            null_dataset_embedding: bool = False,
+        ) -> Union[torch.Tensor, Dict[str, torch.Tensor]]:
+        encoder_hidden_states = self._prepare_dataset_embeddings(
+            input_ids=input_ids,    
+            dataset_embeddings=dataset_embeddings,
+            null_dataset_embedding=null_dataset_embedding,
+        )
+        outputs = self.backbone(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            encoder_hidden_states=encoder_hidden_states,
+        )
+        output_vectors = outputs.last_hidden_state
+        output_pooled = mean_pool(output_vectors, attention_mask)
+        pooled_output = self.output_projection(output_pooled) # (b, 2d) -> (b, d)
+
+        if output_hidden_states:
+            return {
+                "hidden_states": output_vectors,
+                "pooled": pooled_output,
+            }
+        else:
+            return pooled_output
+
+
 class ContextualCrossAttention(transformers.PreTrainedModel):
     embedder: transformers.PreTrainedModel
     dataset_backbone: transformers.PreTrainedModel
@@ -530,25 +573,11 @@ class ContextualCrossAttention(transformers.PreTrainedModel):
             config=biencoder_config,
             embedder=embedder
         )
-
-        # TODO: Save config to disk with a new name to avoid this.
-        second_stage_config = transformers.AutoConfig.from_pretrained(
-            "nomic-ai/nomic-bert-2048", trust_remote_code=True)
-        self.second_stage_model = ContextualBertModel._from_config(second_stage_config)
-        self.transductive_tokens_per_document = vars(config).get("transductive_tokens_per_document", 1)
         self.temp = config.logit_scale
         if config.disable_dropout:
             disable_dropout(self)
-        self.hidden_size = self.second_stage_model.config.hidden_size
-        self.output_projection = torch.nn.Sequential(
-            torch.nn.Linear(self.hidden_size, self.hidden_size),
-            torch.nn.ReLU(),
-            torch.nn.Linear(self.hidden_size, self.hidden_size)
-        )
-    
-    @property
-    def num_corpus_tokens(self) -> int:
-        return self.config.transductive_corpus_size * self.transductive_tokens_per_document
+        self.hidden_size = self.first_stage_model.embedder.config.hidden_size
+        self.second_stage_model = ContextualBertWrapper(config=config)
     
     def forward(
             self, 
@@ -562,57 +591,16 @@ class ContextualCrossAttention(transformers.PreTrainedModel):
         input_ids (long torch.Tensor) – ids of input tokens
         attention_mask (bool torch.Tensor)
         """
-        batch_size = input_ids.shape[0]
         dataset_embeddings = self.first_stage_model(
             input_ids=dataset_input_ids, 
             attention_mask=dataset_attention_mask
         )
-        # TODO: Deduplicate code below from other transductive model class
-        if len(dataset_embeddings.shape) == 2:
-            # Auto-expand for a batch.
-            dataset_embeddings = dataset_embeddings[None, :, :] # (b, d) -> (1, b, d)
-        dataset_embeddings = dataset_embeddings.to(input_ids.device)
-        dataset_embeddings = dataset_embeddings.to(torch.float32)
-        if self.transductive_tokens_per_document > 1:
-            # Choose N random documents to fill our context window with.
-            # This logic is a little confusing but allows us to sample a
-            # different batch *per-dataset*
-            assert dataset_embeddings.shape[1] == self.transductive_tokens_per_document
-            R = torch.randint(
-                low=0, 
-                high=len(dataset_embeddings), 
-                size=(batch_size, self.config.transductive_corpus_size), 
-                device=dataset_embeddings.device
-            )
-            # TODO make this deterministic somehow for evaluation?
-            dataset_embeddings = dataset_embeddings[R].reshape((batch_size, self.num_corpus_tokens, self.hidden_size))
-
-        if dataset_embeddings.shape[1] > self.num_corpus_tokens:
-            # If too many dataset embeddings are passed in, just take the first N until
-            # we have the proper number.
-            dataset_embeddings = dataset_embeddings[:, :self.num_corpus_tokens, :]
-
-        batch_size = input_ids.shape[0]
-        if dataset_embeddings.shape[0] == 1:
-            dataset_embeddings = dataset_embeddings.expand((batch_size, -1, -1))
-        
-        output = self.second_stage_model(
+        return self.second_stage_model(
             input_ids=input_ids,
             attention_mask=attention_mask,
-            encoder_hidden_states=dataset_embeddings,
+            dataset_embeddings=dataset_embeddings,
+            output_hidden_states=output_hidden_states,
         )
-        
-        output_vectors = output.last_hidden_state
-        output_pooled = mean_pool(output_vectors, attention_mask)
-        pooled_output = self.output_projection(output_pooled) # (b, 2d) -> (b, d)
-
-        if output_hidden_states:
-            return {
-                "hidden_states": output_vectors,
-                "pooled": pooled_output,
-            }
-        else:
-            return pooled_output
 
 
 def get_model_class(name: str):

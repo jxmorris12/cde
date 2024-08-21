@@ -190,15 +190,15 @@ class ContextualBlock(nn.Module):
         
         
         # Do cross attention with `encoder_hidden_states`
+        cross_attention_x = self.cross_attn_norm_1(hidden_states)
         cross_attention_outputs = self.cross_attn(
-            x=hidden_states, 
+            x=cross_attention_x, 
             x_kv=encoder_hidden_states,
             cu_seqlens=cu_seqlens,
             cu_seqlens_k=cu_seqlens_k,
             max_seqlen=max_seq_len,
             max_seqlen_k=max_seqlen_k,
         )
-        cross_attention_outputs = self.cross_attn_norm_1(cross_attention_outputs)
         hidden_states = self.cross_attn_norm_2(hidden_states + cross_attention_outputs)
         
         # Do MLP

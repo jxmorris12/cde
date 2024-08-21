@@ -110,9 +110,9 @@ class FlashMHA(nn.Module):
         kv = rearrange(kv, "... (two hkv d) -> ... two hkv d", two=2, d=self.head_dim)
     
         if self.rotary_emb_dim > 0:
-            q, kv = self.rotary_emb(
+            q = self.rotary_emb(
                 qkv=q, 
-                kv=kv, 
+                kv=None, 
                 seqlen_offset=0, 
                 cu_seqlens=cu_seqlens, 
                 max_seqlen=max_seqlen,
