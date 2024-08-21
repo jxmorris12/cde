@@ -530,8 +530,11 @@ class ContextualCrossAttention(transformers.PreTrainedModel):
             config=biencoder_config,
             embedder=embedder
         )
-        self.second_stage_model = ContextualBertModel.from_pretrained("nomic-ai/nomic-bert-2048")
-        # self.second_stage_model = ContextualBertModel._from_config(config)
+
+        # TODO: Save config to disk with a new name to avoid this.
+        second_stage_config = transformers.AutoConfig.from_pretrained(
+            "nomic-ai/nomic-bert-2048", trust_remote_code=True)
+        self.second_stage_model = ContextualBertModel._from_config(second_stage_config)
         self.transductive_tokens_per_document = vars(config).get("transductive_tokens_per_document", 1)
         self.temp = config.logit_scale
         if config.disable_dropout:
@@ -590,7 +593,9 @@ class ContextualCrossAttention(transformers.PreTrainedModel):
             dataset_embeddings = dataset_embeddings[:, :self.num_corpus_tokens, :]
 
         batch_size = input_ids.shape[0]
-        dataset_embeddings = dataset_embeddings.expand((batch_size, -1, -1))
+        if dataset_embeddings.shape[0] == 1:
+            dataset_embeddings = dataset_embeddings.expand((batch_size, -1, -1))
+        
         output = self.second_stage_model(
             input_ids=input_ids,
             attention_mask=attention_mask,

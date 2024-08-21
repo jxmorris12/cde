@@ -9,6 +9,5 @@ numpy<2.0
 optimum
 pytest
 submitit
-torchvision
 transformers
 wandb

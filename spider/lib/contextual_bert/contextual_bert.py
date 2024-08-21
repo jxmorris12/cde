@@ -165,6 +165,7 @@ class ContextualBlock(nn.Module):
             cu_seqlens=cu_seqlens,
             max_seq_len=max_seq_len,
         )
+
         if not self.fused_dropout_add_ln:
             hidden_states = self.norm1(
                 (self.drop_path1(self.dropout1(attn_outputs)) + hidden_states).to(dtype=self.norm1.weight.dtype)
@@ -187,6 +188,7 @@ class ContextualBlock(nn.Module):
                 prenorm=False,
             )
         
+        
         # Do cross attention with `encoder_hidden_states`
         cross_attention_outputs = self.cross_attn(
             x=hidden_states, 
@@ -196,8 +198,8 @@ class ContextualBlock(nn.Module):
             max_seqlen=max_seq_len,
             max_seqlen_k=max_seqlen_k,
         )
-
-        hidden_states = (hidden_states + cross_attention_outputs)
+        cross_attention_outputs = self.cross_attn_norm_1(cross_attention_outputs)
+        hidden_states = self.cross_attn_norm_2(hidden_states + cross_attention_outputs)
         
         # Do MLP
         mlp_out = self.mlp(hidden_states)

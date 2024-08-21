@@ -74,7 +74,8 @@ class MlmTrainer(transformers.Trainer):
         probability_matrix = torch.full(labels.shape, self.mlm_probability)
         if special_tokens_mask is None:
             special_tokens_mask = [
-                self.tokenizer.get_special_tokens_mask(val, already_has_special_tokens=True) for val in labels.tolist()
+                self.tokenizer.get_special_tokens_mask(val, already_has_special_tokens=True) 
+                for val in labels.tolist()
             ]
             special_tokens_mask = torch.tensor(special_tokens_mask, dtype=torch.bool)
         else:

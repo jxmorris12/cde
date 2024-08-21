@@ -260,6 +260,7 @@ class VarLengthRotaryEmbedding(RotaryEmbedding):
                 cu_seqlens=cu_seqlens,
                 max_seqlen=max_seqlen,
             )
+            kv = kv[None] # Implicit batch
             kv = apply_rotary_emb_kv_(
                 kv,
                 self._cos_cached,
@@ -267,6 +268,7 @@ class VarLengthRotaryEmbedding(RotaryEmbedding):
                 interleaved=self.interleaved,
                 seqlen_offsets=seqlen_offset,
             )
+            kv = kv[0] # Remove implicit batch
             return q, kv
 
 
