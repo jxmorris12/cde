@@ -5,11 +5,11 @@ import functools
 import torch
 import transformers
 
-from spider.collate import TokenizerCollator
-from spider.dataset import NomicSupervisedDataset
-from spider.gradcache import GradCache
-from spider.lib.misc import inputs_for_key
-from spider.model import BiEncoder, DatasetTransformer
+from cde.collate import TokenizerCollator
+from cde.dataset import NomicSupervisedDataset
+from cde.gradcache import GradCache
+from cde.lib.misc import inputs_for_key
+from cde.model import BiEncoder, DatasetTransformer
 
 
 def contrastive_loss(

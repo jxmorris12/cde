@@ -7,7 +7,7 @@ import numpy as np
 import torch
 import transformers
 
-from spider.lib import cluster_dataset, paired_kmeans_faiss
+from cde.lib import cluster_dataset, paired_kmeans_faiss
 
 
 @pytest.fixture

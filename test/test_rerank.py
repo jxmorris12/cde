@@ -5,12 +5,12 @@ import pytest
 import torch
 import transformers
 
-from spider.collate import TokenizerCollator
-from spider.dataset import BeirDataset
-from spider.lib import ModelConfig 
-from spider.model import get_model_class
-from spider.run_args import ModelArguments, DataArguments, TrainingArguments
-from spider.trainer import CustomTrainer
+from cde.collate import TokenizerCollator
+from cde.dataset import BeirDataset
+from cde.lib import ModelConfig 
+from cde.model import get_model_class
+from cde.run_args import ModelArguments, DataArguments, TrainingArguments
+from cde.trainer import CustomTrainer
 
 from .helpers import FakeEmbedder
 

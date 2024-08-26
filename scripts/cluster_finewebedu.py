@@ -2,8 +2,8 @@ import argparse
 
 import transformers
 
-from spider.dataset import FineWebEdu
-from spider.lib import cluster_dataset
+from cde.dataset import FineWebEdu
+from cde.lib import cluster_dataset
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
@@ -19,6 +19,7 @@ def main():
     dataset = FineWebEdu(
         tokenizer=tokenizer,
         max_seq_length=args.max_seq_length,
+        tiny=False,
     )
     print(f"[***] Clustering {len(dataset)} docs...")
     cluster_results = cluster_dataset(

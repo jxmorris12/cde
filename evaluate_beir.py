@@ -5,9 +5,9 @@ import os
 import pandas as pd
 import tqdm
 
-from spider.lib.misc import md5_hash_kwargs
-from spider.lib.model_configs import MODEL_FOLDER_DICT
-from spider.lib.utils import analyze_utils
+from cde.lib.misc import md5_hash_kwargs
+from cde.lib.model_configs import MODEL_FOLDER_DICT
+from cde.lib.utils import analyze_utils
 
 
 # can run with torchrun, for example:

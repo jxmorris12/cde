@@ -6,7 +6,7 @@ import random
 import tqdm
 import transformers
 
-from spider.dataset import (
+from cde.dataset import (
     NomicSupervisedDataset, 
     NomicUnsupervisedDataset
 )

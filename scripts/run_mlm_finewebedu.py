@@ -11,18 +11,18 @@ import torch
 import transformers
 import wandb
 
-from spider.collate import TokenizedCollator
-from spider.dataset import FineWebEdu
-from spider.lib import (
+from cde.collate import TokenizedCollator
+from cde.dataset import FineWeb, FineWebEdu
+from cde.lib import (
     get_rank, get_world_size, 
     load_embedder_and_tokenizer, 
     load_model_state_dict_from_path, 
     ModelConfig,
     print0
 )
-from spider.model import get_model_class
-from spider.run_args import ModelArguments, DataArguments, TrainingArguments
-from spider.sampler import get_sampler
+from cde.model import get_model_class
+from cde.run_args import ModelArguments, DataArguments, TrainingArguments
+from cde.sampler import get_sampler
 
 
 # 
@@ -123,9 +123,11 @@ class MlmTrainer(transformers.Trainer):
         outputs = model(
             input_ids=inputs["input_ids"],
             attention_mask=inputs["attention_mask"],
-            dataset_input_ids=unmasked_input_ids[R1],
+            dataset_input_ids=unmasked_input_ids,
+            # dataset_input_ids=unmasked_input_ids[R1],
             # dataset_input_ids=input_ids["input_ids"][R1],
-            dataset_attention_mask=inputs["attention_mask"][R1],
+            dataset_attention_mask=inputs["attention_mask"],
+            # dataset_attention_mask=inputs["attention_mask"][R1],
             output_hidden_states=True,
         )
         logits = self.classifier(outputs["hidden_states"])
@@ -237,10 +239,20 @@ def main():
         model_args.embedder,
     )
 
-    train_dataset = FineWebEdu(
-        tokenizer=embedder_tokenizer,
-        max_seq_length=model_args.max_seq_length,
-    )
+    if data_args.dataset.startswith("finewebedu"):
+        train_dataset = FineWebEdu(
+            tokenizer=embedder_tokenizer,
+            max_seq_length=model_args.max_seq_length,
+            tiny=data_args.dataset.endswith("-tiny"),
+        )
+    elif data_args.dataset.startswith("fineweb"):
+        train_dataset = FineWeb(
+            tokenizer=embedder_tokenizer,
+            max_seq_length=model_args.max_seq_length,
+            tiny=data_args.dataset.endswith("-tiny"),
+        )
+    else:
+        raise ValueError(f"Invalid dataset for MLM pretraining {args.dataset}")
 
 
     train_sampler_fn = functools.partial(

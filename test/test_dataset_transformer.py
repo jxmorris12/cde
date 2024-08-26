@@ -2,9 +2,9 @@ import pytest
 import torch
 import transformers
 
-from spider.lib import load_embedder_and_tokenizer, ModelConfig
-from spider.model import DatasetTransformer
-from spider.run_args import ModelArguments
+from cde.lib import load_embedder_and_tokenizer, ModelConfig
+from cde.model import DatasetTransformer
+from cde.run_args import ModelArguments
 
 
 def test_dataset_transformer_invariance_synthetic():

@@ -1,4 +1,4 @@
-from spider.dataset import NomicSupervisedDataset
+from cde.dataset import NomicSupervisedDataset
 d = NomicSupervisedDataset()
 
 import torch

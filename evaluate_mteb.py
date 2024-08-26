@@ -7,14 +7,14 @@ import random
 import datasets
 import torch
 
-from spider.lib import cluster_dataset
-from spider.lib.embed import DenseEncoder
-from spider.lib.model_configs import MODEL_FOLDER_DICT
-from spider.lib.utils import analyze_utils
+from cde.lib import cluster_dataset
+from cde.lib.embed import DenseEncoder
+from cde.lib.model_configs import MODEL_FOLDER_DICT
+from cde.lib.utils import analyze_utils
 
 from mteb import MTEB
 from mteb import HFDataLoader
-# from spider.lib.eval.mteb import MTEB
+# from cde.lib.eval.mteb import MTEB
 
 TASK_LIST_RETRIEVAL = [
     "HotpotQA",

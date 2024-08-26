@@ -1,7 +1,7 @@
 import pytest
 
-from spider.dataset import NomicSupervisedDataset
-from spider.sampler import FixedSubdomainSampler, RandomSampler
+from cde.dataset import NomicSupervisedDataset
+from cde.sampler import FixedSubdomainSampler, RandomSampler
 
 @pytest.fixture
 def nomic_dataset():

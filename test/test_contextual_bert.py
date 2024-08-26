@@ -2,11 +2,11 @@ import torch
 import transformers
 
 
-from spider.lib import ModelConfig, load_embedder_and_tokenizer
-from spider.model import ContextualCrossAttention
+from cde.lib import ModelConfig, load_embedder_and_tokenizer
+from cde.model import ContextualCrossAttention
 
-from spider.lib.contextual_bert import ContextualBertModel
-from spider.lib.contextual_bert.configuration import ContextualBertConfig
+from cde.lib.contextual_bert import ContextualBertModel
+from cde.lib.contextual_bert.configuration import ContextualBertConfig
 
 device = ("cuda" if torch.cuda.is_available() else "cpu")
 

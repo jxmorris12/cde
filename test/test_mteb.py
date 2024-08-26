@@ -1,8 +1,8 @@
 import os
 import tempfile
 
-from spider.lib.embed import TwoStageDenseEncoder
-from spider.lib.eval.mteb import MTEB
+from cde.lib.embed import TwoStageDenseEncoder
+from cde.lib.eval.mteb import MTEB
 
 from helpers import FakeDatasetTransformer
 

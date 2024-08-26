@@ -1,7 +1,7 @@
 from setuptools import find_packages, setup
 
 setup(
-    name="spider",
+    name="cde",
     version="0.0.1",
     description="train semi-parametric text embedding models",
     author="Jack Morris",
