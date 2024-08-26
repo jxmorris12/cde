@@ -24,25 +24,9 @@ from cde.lib import (
     RerankHelper, 
     TensorRunningAverages
 )
+from cde.lib.trainer_hn_filtering import TrainerFilterMixin
 from cde.sampler import Sampler
 
-
-
-class NomicEmbeddingModelWrapper(torch.nn.Module):
-    # TODO: Put this somewhere else
-    def __init__(self):
-        super().__init__()
-        self.model = transformers.AutoModel.from_pretrained(
-            "nomic-ai/nomic-embed-text-v1", 
-            trust_remote_code=True
-        )
-        self.model.eval()
-    
-    def forward(self, **kwargs):
-        from cde.lib import mean_pool
-        output = self.model(**kwargs)
-        embeddings = mean_pool(output[0], kwargs["attention_mask"])
-        return torch.nn.functional.normalize(embeddings, p=2, dim=1)
 
 def reset_memory() -> None:
     gc.collect()
@@ -505,33 +489,6 @@ class CustomTrainer(transformers.Trainer):
                 }
             for key, val in grad_norm_metrics.items():
                 self._log_extra(key, val)
-            
-    def _get_query_doc_scores(self, query_inputs, document_inputs) -> torch.Tensor:
-        from cde.lib.tensor import forward_batched
-        
-        if self._hn_filter_model is None:
-            self._hn_filter_model = NomicEmbeddingModelWrapper()
-            self._hn_filter_model.to(self.args.device)
-
-        with torch.no_grad():
-            query_outputs = forward_batched(
-                model=self._hn_filter_model,
-                input_ids=query_inputs["input_ids"][:, :128],
-                attention_mask=query_inputs["attention_mask"][:, :128],
-                batch_size=(self.args.per_device_train_batch_size * 4),
-            )
-            doc_outputs = forward_batched(
-                model=self._hn_filter_model,
-                input_ids=document_inputs["input_ids"][:, :128],
-                attention_mask=document_inputs["attention_mask"][:, :128],
-                batch_size=(self.args.per_device_train_batch_size * 4),
-            )
-
-        query_outputs = torch.nn.functional.normalize(query_outputs, p=2, dim=1)
-        doc_outputs = torch.nn.functional.normalize(doc_outputs, p=2, dim=1)
-        scores = query_outputs @ doc_outputs.T
-        
-        return scores
 
     def compute_loss(
         self,

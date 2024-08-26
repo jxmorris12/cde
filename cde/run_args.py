@@ -239,6 +239,13 @@ class TrainingArguments(transformers.TrainingArguments):
             "help": "threshold for tuning hard negatives (in 0-1) or none",
         }
     )
+    hn_filter_model: str = field(
+        default="nomic",
+        metadata={
+            "help": "model to use for filtering hard negatives",
+            "choices": ["nomic", "stella"],
+        }
+    )
     learning_rate: float = field(
         default=2e-5,
         metadata={"help": "The initial learning rate for AdamW on the backbone model."}
