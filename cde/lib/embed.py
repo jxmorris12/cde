@@ -222,7 +222,7 @@ class DenseEncoder(torch.nn.Module):
         self._consider_putting_model_on_device()
 
         show_progress_bar = (len(dataset) >= 128) and show_progress_bar
-        print(f"[DenseEncoder] encode() calling embed_dataloader (convert_to_tensor={convert_to_tensor})")
+        print(f"[DenseEncoder] encode() calling embed_dataloader (len(dataset)={len(dataset)}, convert_to_tensor={convert_to_tensor})")
         encoded_embeds = embed_dataloader(
             self.encoder,
             data_loader, 
@@ -248,7 +248,7 @@ def embed_with_cache(
         save_to_disk: bool = True,
         batch_size: int = 4096,
         max_seq_length: int = 256,
-        encoder: Optional[torch.nn.Module] = None,
+        model: Optional[DenseEncoder] = None,
     ) -> datasets.Dataset:
     embedder_cache_path = model_name.replace('/', '__')
     cache_folder = os.path.join(get_cde_cache_dir(), 'corpus_embeddings', embedder_cache_path)
@@ -267,7 +267,8 @@ def embed_with_cache(
     d_subset = d.remove_columns(all_other_colums)
 
     print(f"[embed_with_cache] encoding {len(d)} with batch size {batch_size}")
-    model = DenseEncoder(model_name, encoder=encoder, max_seq_length=max_seq_length)
+    if model is None:
+        model = DenseEncoder(model_name, max_seq_length=max_seq_length)
     embeddings = model.encode(d_subset, col, batch_size=batch_size)
 
     print(f"[embed_with_cache] creating datasets")

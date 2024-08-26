@@ -162,6 +162,12 @@ class DataArguments:
             "help": "Whether to downscale and then normalize embeddings before clustering",
         }
     )
+    clustering_batch_packing_strategy: str = field(
+        default="random",
+        metadata = {
+            "choices": ["random", "tsp_greedy"],
+        }
+    )
     num_hard_negatives: int = field(
         default=0,
         metadata={

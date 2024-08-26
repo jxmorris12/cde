@@ -17,6 +17,7 @@ from cde.dataset import (
     BeirDataset, NomicSupervisedDataset, NomicUnsupervisedDataset
 )
 from cde.lib import (
+    cluster_packing,
     get_rank, get_world_size, 
     load_embedder_and_tokenizer, 
     load_model_state_dict_from_path, 
@@ -216,6 +217,7 @@ def main():
         shuffle=True,
         clustering_model=data_args.clustering_model,
         downscale_and_normalize=data_args.clustering_downscale_and_normalize,
+        batch_packing_strategy=data_args.clustering_batch_packing_strategy,
         clustering_query_to_doc=data_args.clustering_query_to_doc,
         seed=training_args.seed,
     )
@@ -231,6 +233,7 @@ def main():
         clustering_model="gtr_base",
         clustering_query_to_doc=data_args.clustering_query_to_doc,
         downscale_and_normalize=data_args.clustering_downscale_and_normalize,
+        batch_packing_strategy=data_args.clustering_batch_packing_strategy,
         num_samples=(training_args.per_device_eval_batch_size * training_args.max_eval_batches),
     )
     print0("[main] creating val samplers")
@@ -318,7 +321,7 @@ def main():
     logging.info("train() loaded checkpoint %s", checkpoint)
     print0("[main] trainer.train()")
 
-    trainer.evaluate_retrieval_datasets()
+    # trainer.evaluate_retrieval_datasets()
     trainer.train(resume_from_checkpoint=checkpoint)
     trainer.evaluate_retrieval_datasets()
 

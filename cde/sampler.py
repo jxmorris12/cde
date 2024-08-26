@@ -20,12 +20,13 @@ from cde.lib import (
     shuffle_batches,
     tqdm_if_main_worker,
 ) 
+from cde.lib.cluster_packing import ClusterPackingMixin
 
 
 NomicDataset = Union[NomicSupervisedDataset, NomicUnsupervisedDataset]
 
 
-class Sampler(abc.ABC, torch.utils.data.Sampler):
+class Sampler(abc.ABC, torch.utils.data.Sampler, ClusterPackingMixin):
     def __init__(
             self, 
             dataset: NomicDataset, 
@@ -34,7 +35,8 @@ class Sampler(abc.ABC, torch.utils.data.Sampler):
             max_num_batches: Optional[int] = None,
             num_samples: Optional[int] = None,
             seed: int = 42,
-            epoch: int = 0 
+            epoch: int = 0,
+            batch_packing_strategy: str = "random",
         ):
         self.dataset = dataset
         self.batch_size = batch_size
@@ -67,6 +69,8 @@ class Sampler(abc.ABC, torch.utils.data.Sampler):
             self.seed,
             self.epoch,
             get_world_size(),
+            self.num_samples,
+            self.batch_packing_strategy
         )
     
     def _get_indices(self) -> Iterable[int]:
@@ -149,21 +153,11 @@ class FixedSubdomainSampler(RandomSampler):
             for k in tqdm_if_main_worker(self.batch_assignments.keys(), desc="Shuffling clusters", colour="red"):
                 np_gen.shuffle(self.batch_assignments[k])
     
-    def _order_batches(self, np_gen: np.random.Generator, batches: List[List[int]]) -> List[List[int]]:
-        if self.batch_packing_strategy == "random":
-            np_gen.shuffle(all_sub_batches)
-            return batches
-        elif self.batch_packing_strategy == "tsp_greedy":
-            # TODO
-            return batches
-        else:    
-            raise ValueError(f"unknown batch_packing_strategy {self.batch_packing_strategy}")
-    
     def _get_batch_lists(self) -> List[Iterable[int]]:
         """List of sub-batches which will be flattened and reshaped into the full clusters."""
         batch_lists = list(self.batch_assignments.values())
         np_gen = np.random.default_rng(seed=(self.seed + self.epoch))
-        batch_lists = self._order_batches(np_gen, batch_lists)
+        batch_lists = self._order_batches(np_gen, batch_lists, cluster_id=0)
         return batch_lists
     
     def _get_indices(self) -> List[int]:
@@ -221,6 +215,7 @@ class AutoClusterSampler(FixedSubdomainSampler):
             downscale_and_normalize: bool,
             model: str,
             num_samples: Optional[int] = None,
+            batch_packing_strategy: str = "random",
             seed: int = 42,
         ):
         super().__init__(
@@ -237,14 +232,15 @@ class AutoClusterSampler(FixedSubdomainSampler):
         self.cluster_size = cluster_size
         self.share_negatives_between_gpus = share_negatives_between_gpus
         self.downscale_and_normalize = downscale_and_normalize
+        self.batch_packing_strategy = batch_packing_strategy
     
     @property
     def batch_assignments(self) -> Dict[int, List[int]]:
         cluster_assignments = cluster_dataset(
             dataset=self.dataset,
             model=self.model,
-            query_key=self.dataset._document_input_ids_key,
-            document_key=self.dataset._query_input_ids_key,
+            query_key=self.dataset._query_input_ids_key,
+            document_key=self.dataset._document_input_ids_key,
             query_to_doc=self.query_to_doc,
             cluster_size=self.cluster_size,
             downscale_and_normalize=self.downscale_and_normalize,
@@ -271,6 +267,7 @@ class AutoClusterWithinDomainSampler(FixedSubdomainSampler):
             downscale_and_normalize: bool,
             model: str,
             num_samples: Optional[int] = None,
+            batch_packing_strategy: str = "random",
             seed: int = 42,
         ):
         # TODO: shuffle?
@@ -292,6 +289,7 @@ class AutoClusterWithinDomainSampler(FixedSubdomainSampler):
         self.share_negatives_between_gpus = share_negatives_between_gpus
         self.dataset = dataset
         self.model = model
+        self.batch_packing_strategy = batch_packing_strategy
     
     @property
     def subdomain_cluster_assignments(self) -> List[Dict[int, List[int]]]:
@@ -310,11 +308,19 @@ class AutoClusterWithinDomainSampler(FixedSubdomainSampler):
         all_batches = []
         np_gen = np.random.default_rng(seed=(self.seed + self.epoch))
         all_cluster_assignments = self.subdomain_cluster_assignments
-        for minicluster in tqdm_if_main_worker(all_cluster_assignments, colour="red", leave=False):
+        for j, minicluster in tqdm_if_main_worker(
+                enumerate(all_cluster_assignments), 
+                colour="red", 
+                leave=False
+            ):
             all_sub_batches = []
             for cluster_idx, cluster_list in minicluster.items():
                 all_sub_batches.append(cluster_list)
-            all_sub_batches = self._order_batches(np_gen, all_sub_batches)
+            all_sub_batches = self._order_batches(
+                np_gen, 
+                all_sub_batches,
+                cluster_id=j,
+            )
             all_batches.extend(all_sub_batches)
         return all_batches
 
@@ -330,6 +336,7 @@ def get_sampler(
     clustering_model: str,
     clustering_query_to_doc: bool = True,
     num_samples: Optional[int] = None,
+    batch_packing_strategy: str = "random",
     seed: int = 42,
 ) -> Sampler:
     if sampling_strategy == "random":
@@ -339,6 +346,7 @@ def get_sampler(
             shuffle=shuffle,
             num_samples=num_samples,
             seed=seed,
+            batch_packing_strategy=batch_packing_strategy,
         )
     elif sampling_strategy == "domain":
         return FixedSubdomainSampler(
@@ -346,6 +354,7 @@ def get_sampler(
             batch_size=batch_size,
             shuffle=shuffle,
             share_negatives_between_gpus=share_negatives_between_gpus,
+            batch_packing_strategy=batch_packing_strategy,
             num_samples=num_samples,
             seed=seed,
         )
@@ -357,6 +366,7 @@ def get_sampler(
             cluster_size=cluster_size,
             downscale_and_normalize=downscale_and_normalize,
             share_negatives_between_gpus=share_negatives_between_gpus,
+            batch_packing_strategy=batch_packing_strategy,
             query_to_doc=clustering_query_to_doc, 
             model=clustering_model,
             num_samples=num_samples,
@@ -369,6 +379,7 @@ def get_sampler(
             shuffle=shuffle,
             share_negatives_between_gpus=share_negatives_between_gpus,
             cluster_size=cluster_size,
+            batch_packing_strategy=batch_packing_strategy,
             downscale_and_normalize=downscale_and_normalize,
             query_to_doc=clustering_query_to_doc, 
             model=clustering_model,

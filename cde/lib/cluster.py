@@ -77,7 +77,7 @@ def embed_for_clustering(
         return queries, corpus
     elif model == "stella_en_400M_v5":
         model_name = "dunzhang/stella_en_400M_v5"
-        model = AutoModel.from_pretrained(model_name, trust_remote_code=True) 
+        # model = AutoModel.from_pretrained(model_name, trust_remote_code=True) 
 
         dataset_fingerprint = dataset._fingerprint
         num_gpus = torch.cuda.device_count()
@@ -111,7 +111,7 @@ def embed_for_clustering(
                 dataset._fingerprint + "_documents", 
                 dataset,
                 document_key,
-                encoder=model,
+                # encoder=model,
                 save_to_disk=True,
                 batch_size=2048,
             )
@@ -360,6 +360,9 @@ def cluster_dataset_uncached(
 
 
 def save_cluster_dict(cluster_dict: Dict[int, List[int]], path: str):
+    if isinstance(cluster_dict, list):
+        pickle.dump(cluster_dict, open(path.replace(".txt", ".p"), "wb"))
+        return
     values = [
             value for key, value in sorted(cluster_dict.items())
     ]
@@ -373,6 +376,10 @@ def save_cluster_dict(cluster_dict: Dict[int, List[int]], path: str):
 
 
 def load_cluster_dict(path: str) -> Dict[int, List[int]]:
+    print0(f"[load_cluster_dict] loading from {path}")
+    if os.path.exists(path.replace(".txt", ".p")):
+        return pickle.load(open(path.replace(".txt", ".p"), "rb"))
+    
     with open(path, 'r') as f:
         lines = f.readlines()
     result = {}
@@ -403,7 +410,7 @@ def cluster_dataset(
         downscale_and_normalize=downscale_and_normalize,
     ) + ".txt"
     print("[cluster_dataset] checking for cluster at file", clustering_hash)
-    if os.path.exists(clustering_hash):
+    if os.path.exists(clustering_hash) or os.path.exists(clustering_hash.replace(".txt", ".p")):
         print("[cluster_dataset] opening cached cluster ... ", clustering_hash)
         result = load_cluster_dict(clustering_hash)
         print("[cluster_dataset] opened cached cluster ... ", clustering_hash)
@@ -462,7 +469,7 @@ def cluster_dataset(
                 torch.cuda.empty_cache()
         gc.collect()
         torch.cuda.empty_cache()
-        save_cluster_dict(result, clustering_hash + ".txt")
+        save_cluster_dict(result, clustering_hash)
         return result
 
 
@@ -535,7 +542,7 @@ def cluster_subdomains(
         downscale_and_normalize=downscale_and_normalize,
     ) + ".txt"
     print0("[cluster_subdomains] checking for cluster at file", clustering_hash)
-    if os.path.exists(clustering_hash):
+    if os.path.exists(clustering_hash) or os.path.exists(clustering_hash.replace(".txt", ".p")):
         # print("[cluster_subdomains] opening cached cluster ... ", clustering_hash)
         return load_cluster_dict(clustering_hash)
     else:
@@ -551,6 +558,6 @@ def cluster_subdomains(
         gc.collect()
         torch.cuda.empty_cache()
         print("[cluster_subdomains] saving result to", clustering_hash)
-        save_cluster_dict(result, clustering_hash + ".txt")
+        save_cluster_dict(result, clustering_hash)
         print("[cluster_subdomains] saved result to", clustering_hash)
         return result
