@@ -126,7 +126,9 @@ class DenseEncoder(torch.nn.Module):
         if self.encoder is None:
             print("[DE] initializing from", self.model_name_or_path)
             self.encoder = transformers.AutoModel.from_pretrained(
-                self.model_name_or_path, torch_dtype=torch.float16)
+                self.model_name_or_path, 
+                torch_dtype=torch.float16
+            )
             self.encoder.eval()
         if hasattr(self.encoder, "decoder") and hasattr(self.encoder, "encoder"):
             print("[DE] taking encoder from an encoder-decoder model")

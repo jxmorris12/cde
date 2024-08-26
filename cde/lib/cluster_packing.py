@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Optional
 
 from sklearn.decomposition import TruncatedSVD
 import numpy as np
@@ -16,8 +16,8 @@ class ClusterPackingMixin:
     def _compute_centroid_embeddings(self, clusters: List[List[int]]) -> torch.Tensor:
         model_name = "sentence-transformers/gtr-t5-base" # TODO: Argparse for this.
         if self._encoder is None:
-            self._encoder = DenseEncoder(model_name, max_seq_length=256)
-            
+            self._encoder = DenseEncoder(model_name, max_seq_length=128)
+
         all_idxs = [idx for cluster in clusters for idx in cluster]
         subdataset = self.dataset.dataset.select(all_idxs)
         embeddings_dataset = embed_with_cache(
@@ -25,9 +25,9 @@ class ClusterPackingMixin:
             subdataset._fingerprint, 
             subdataset,
             "document",
-            encoder=self._encoder,
+            model=self._encoder,
             save_to_disk=True,
-            batch_size=2048,
+            batch_size=8192,
         )
 
         centroids = []
@@ -39,11 +39,15 @@ class ClusterPackingMixin:
         return torch.stack(centroids)
 
     def _tsp_greedy_uncached(self, np_gen: np.random.Generator, clusters: List[List[int]]) -> List[int]:
+        if len(clusters) == 1:
+            print(f"Got only one cluster, returning it without ordering.")
+            return [0]
+
         # Embed all the clusters
         cluster_embeddings = self._compute_centroid_embeddings(clusters)
         
         # Downscale
-        scaler = TruncatedSVD(n_components=100, random_state=42)
+        scaler = TruncatedSVD(n_components=256, random_state=42)
         cluster_embeddings = scaler.fit_transform(cluster_embeddings.numpy())
         cluster_embeddings = torch.tensor(cluster_embeddings, dtype=torch.float)
         cluster_embeddings = cluster_embeddings.to("cuda" if torch.cuda.is_available() else "cpu")
