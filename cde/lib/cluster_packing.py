@@ -5,7 +5,7 @@ import numpy as np
 import os
 import torch
 
-from cde.lib import DenseEncoder, tqdm_if_main_worker
+from cde.lib import DenseEncoder, print0, tqdm_if_main_worker
 from cde.lib.embed import embed_with_cache
 from cde.lib.misc import get_cache_location_from_kwargs
 
@@ -29,7 +29,6 @@ class ClusterPackingMixin:
             save_to_disk=True,
             batch_size=8192,
         )
-
         centroids = []
         j = 0
         for cluster_idxs in clusters:
@@ -71,15 +70,23 @@ class ClusterPackingMixin:
     def tsp_greedy(self, np_gen: np.random.Generator, clusters: List[List[int]], cluster_id: int) -> List[int]:
         cache_location = get_cache_location_from_kwargs(
             method="tsp_greedy",
-            sampler_hash=hash(self),
+            dataset_fingerprint=self.dataset._fingerprint, 
+            cluster_size=self.cluster_size,
+            batch_size=self.batch_size, 
+            seed=self.seed,
+            epoch=self.epoch,
+            batch_packing_strategy=self.batch_packing_strategy,
             cluster_id=cluster_id,
         ) 
         if os.path.exists(cache_location):
+            print0(f"[tsp_greedy] Loading TSP solution from {cache_location} (cluster_id={cluster_id})")
             order = list(map(int, open(cache_location).readlines()))
         else:
+            print0(f"[tsp_greedy] Saving TSP order to {cache_location} (cluster_id={cluster_id})")
             order = self._tsp_greedy_uncached(np_gen, clusters)
             with open(cache_location, "w") as f:
                 f.write("\n".join(map(str, order)))
+            print0(f"[tsp_greedy] Saved TSP order to {cache_location} (cluster_id={cluster_id})")
         assert len(order) == len(clusters)
         return [clusters[j] for j in order]
 

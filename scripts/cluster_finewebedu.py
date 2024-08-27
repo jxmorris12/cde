@@ -2,7 +2,7 @@ import argparse
 
 import transformers
 
-from cde.dataset import FineWebEdu
+from cde.dataset import FineWeb, FineWebEdu
 from cde.lib import cluster_dataset
 
 def parse_args() -> argparse.Namespace:
@@ -19,7 +19,7 @@ def main():
     dataset = FineWebEdu(
         tokenizer=tokenizer,
         max_seq_length=args.max_seq_length,
-        tiny=False,
+        tiny=True,
     )
     print(f"[***] Clustering {len(dataset)} docs...")
     cluster_results = cluster_dataset(

@@ -69,7 +69,7 @@ class TokenizedCollator(transformers.DataCollatorWithPadding):
                     # can't stack string, etc. -- just leave em
                     extra_keys.append(k)
 
-        for k in extra_keys: del out_ex[k]
+        # for k in extra_keys: del out_ex[k]
         return dict(out_ex)
 
 

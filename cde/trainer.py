@@ -24,7 +24,7 @@ from cde.lib import (
     RerankHelper, 
     TensorRunningAverages
 )
-from cde.lib.trainer_hn_filtering import TrainerFilterMixin
+from cde.lib.trainer_hn_filtering import TrainerNegativeFilterMixin
 from cde.sampler import Sampler
 
 
@@ -43,7 +43,7 @@ def calculate_gradient_norm(model: torch.nn.Module) -> torch.Tensor:
     return total_norm
 
 
-class CustomTrainer(transformers.Trainer):
+class CustomTrainer(transformers.Trainer, TrainerNegativeFilterMixin):
     retrieval_datasets: Dict[str, datasets.Dataset]
     embedder_tokenizer: transformers.PreTrainedTokenizer
     _train_sampler_fn: Callable[[], Sampler]

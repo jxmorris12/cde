@@ -24,6 +24,7 @@ def embed_dataloader(
         data_loader, col: str, 
         show_progress_bar: bool = True, 
         convert_to_tensor: bool = True,
+        output_device: str = "cuda",
         **kwargs
     ) -> List[torch.Tensor]:
     encoded_embeds = []
@@ -51,7 +52,7 @@ def embed_dataloader(
         encoded_embeds.append(embeds.cpu())
         
     if convert_to_tensor:
-        return torch.cat(encoded_embeds, dim=0).to(embed_device)
+        return torch.cat(encoded_embeds, dim=0).to(output_device)
     else:
         encoded_embeds = [embeds.cpu().float().numpy() for embeds in encoded_embeds]
         output_array = np.concatenate(encoded_embeds, axis=0)
@@ -205,6 +206,7 @@ class DenseEncoder(torch.nn.Module):
             prefix: str = "", 
             show_progress_bar: bool = True,
             convert_to_tensor: bool = True,
+            output_device: str = "cuda",
             **kwargs,
         ) -> Union[torch.Tensor, np.ndarray]:
         """ Returns a list of embeddings for the given sentences.
@@ -231,6 +233,7 @@ class DenseEncoder(torch.nn.Module):
             col=col,
             convert_to_tensor=convert_to_tensor,
             show_progress_bar=show_progress_bar,
+            output_device=output_device,
             **self.model_kwargs
         )
         print("[DenseEncoder] encode() done calling embed_dataloader")
@@ -271,7 +274,7 @@ def embed_with_cache(
     print(f"[embed_with_cache] encoding {len(d)} with batch size {batch_size}")
     if model is None:
         model = DenseEncoder(model_name, max_seq_length=max_seq_length)
-    embeddings = model.encode(d_subset, col, batch_size=batch_size)
+    embeddings = model.encode(d_subset, col, batch_size=batch_size, output_device="cpu")
 
     print(f"[embed_with_cache] creating datasets")
 

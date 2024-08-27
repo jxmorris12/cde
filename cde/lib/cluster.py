@@ -360,6 +360,7 @@ def cluster_dataset_uncached(
 
 
 def save_cluster_dict(cluster_dict: Dict[int, List[int]], path: str):
+    print(f"[save_cluster_dict] Saving cluster dict of length {len(cluster_dict)} / type {type(cluster_dict)} to {path}")
     if isinstance(cluster_dict, list):
         pickle.dump(cluster_dict, open(path.replace(".txt", ".p"), "wb"))
         return
@@ -462,9 +463,9 @@ def cluster_dataset(
                     if isinstance(cluster, torch.Tensor): cluster = cluster.item()
                     new_clusters.add(cluster)
                     true_data_idx = mini_dataset_sub_idx[data_idx]
+                    if isinstance(true_data_idx, torch.Tensor): true_data_idx = true_data_idx.item()
                     result[true_data_idx] = cluster + offset
                 offset += len(new_clusters)
-                
                 gc.collect()
                 torch.cuda.empty_cache()
         gc.collect()

@@ -474,7 +474,9 @@ class NomicSupervisedDataset(torch.utils.data.Dataset, TokenizerMixin):
             'idx': query_id,
             ######################################################################
             "query": query,
+            "query_text__no_prefix": ex["query"],
             "document": document,
+            "document_text__no_prefix": ex["document"],
             ######################################################################
             "random_document": random_document,
             ######################################################################
@@ -592,8 +594,10 @@ class NomicUnsupervisedDataset(torch.utils.data.Dataset, TokenizerMixin):
         return self._tokenize({
             'idx': idx,
             ######################################################################
-            'query': query,
-            'document': document,
+            "query": query,
+            "query_text__no_prefix": ex["query"],
+            "document": document,
+            "document_text__no_prefix": ex["document"],
             ######################################################################
             # 'random_document': self.dataset[random_idx]["document"],
         })
