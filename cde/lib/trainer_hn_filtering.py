@@ -4,7 +4,7 @@ from sentence_transformers import SentenceTransformer
 import transformers
 import torch
 
-from cde.lib import mean_pool
+from cde.lib import mean_pool, print0
 
 
 class NomicEmbeddingModelWrapper(torch.nn.Module):
@@ -36,8 +36,8 @@ class TrainerNegativeFilterMixin:
         with torch.no_grad():
             query_outputs = forward_batched(
                 model=self._hn_filter_model,
-                input_ids=query_inputs["input_ids"][:, :512],
-                attention_mask=query_inputs["attention_mask"][:, :512],
+                input_ids=query_inputs["input_ids"][:, :self.model.config.max_seq_length],
+                attention_mask=query_inputs["attention_mask"][:, :self.model.config.max_seq_length],
                 batch_size=(self.args.per_device_train_batch_size * 4),
             )
             doc_outputs = forward_batched(
@@ -64,6 +64,8 @@ class TrainerNegativeFilterMixin:
                 trust_remote_code=True, 
                 device=self.args.device
             )
+            self._hn_filter_model.max_seq_length = self.model.config.max_seq_length
+            print0(f"Loaded model stella_en_400M_v5 and set max_seq_length to {self.model.config.max_seq_length}.")
         
         model = self._hn_filter_model
         with torch.no_grad():

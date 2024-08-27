@@ -418,10 +418,7 @@ def cluster_dataset(
         return result
     else:
         assert get_world_size() == 1, "can't cluster in DDP"
-        # MAX_DATASET_LEN = 50_000
-        # MAX_DATASET_LEN = 1_000_000
         MAX_DATASET_LEN = 50_000_000
-        # MAX_DATASET_LEN = 20_000_000
         if len(dataset) < MAX_DATASET_LEN:
             result = cluster_dataset_uncached(
                 dataset=dataset,
