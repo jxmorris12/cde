@@ -1,5 +1,7 @@
 from typing import Dict, List, Optional
 
+import faiss # Need to import first to avoid errors :(
+
 import copy
 import functools
 import os

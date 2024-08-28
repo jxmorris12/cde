@@ -75,8 +75,8 @@ def embed_for_clustering(
         queries = bm25.docs_to_bags(query_input_ids).to_sparse_coo()
         corpus = bm25._corpus_scores.to_sparse_coo()
         return queries, corpus
-    elif model == "stella_en_400M_v5":
-        model_name = "dunzhang/stella_en_400M_v5"
+    elif model == "stella_en_1.5M_v5":
+        model_name = "dunzhang/stella_en_1.5B_v5"
         # model = AutoModel.from_pretrained(model_name, trust_remote_code=True) 
 
         dataset_fingerprint = dataset._fingerprint

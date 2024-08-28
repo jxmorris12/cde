@@ -234,6 +234,8 @@ class CustomTrainer(transformers.Trainer, TrainerNegativeFilterMixin):
                 "examples/train": train_table,
                 "examples/eval": eval_table,
             })
+        if (self.args.hn_tune_threshold is not None) and (self.args.hn_tune_threshold >= 0.0):
+            self._init_hn_filter_model()
         
         # Option to run eval at beginning of training
         run_eval_on_start_of_training = False

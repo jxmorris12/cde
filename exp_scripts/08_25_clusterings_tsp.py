@@ -29,17 +29,18 @@ command_str = "python finetune.py --per_device_train_batch_size {cluster_size} -
 args_dict = {
     "dataset": ["nomic_supervised", "nomic_unsupervised"],
     "dataset": ["nomic_unsupervised"],
-    "cluster_size": [64, 256, 1024, 4096, 16384, 131072, 131072*8, 131072*16, 131072*32],
+    "cluster_size": [64, 256, 1024, 4096, 16384, 131072, 262144, 524288, 1048576, 2097152, 4194304],
 }
 combinations = list(itertools.product(*args_dict.values()))
 args_list = [{key: value for key, value in zip(args_dict.keys(), combination)} for combination in combinations]
 
 jobs = []
-for idx, args in enumerate(args_list):
-    print(f"Job {idx+1}/{len(args_list)}:", args)
-    result_command = command_str.format(**args)
-    function = submitit.helpers.CommandFunction(shlex.split(result_command))
-    job = executor.submit(function)
-    jobs.append(job)
+with executor.batch():
+    for idx, args in enumerate(args_list):
+        print(f"Job {idx+1}/{len(args_list)}:", args)
+        result_command = command_str.format(**args)
+        function = submitit.helpers.CommandFunction(shlex.split(result_command))
+        job = executor.submit(function)
+        jobs.append(job)
 
 print(f"*** SUBMITIT: Successfully submitted {len(jobs)} jobs. ***")

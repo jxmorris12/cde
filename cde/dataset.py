@@ -471,16 +471,19 @@ class NomicSupervisedDataset(torch.utils.data.Dataset, TokenizerMixin):
         num_hard_negatives = min(self.num_hard_negatives, len(ex["negative"]))
         negative_documents = [document_prefix + d for d in random.sample(ex["negative"], num_hard_negatives)]
         return self._tokenize({
-            'idx': query_id,
+            "idx": query_id,
             ######################################################################
             "query": query,
             "query_text__no_prefix": ex["query"],
             "document": document,
             "document_text__no_prefix": ex["document"],
             ######################################################################
-            "random_document": random_document,
+            "query_embedding": torch.Tensor(ex.get("query_embedding")),
+            "document_embedding": torch.Tensor(ex.get("document_embedding")),
             ######################################################################
+            "random_document": random_document,
             "negative_document": negative_documents, 
+            ######################################################################
         })
 
 

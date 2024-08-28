@@ -243,7 +243,13 @@ class TrainingArguments(transformers.TrainingArguments):
         default="nomic",
         metadata={
             "help": "model to use for filtering hard negatives",
-            "choices": ["nomic", "stella"],
+            "choices": ["nomic", "stella", "sbert"],
+        }
+    )
+    hn_filter_precompute_vectors: bool = field(
+        default=False,
+        metadata={
+            "help": "whether to precompute embeddings for hard negative filtering",
         }
     )
     learning_rate: float = field(
