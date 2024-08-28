@@ -243,7 +243,7 @@ class TrainingArguments(transformers.TrainingArguments):
         default="nomic",
         metadata={
             "help": "model to use for filtering hard negatives",
-            "choices": ["nomic", "stella", "sbert"],
+            "choices": ["nomic", "stella", "sbert", "sentence_t5"],
         }
     )
     hn_filter_precompute_vectors: bool = field(
@@ -330,13 +330,13 @@ class TrainingArguments(transformers.TrainingArguments):
         metadata={"help": "The weight decay to apply (if not zero) to all layers except all bias and LayerNorm weights in [`AdamW`] optimizer."}
     )
     automatically_deduplicate_documents: bool = field(
-        default=True,
+        default=False,
         metadata={"help": "whether to count duplicate queries as joint positive samples"}
-    )
+    ) # TODO: Remove (no longer used).
     automatically_deduplicate_queries: bool = field(
-        default=True,
+        default=False,
         metadata={"help": "whether to count duplicate queries as joint positive samples"}
-    )
+    ) # TODO: Remove (no longer used).
     ddp_find_unused_parameters: Optional[bool] = field(
         default=False,
         metadata={

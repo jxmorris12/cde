@@ -537,18 +537,9 @@ class CustomTrainer(transformers.Trainer, TrainerNegativeFilterMixin):
             batch_size = document_first_tokens.shape[0]
             one_hot_labels = torch.eye(batch_size, device=self.args.device, dtype=torch.bool)
 
-        if self.args.automatically_deduplicate_documents:
-            smart_labels_doc = (
-                non_neg_doc_unique_ids[:, None] == document_unique_ids[None, :])
-        else:
-            smart_labels_doc = one_hot_labels.cpu().clone()
-        
+        smart_labels_doc = one_hot_labels.cpu().clone()
         query_unique_ids = all_query_input_ids.cpu() @ seq_len_hash
-        if self.args.automatically_deduplicate_queries:
-            query_collisions = (query_unique_ids[:, None] == query_unique_ids[None, :])
-            smart_labels = (query_collisions.long() @ smart_labels_doc.long()).bool()
-        else:
-            smart_labels = smart_labels_doc
+        smart_labels = smart_labels_doc
         
         # Automatically filter out too-hard negatives.
         hard_negatives_metrics = {}
