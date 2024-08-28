@@ -560,6 +560,11 @@ class CustomTrainer(transformers.Trainer, TrainerNegativeFilterMixin):
                 smart_labels_neg = qd_scores >= qd_scores.diag()[:, None]
             else:
                 smart_labels_neg = qd_scores >= self.args.hn_tune_threshold
+            
+            # if self._is_main_worker:
+            #     breakpoint()
+            # torch.distributed.barrier()
+
             smart_labels = smart_labels | smart_labels_neg
             hard_negatives_metrics = {
                 "smart_hn_exceed_threshold": (qd_scores >= self.args.hn_tune_threshold).long().sum(),
