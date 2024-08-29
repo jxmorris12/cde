@@ -102,7 +102,6 @@ class TrainerNegativeFilterMixin:
             print0(f"[trainer_hn_filter] shard size = {MAX_NUM_EMBEDDINGS_PER_SHARD}.")
             self._precompute_hn_index()
         
-
         num_shards = len(glob.glob(os.path.join(self._filename_dir, "corpus_shard_*.parquet")))
         document_embedding_index = datasets.load_dataset("parquet", data_files=[self._filename_doc_index(shard) for shard in range(num_shards)])["train"]
         document_embedding_index = document_embedding_index.rename_column("embeddings", "document_embedding")
