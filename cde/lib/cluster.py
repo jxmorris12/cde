@@ -303,7 +303,7 @@ def cluster_dataset_uncached(
         cluster_size: int,
         downscale_and_normalize: bool,
     ) -> Dict[int, List[int]]:
-    print("[cluster_dataset_uncached] calling embed_for_clustering...")
+    print0("[cluster_dataset_uncached] calling embed_for_clustering...")
     q, X = embed_for_clustering(
         dataset=dataset,
         query_key=query_key,
@@ -337,7 +337,7 @@ def cluster_dataset_uncached(
     q = q.cpu()
     X = X.cpu()
 
-    print("cluster_dataset_uncached] calling faiss...")
+    print0("cluster_dataset_uncached] calling faiss...")
     if is_sparse:
         _, assignments = paired_kmeans_sparse(
             q=q, 
@@ -481,10 +481,8 @@ def cluster_subdomains_uncached(
         downscale_and_normalize: bool,
     ) -> List[Dict[int, List[int]]]:
     """Creates clusters of cluster_size and combines them into subdomain-specific batches of ~batch_size."""
-    offset = 0
-   
     if batch_size < cluster_size:
-        print("WARNING: batch size", batch_size, "is less than cluster size", cluster_size)
+        print0("WARNING: batch size", batch_size, "is less than cluster size", cluster_size)
     
     subdomains_smallest_first = sorted(subdomains.items(), key=lambda x: len(x[1]))
     # subdomains_largest_first = sorted(subdomains.items(), key=lambda x: -len(x[1]))
@@ -496,9 +494,9 @@ def cluster_subdomains_uncached(
     # random.shuffle(subdomains_smallest_first)
     for j, (_, data_idxs) in enumerate(subdomains_smallest_first):
         perc = (j + 1) / len(subdomains) * 100
-        print(f"({j + 1} / {len(subdomains)} -- {perc:.1f}%) selecting {len(data_idxs)} indices for clustering")
+        print0(f"({j + 1} / {len(subdomains)} -- {perc:.1f}%) selecting {len(data_idxs)} indices for clustering")
         mini_dataset = dataset.dataset.select(data_idxs, keep_in_memory=True)
-        print("[autocluster] calling cluster_dataset")
+        print0("[cluster_subdomains] calling cluster_dataset")
         
         # The idea is that we cluster each dataset individually and then track the clusters via
         # nested dicts like this.
@@ -517,7 +515,7 @@ def cluster_subdomains_uncached(
             if isinstance(raw_cluster, torch.Tensor): raw_cluster = raw_cluster.item()
             mini_cluster_assignments[raw_cluster].append(data_idxs[j])
         all_cluster_assignments.append(dict(mini_cluster_assignments))
-    print(f"[cluster_subdomains] expanded {len(subdomains)} domains to {len(all_cluster_assignments)} clusters.")
+    print0(f"[cluster_subdomains] expanded {len(subdomains)} domains to {len(all_cluster_assignments)} clusters.")
     return all_cluster_assignments
 
 
@@ -530,6 +528,15 @@ def cluster_subdomains(
         model: str,
         downscale_and_normalize: bool
     ) -> List[Dict[int, List[int]]]:
+    print0("[cluster_subdomains]:", 
+        f"dataset_fingerprint={dataset._fingerprint}",
+        f"batch_size={batch_size}",
+        f"cluster_size={cluster_size}",
+        f"model={model}",
+        f"query_to_doc={query_to_doc}",
+        f"downscale_and_normalize={downscale_and_normalize}",
+    )
+    # exit()
     clustering_hash = get_cache_location_from_kwargs(
         method="cluster_subdomains__list",
         dataset_fingerprint=dataset._fingerprint,
@@ -541,9 +548,12 @@ def cluster_subdomains(
     ) + ".txt"
     print0("[cluster_subdomains] checking for cluster at file", clustering_hash)
     if os.path.exists(clustering_hash) or os.path.exists(clustering_hash.replace(".txt", ".p")):
-        # print("[cluster_subdomains] opening cached cluster ... ", clustering_hash)
+        print0("[cluster_subdomains] opening cached cluster ... ", clustering_hash)
         return load_cluster_dict(clustering_hash)
     else:
+        print0("[cluster_subdomains] generating cached cluster ... ", clustering_hash)
+        # exit()
+
         result = cluster_subdomains_uncached(
             dataset=dataset,
             subdomains=subdomains,

@@ -19,8 +19,8 @@ from cde.dataset import (
     BeirDataset, NomicSupervisedDataset, NomicUnsupervisedDataset
 )
 from cde.lib import (
-    cluster_packing,
-    get_rank, get_world_size, 
+    get_rank, 
+    get_world_size, 
     load_embedder_and_tokenizer, 
     load_model_state_dict_from_path, 
     ModelConfig,
@@ -30,6 +30,9 @@ from cde.model import get_model_class
 from cde.run_args import ModelArguments, DataArguments, TrainingArguments
 from cde.sampler import get_sampler
 from cde.trainer import CustomTrainer
+
+
+torch.cuda.set_device(get_rank()) # Try to fix a DDP issue: https://github.com/pytorch/torchrec/issues/328
 
 
 logger = logging.getLogger(__name__)
