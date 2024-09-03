@@ -107,9 +107,9 @@ class TrainerNegativeFilterMixin:
         query_embedding_index = datasets.load_dataset("parquet", data_files=[self._filename_query_index(shard) for shard in range(num_shards)])["train"]
         query_embedding_index = query_embedding_index.rename_column("embeddings", "query_embedding")
 
-        og_fingerprint = self.train_dataset._fingerprint
+        og_fingerprint = self.train_dataset.dataset._fingerprint
         self.train_dataset.dataset = datasets.concatenate_datasets([self.train_dataset.dataset, document_embedding_index, query_embedding_index], axis=1)
-        self.train_dataset._fingerprint = og_fingerprint
+        self.train_dataset.dataset._fingerprint = og_fingerprint
     
     @property
     def _inference_batch_size(self) -> int:
@@ -121,7 +121,7 @@ class TrainerNegativeFilterMixin:
 
         train_dataset_length = (len(self.train_dataset) // (batch_size * get_world_size())) * batch_size * get_world_size()
         print0(f"Precomputing embeddings for {len(self.train_dataset)} samples: {train_dataset_length} across {get_world_size()} workers and {len(self.train_dataset) - train_dataset_length} on self.")
-        dataset1 = self.train_dataset.dataset).select(range(0, train_dataset_length)
+        dataset1 = self.train_dataset.dataset.select(range(0, train_dataset_length))
         train_dataloader_1 = torch.utils.data.DataLoader(
             dataset1, 
             batch_size=batch_size, 
@@ -160,7 +160,7 @@ class TrainerNegativeFilterMixin:
                 shard_idx += 1
                 all_query_embeddings, all_doc_embeddings = [], []
         # Compute last samples on main worker to even it out
-        dataset2 = self.train_dataset.dataset).select(range(train_dataset_length, len(self.train_dataset))
+        dataset2 = self.train_dataset.dataset.select(range(train_dataset_length, len(self.train_dataset)))
         train_dataloader_2 = torch.utils.data.DataLoader(
             dataset2, 
             batch_size=batch_size, 

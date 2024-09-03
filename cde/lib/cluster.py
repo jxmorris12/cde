@@ -410,7 +410,16 @@ def cluster_dataset(
         query_to_doc=query_to_doc,
         downscale_and_normalize=downscale_and_normalize,
     ) + ".txt"
-    print("[cluster_dataset] checking for cluster at file", clustering_hash)
+    print0("[cluster_dataset] checking for cluster at file", clustering_hash)
+    print0("[cluster_dataset] checking for cluster w args:", 
+        f"dataset_fingerprint={dataset._fingerprint}",
+        f"document_key={document_key}",
+        f"query_key={query_key}",
+        f"batch_size={cluster_size}",
+        f"model={model}",
+        f"query_to_doc={query_to_doc}",
+        f"downscale_and_normalize={downscale_and_normalize}"
+    )
     if os.path.exists(clustering_hash) or os.path.exists(clustering_hash.replace(".txt", ".p")):
         print("[cluster_dataset] opening cached cluster ... ", clustering_hash)
         result = load_cluster_dict(clustering_hash)
