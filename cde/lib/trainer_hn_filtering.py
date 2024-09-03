@@ -154,8 +154,8 @@ class TrainerNegativeFilterMixin:
                     save_embeddings(all_query_embeddings, self._filename_query_index(shard=shard_idx))
                     save_embeddings(all_doc_embeddings, self._filename_doc_index(shard=shard_idx))
                 
-                gc.collect()
-                torch.cuda.empty_cache()
+                # gc.collect()
+                # torch.cuda.empty_cache()
                 print0(f"[trainer_hn_filter] Saved {len(all_query_embeddings)} query+doc embeddings to disk (shard={shard_idx}).")
                 shard_idx += 1
                 all_query_embeddings, all_doc_embeddings = [], []

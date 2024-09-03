@@ -347,7 +347,7 @@ class TrainingArguments(transformers.TrainingArguments):
         },
     )
     ddp_share_negatives_between_gpus: bool = field(
-        default=True,
+        default=False,
         metadata={
             "help": "Whether to share negative examples between GPUs (alters batch size)"
         }

@@ -22,20 +22,23 @@ def pad_tensor_to_length(the_list: List[int], length: int = 0, value: int = 0) -
         return torch.tensor(the_list + [value] * num_pads, dtype=torch.long)
 
 
-def cut_padding(batch: Dict[str, torch.Tensor], pad_token: int) -> Dict[str, torch.Tensor]:
+def cut_padding(batch: Dict[str, torch.Tensor], pad_token: int, prefix: str = '') -> Dict[str, torch.Tensor]:
     """Truncates doc if some stuff is all padding at the end."""
-    assert 'input_ids' in batch
-    assert 'attention_mask' in batch
+    assert f'{prefix}input_ids' in batch
+    assert f'{prefix}attention_mask' in batch
+    if not (
+        isinstance(batch[f'{prefix}attention_mask'], torch.Tensor) and isinstance(batch[f'{prefix}input_ids'], torch.Tensor)): 
+        return batch
     # 
-    b, s = batch['input_ids'].shape
+    b, s = batch[f'{prefix}input_ids'].shape
     # 
-    all_padding = (batch['input_ids'] == pad_token).all(dim=0)
+    all_padding = (batch[f'{prefix}input_ids'] == pad_token).all(dim=0)
     if all_padding.sum() == 0:
         return batch
     # 
     padding_start = all_padding.int().argmax()
-    batch['input_ids'] = batch['input_ids'][:, :padding_start]
-    batch['attention_mask'] = batch['attention_mask'][:, :padding_start]
+    batch[f'{prefix}input_ids'] = batch[f'{prefix}input_ids'][:, :padding_start]
+    batch[f'{prefix}attention_mask'] = batch[f'{prefix}attention_mask'][:, :padding_start]
     return batch
 
 
@@ -68,6 +71,13 @@ class TokenizedCollator(transformers.DataCollatorWithPadding):
                 except TypeError:
                     # can't stack string, etc. -- just leave em
                     extra_keys.append(k)
+        
+        cut_keys = [key.replace("input_ids", "") for key in out_ex.keys() if key.endswith("input_ids")]
+        for prefix in cut_keys:
+            try:
+                out_ex = cut_padding(out_ex, self.tokenizer.pad_token_id, prefix=prefix)
+            except:
+                breakpoint()
 
         # for k in extra_keys: del out_ex[k]
         return dict(out_ex)
@@ -151,29 +161,28 @@ class DocumentQueryCollatorWithPadding(transformers.DataCollatorWithPadding):
             )
             return output
 
-
         # tokenize documents.
         if len(document_batch):
             document_batch: Dict[str, torch.Tensor] = pad_batch_func(document_batch)
-            # document_batch = cut_padding(document_batch, self.tokenizer.pad_token_id)
+            document_batch = cut_padding(document_batch, self.tokenizer.pad_token_id)
             ex.update({f'document_{k}': v for k,v in document_batch.items()})
         
         # tokenize hard negative documents.
         if len(hn_document_batch):
             hn_document_batch: Dict[str, torch.Tensor] = pad_batch_func(hn_document_batch)
-            # hn_document_batch = cut_padding(hn_document_batch, self.tokenizer.pad_token_id)
+            hn_document_batch = cut_padding(hn_document_batch, self.tokenizer.pad_token_id)
             ex.update({f'negative_document_{k}': v for k,v in hn_document_batch.items()})
 
         # tokenize queries.
         if len(query_batch):
             query_batch: Dict[str, torch.Tensor] = pad_batch_func(query_batch)
-            # query_batch = cut_padding(query_batch, self.tokenizer.pad_token_id)
+            query_batch = cut_padding(query_batch, self.tokenizer.pad_token_id)
             ex.update({f'query_{k}': v for k,v in query_batch.items()})
 
         # tokenize dataset-level documents.
         if len(dataset_batch):
             dataset_batch: Dict[str, torch.Tensor] = pad_batch_func(dataset_batch)
-            # dataset_batch = cut_padding(dataset_batch, self.tokenizer.pad_token_id)
+            dataset_batch = cut_padding(dataset_batch, self.tokenizer.pad_token_id)
             ex.update({f'dataset_{k}': v for k,v in dataset_batch.items()})
         
         return ex

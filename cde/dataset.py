@@ -470,7 +470,7 @@ class NomicSupervisedDataset(torch.utils.data.Dataset, TokenizerMixin):
 
         num_hard_negatives = min(self.num_hard_negatives, len(ex["negative"]))
         negative_documents = [document_prefix + d for d in random.sample(ex["negative"], num_hard_negatives)]
-        return self._tokenize({
+        out_ex = self._tokenize({
             "idx": query_id,
             ######################################################################
             "query": query,
@@ -480,13 +480,15 @@ class NomicSupervisedDataset(torch.utils.data.Dataset, TokenizerMixin):
             "document_text": document_prefix + ex["document"],
             "document_text__no_prefix": ex["document"],
             ######################################################################
-            "query_embedding": torch.Tensor(ex.get("query_embedding")),
-            "document_embedding": torch.Tensor(ex.get("document_embedding")),
-            ######################################################################
             "random_document": random_document,
             "negative_document": negative_documents, 
             ######################################################################
         })
+
+        ######################################################################
+        if "query_embedding" in ex: out_ex["query_embedding"] = torch.Tensor(ex["query_embedding"])
+        if "document_embedding" in ex: out_ex["document_embedding"] = torch.Tensor(ex["query_embedding"])
+        return out_ex
 
 
 def get_subdomain_idxs_cached(dataset: datasets.Dataset):
@@ -596,7 +598,7 @@ class NomicUnsupervisedDataset(torch.utils.data.Dataset, TokenizerMixin):
         document = document_prefix + ex["document"]
         # random_idx = random.choice(range(len(self.dataset)))
         # print0("__collate__ call [3]")
-        return self._tokenize({
+        out_ex = self._tokenize({
             'idx': idx,
             ######################################################################
             "query": query,
@@ -608,6 +610,9 @@ class NomicUnsupervisedDataset(torch.utils.data.Dataset, TokenizerMixin):
             ######################################################################
             # 'random_document': self.dataset[random_idx]["document"],
         })
+        if "query_embedding" in ex: out_ex["query_embedding"] = torch.Tensor(ex["query_embedding"])
+        if "document_embedding" in ex: out_ex["document_embedding"] = torch.Tensor(ex["query_embedding"])
+        return out_ex
 
 
 @functools.lru_cache()

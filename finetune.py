@@ -201,7 +201,7 @@ def main():
             use_prefix=data_args.use_prefix,
         )
         eval_dataset = None
-        # Need to tokenize and collate for this dataset
+    # Need to tokenize and collate for this dataset
         collator_cls = TokenizedCollator
     else:
         raise ValueError(f'Unsupported dataset {data_args.dataset}')
