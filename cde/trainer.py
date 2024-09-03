@@ -501,10 +501,13 @@ class CustomTrainer(transformers.Trainer, TrainerNegativeFilterMixin):
         query_inputs, document_inputs, negative_document_inputs = self._split_inputs(inputs=inputs)
 
         seq_len = document_inputs["input_ids"].shape[1]
-        random_integers = torch.randint(0, 2, (seq_len,))
-        seq_len_hash = torch.where(random_integers == 0, torch.tensor(-1), torch.tensor(1)).long()
+        # doc_random_integers = torch.randint(0, 2, (seq_len,))
+        # query_random_integers = torch.randint(0, 2, (query_inputs["input_ids"].shape[1],))
+        
+        # doc_seq_len_hash = torch.where(random_integers == 0, torch.tensor(-1), torch.tensor(1)).long()
+        # query_seq_len_hash = torch.where(random_integers == 0, torch.tensor(-1), torch.tensor(1)).long()
 
-        non_neg_doc_unique_ids = self.consider_gather(document_inputs["input_ids"]).cpu() @ seq_len_hash
+        # non_neg_doc_unique_ids = self.consider_gather(document_inputs["input_ids"]).cpu() @ doc_seq_len_hash
         if len(negative_document_inputs):
             document_inputs["input_ids"] = torch.cat(
                 (document_inputs["input_ids"], negative_document_inputs["input_ids"]), dim=0
@@ -522,7 +525,7 @@ class CustomTrainer(transformers.Trainer, TrainerNegativeFilterMixin):
         query_first_tokens = all_query_input_ids[:, 1].contiguous()
 
         # Create labels based on document IDs.
-        document_unique_ids = all_document_input_ids.cpu() @ seq_len_hash
+        # document_unique_ids = all_document_input_ids.cpu() @ doc_seq_len_hash
 
         # We have to stack the hard negatives within device (before the gather) to mimic
         # the way that embeddings are computed and gathered.
@@ -538,7 +541,7 @@ class CustomTrainer(transformers.Trainer, TrainerNegativeFilterMixin):
             one_hot_labels = torch.eye(batch_size, device=self.args.device, dtype=torch.bool)
 
         smart_labels_doc = one_hot_labels.cpu().clone()
-        query_unique_ids = all_query_input_ids.cpu() @ seq_len_hash
+        # query_unique_ids = all_query_input_ids.cpu() @ query_seq_len_hash
         smart_labels = smart_labels_doc
         
         # Automatically filter out too-hard negatives.
@@ -566,10 +569,10 @@ class CustomTrainer(transformers.Trainer, TrainerNegativeFilterMixin):
             }
 
         # Aggregate labels for duplicate queries.
-        num_unique_documents = document_unique_ids.unique().numel()
-        num_collisions_documents = len(document_unique_ids) - num_unique_documents
-        num_unique_queries = query_unique_ids.unique().numel()
-        num_collisions_queries = len(smart_labels) - num_unique_queries
+        # num_unique_documents = document_unique_ids.unique().numel()
+        # num_collisions_documents = len(document_unique_ids) - num_unique_documents
+        # num_unique_queries = query_unique_ids.unique().numel()
+        # num_collisions_queries = len(smart_labels) - num_unique_queries
 
         smart_labels = smart_labels.to(self.args.device)
         duplicate_labels = (smart_labels.long() - one_hot_labels.long())
@@ -584,10 +587,10 @@ class CustomTrainer(transformers.Trainer, TrainerNegativeFilterMixin):
         document_first_token_mean = (document_first_tokens == document_first_token_most_common).float().mean()
 
         metrics = {
-            "stats_unique": num_unique_documents,
-            "stats_unique_queries": num_unique_queries,
-            "stats_collisions": num_collisions_documents,
-            "stats_collisions_queries": num_collisions_queries,
+            # "stats_unique": num_unique_documents,
+            # "stats_unique_queries": num_unique_queries,
+            # "stats_collisions": num_collisions_documents,
+            # "stats_collisions_queries": num_collisions_queries,
             "stats_dataset_inputs_unique_tokens": ds_input_document_unique_tokens,
             "stats_unique_first_tokens_document": document_first_tokens.unique().numel(),
             "stats_unique_first_tokens_query": query_first_tokens.unique().numel(),

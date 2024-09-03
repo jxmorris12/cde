@@ -74,10 +74,7 @@ class TokenizedCollator(transformers.DataCollatorWithPadding):
         
         cut_keys = [key.replace("input_ids", "") for key in out_ex.keys() if key.endswith("input_ids")]
         for prefix in cut_keys:
-            try:
-                out_ex = cut_padding(out_ex, self.tokenizer.pad_token_id, prefix=prefix)
-            except:
-                breakpoint()
+            out_ex = cut_padding(out_ex, self.tokenizer.pad_token_id, prefix=prefix)
 
         # for k in extra_keys: del out_ex[k]
         return dict(out_ex)
