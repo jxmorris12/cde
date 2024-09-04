@@ -486,8 +486,8 @@ class NomicSupervisedDataset(torch.utils.data.Dataset, TokenizerMixin):
         })
 
         ######################################################################
-        if "query_embedding" in ex: out_ex["query_embedding"] = torch.Tensor(ex["query_embedding"])
-        if "document_embedding" in ex: out_ex["document_embedding"] = torch.Tensor(ex["query_embedding"])
+        if "query_embedding" in ex: out_ex["query_embedding"] = ex["query_embedding"]
+        if "document_embedding" in ex: out_ex["document_embedding"] = ex["query_embedding"]
         return out_ex
 
 
@@ -597,7 +597,8 @@ class NomicUnsupervisedDataset(torch.utils.data.Dataset, TokenizerMixin):
         query = query_prefix + ex["query"]
         document = document_prefix + ex["document"]
         # random_idx = random.choice(range(len(self.dataset)))
-        # print0("__collate__ call [3]")
+        # print0("__getitem__ call [3]")
+        # print0("__getitem__ =>", ex.keys())
         out_ex = self._tokenize({
             'idx': idx,
             ######################################################################

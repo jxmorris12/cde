@@ -75,50 +75,6 @@ def embed_for_clustering(
         queries = bm25.docs_to_bags(query_input_ids).to_sparse_coo()
         corpus = bm25._corpus_scores.to_sparse_coo()
         return queries, corpus
-    elif model == "stella_en_1.5M_v5":
-        model_name = "dunzhang/stella_en_1.5B_v5"
-        # model = AutoModel.from_pretrained(model_name, trust_remote_code=True) 
-
-        dataset_fingerprint = dataset._fingerprint
-        num_gpus = torch.cuda.device_count()
-        if get_rank() == 0:
-            print(f"Embedding {len(dataset)} queries with {num_gpus} GPUs...")
-        # https://github.com/UKPLab/sentence-transformers/blob/87f4180d7d197d4a471d627afc788b62a81c0214/sentence_transformers/SentenceTransformer.py#L392
-        print("[embed_with_cache] computing query embeddings")
-        dataset.set_format("pt")
-        print("[embed_with_cache] embedding queries")
-        query_embeddings = embed_with_cache(
-            model_name, 
-            dataset_fingerprint + "_queries", 
-            dataset,
-            query_key,
-            encoder=model,
-            save_to_disk=True,
-            batch_size=2048,
-        )
-        print("[embed_with_cache] halving query embeddings")
-        query_embeddings = query_embeddings["embeds"].half().cpu()
-        assert not query_embeddings.isnan().any(), "got nan query embeddings"
-    
-        if document_key == query_key:
-            print(f"[embed_with_cache] repeating corpus_embeddings num_gpus={num_gpus}")
-            corpus_embeddings = query_embeddings
-
-        else:
-            print(f"[embed_with_cache] computing corpus_embeddings num_gpus={num_gpus}")
-            corpus_embeddings = embed_with_cache(
-                model_name, 
-                dataset._fingerprint + "_documents", 
-                dataset,
-                document_key,
-                # encoder=model,
-                save_to_disk=True,
-                batch_size=2048,
-            )
-            corpus_embeddings = corpus_embeddings["embeds"].half().cpu()
-            print("[embed_with_cache] got corpus embeddings, remapping")
-
-        assert not corpus_embeddings.isnan().any(), "got nan corpus embeddings"
 
     elif model == "gtr_base":
         assert query_to_doc
@@ -126,7 +82,7 @@ def embed_for_clustering(
         num_gpus = torch.cuda.device_count()
         if get_rank() == 0:
             print(f"Embedding {len(dataset)} queries with {num_gpus} GPUs...")
-        model = DenseEncoder("sentence-transformers/gtr-t5-base")
+        # model = DenseEncoder("sentence-transformers/gtr-t5-base")
 
         # https://github.com/UKPLab/sentence-transformers/blob/87f4180d7d197d4a471d627afc788b62a81c0214/sentence_transformers/SentenceTransformer.py#L392
         print("[embed_with_cache] computing query embeddings")
@@ -163,6 +119,112 @@ def embed_for_clustering(
 
         assert not corpus_embeddings.isnan().any(), "got nan corpus embeddings"
 
+        
+        # qidxs = torch.zeros(len(dataset), dtype=torch.long)
+        # qidxs[query_output_idxs] = torch.arange(len(dataset), dtype=torch.long)
+        # cidxs = torch.zeros(len(dataset), dtype=torch.long)
+        # cidxs[corpus_output_idxs] = torch.arange(len(dataset), dtype=torch.long)
+        # ##################################################################
+        # query_embeddings = query_embeddings[qidxs]
+        # corpus_embeddings = corpus_embeddings[cidxs]
+        avg_sim = (corpus_embeddings[:100] @ query_embeddings[:100].T).diag().mean()
+        print(f"[embed_with_cache] returning all embeddings => avg_sim={avg_sim:.2f}")
+        return query_embeddings, corpus_embeddings
+    
+    elif model == "bert":
+        assert query_to_doc
+        dataset_fingerprint = dataset._fingerprint
+        num_gpus = torch.cuda.device_count()
+        if get_rank() == 0:
+            print(f"Embedding {len(dataset)} queries with {num_gpus} GPUs...")
+
+        # https://github.com/UKPLab/sentence-transformers/blob/87f4180d7d197d4a471d627afc788b62a81c0214/sentence_transformers/SentenceTransformer.py#L392
+        print("[embed_with_cache] computing query embeddings")
+        dataset.set_format("pt")
+        print("[embed_with_cache] embedding queries")
+        query_embeddings = embed_with_cache(
+            "bert-base-uncased", 
+            dataset_fingerprint + "_queries", 
+            dataset,
+            query_key,
+            save_to_disk=True,
+            batch_size=2048,
+        )
+        print("[embed_with_cache] halving query embeddings")
+        query_embeddings = query_embeddings["embeds"].half().cpu()
+        assert not query_embeddings.isnan().any(), "got nan query embeddings"
+    
+        if document_key == query_key:
+            print(f"[embed_with_cache] repeating corpus_embeddings num_gpus={num_gpus}")
+            corpus_embeddings = query_embeddings
+
+        else:
+            print(f"[embed_with_cache] computing corpus_embeddings num_gpus={num_gpus}")
+            corpus_embeddings = embed_with_cache(
+                "bert-base-uncased", 
+                dataset._fingerprint + "_documents", 
+                dataset,
+                document_key,
+                save_to_disk=True,
+                batch_size=2048,
+            )
+            corpus_embeddings = corpus_embeddings["embeds"].half().cpu()
+            print("[embed_with_cache] got corpus embeddings, remapping")
+
+        assert not corpus_embeddings.isnan().any(), "got nan corpus embeddings"
+        
+        # qidxs = torch.zeros(len(dataset), dtype=torch.long)
+        # qidxs[query_output_idxs] = torch.arange(len(dataset), dtype=torch.long)
+        # cidxs = torch.zeros(len(dataset), dtype=torch.long)
+        # cidxs[corpus_output_idxs] = torch.arange(len(dataset), dtype=torch.long)
+        # ##################################################################
+        # query_embeddings = query_embeddings[qidxs]
+        # corpus_embeddings = corpus_embeddings[cidxs]
+        avg_sim = (corpus_embeddings[:100] @ query_embeddings[:100].T).diag().mean()
+        print(f"[embed_with_cache] returning all embeddings => avg_sim={avg_sim:.2f}")
+        return query_embeddings, corpus_embeddings
+    
+    elif model == "nomic":
+        assert query_to_doc
+        dataset_fingerprint = dataset._fingerprint
+        num_gpus = torch.cuda.device_count()
+        if get_rank() == 0:
+            print(f"Embedding {len(dataset)} queries with {num_gpus} GPUs...")
+
+        # https://github.com/UKPLab/sentence-transformers/blob/87f4180d7d197d4a471d627afc788b62a81c0214/sentence_transformers/SentenceTransformer.py#L392
+        print("[embed_with_cache] computing query embeddings")
+        dataset.set_format("pt")
+        print("[embed_with_cache] embedding queries")
+        query_embeddings = embed_with_cache(
+            "nomic-ai/nomic-embed-text-v1", 
+            dataset_fingerprint + "_queries", 
+            dataset,
+            query_key,
+            save_to_disk=True,
+            batch_size=2048,
+        )
+        print("[embed_with_cache] halving query embeddings")
+        query_embeddings = query_embeddings["embeds"].half().cpu()
+        assert not query_embeddings.isnan().any(), "got nan query embeddings"
+    
+        if document_key == query_key:
+            print(f"[embed_with_cache] repeating corpus_embeddings num_gpus={num_gpus}")
+            corpus_embeddings = query_embeddings
+
+        else:
+            print(f"[embed_with_cache] computing corpus_embeddings num_gpus={num_gpus}")
+            corpus_embeddings = embed_with_cache(
+                "nomic-ai/nomic-embed-text-v1",
+                dataset._fingerprint + "_documents", 
+                dataset,
+                document_key,
+                save_to_disk=True,
+                batch_size=2048,
+            )
+            corpus_embeddings = corpus_embeddings["embeds"].half().cpu()
+            print("[embed_with_cache] got corpus embeddings, remapping")
+
+        assert not corpus_embeddings.isnan().any(), "got nan corpus embeddings"
         
         # qidxs = torch.zeros(len(dataset), dtype=torch.long)
         # qidxs[query_output_idxs] = torch.arange(len(dataset), dtype=torch.long)

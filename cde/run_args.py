@@ -147,7 +147,7 @@ class DataArguments:
         default="gtr_base",
         metadata={
             "help": "Model to use for clustering",
-            "choices": ["bm25", "gtr_base", "stella"],
+            "choices": ["bm25", "gtr_base", "bert", "stella"],
         }
     )
     clustering_query_to_doc: bool = field(
@@ -259,7 +259,6 @@ class TrainingArguments(transformers.TrainingArguments):
     remove_unused_columns: Optional[bool] = field(
         default=False, metadata={"help": "Remove columns not required by the model when using an nlp.Dataset."}
     )
-
     per_device_train_batch_size: int = field(
         default=64, metadata={"help": "Batch size per GPU/TPU core/CPU for training."}
     )

@@ -5,7 +5,11 @@ import functools
 import os
 
 import torch
+import torch.multiprocessing
 import transformers
+
+
+torch.multiprocessing.set_sharing_strategy('file_system')
 
 
 is_doc = lambda s: s.startswith('document_')
@@ -72,11 +76,12 @@ class TokenizedCollator(transformers.DataCollatorWithPadding):
                     # can't stack string, etc. -- just leave em
                     extra_keys.append(k)
         
-        cut_keys = [key.replace("input_ids", "") for key in out_ex.keys() if key.endswith("input_ids")]
-        for prefix in cut_keys:
-            out_ex = cut_padding(out_ex, self.tokenizer.pad_token_id, prefix=prefix)
+        # cut_keys = [key.replace("input_ids", "") for key in out_ex.keys() if key.endswith("input_ids")]
+        # for prefix in cut_keys:
+        #     out_ex = cut_padding(out_ex, self.tokenizer.pad_token_id, prefix=prefix)
 
         # for k in extra_keys: del out_ex[k]
+        # print("collator keys", dict(out_ex).keys())
         return dict(out_ex)
 
 
@@ -161,25 +166,25 @@ class DocumentQueryCollatorWithPadding(transformers.DataCollatorWithPadding):
         # tokenize documents.
         if len(document_batch):
             document_batch: Dict[str, torch.Tensor] = pad_batch_func(document_batch)
-            document_batch = cut_padding(document_batch, self.tokenizer.pad_token_id)
+            # document_batch = cut_padding(document_batch, self.tokenizer.pad_token_id)
             ex.update({f'document_{k}': v for k,v in document_batch.items()})
         
         # tokenize hard negative documents.
         if len(hn_document_batch):
             hn_document_batch: Dict[str, torch.Tensor] = pad_batch_func(hn_document_batch)
-            hn_document_batch = cut_padding(hn_document_batch, self.tokenizer.pad_token_id)
+            # hn_document_batch = cut_padding(hn_document_batch, self.tokenizer.pad_token_id)
             ex.update({f'negative_document_{k}': v for k,v in hn_document_batch.items()})
 
         # tokenize queries.
         if len(query_batch):
             query_batch: Dict[str, torch.Tensor] = pad_batch_func(query_batch)
-            query_batch = cut_padding(query_batch, self.tokenizer.pad_token_id)
+            # query_batch = cut_padding(query_batch, self.tokenizer.pad_token_id)
             ex.update({f'query_{k}': v for k,v in query_batch.items()})
 
         # tokenize dataset-level documents.
         if len(dataset_batch):
             dataset_batch: Dict[str, torch.Tensor] = pad_batch_func(dataset_batch)
-            dataset_batch = cut_padding(dataset_batch, self.tokenizer.pad_token_id)
+            # dataset_batch = cut_padding(dataset_batch, self.tokenizer.pad_token_id)
             ex.update({f'dataset_{k}': v for k,v in dataset_batch.items()})
         
         return ex

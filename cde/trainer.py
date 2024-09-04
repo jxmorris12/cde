@@ -17,11 +17,13 @@ from transformers.trainer_utils import speed_metrics
 from cde.dataset import BeirDataset
 from cde.gradcache import GradCache
 from cde.lib import (
-    gather, get_rank, get_world_size, 
+    gather,
+    get_rank,
+    get_world_size,
     inputs_for_key,
     print0,
-    verify_ddp_weights_equal, 
-    RerankHelper, 
+    verify_ddp_weights_equal,
+    RerankHelper,
     TensorRunningAverages
 )
 from cde.lib.trainer_hn_filtering import TrainerNegativeFilterMixin
@@ -78,6 +80,7 @@ class CustomTrainer(transformers.Trainer, TrainerNegativeFilterMixin):
             "random_document_input_ids", "random_document_attention_mask",
             "negative_document_input_ids", "negative_document_attention_mask",
             "query_input_ids", "query_attention_mask",
+            "query_embedding", "document_embedding",
         ]
         self.embedder_tokenizer = embedder_tokenizer 
         self.use_gc = self.args.use_gc # whether to use gradcache
@@ -89,7 +92,10 @@ class CustomTrainer(transformers.Trainer, TrainerNegativeFilterMixin):
 
         effective_batch_size = get_world_size() * self.args.per_device_train_batch_size
         self._memory_reset_step_frequency = int(2000 * effective_batch_size / 256)
-        self._hn_filter_model = None
+        if (self.args.hn_tune_threshold is not None) and (self.args.hn_tune_threshold >= 0.0):
+            self._init_hn_filter_model()
+         
+
     
     def _save(self, output_dir: Optional[str] = None, state_dict=None):
         super()._save(output_dir=output_dir, state_dict=state_dict)
@@ -130,7 +136,7 @@ class CustomTrainer(transformers.Trainer, TrainerNegativeFilterMixin):
 
         if self.use_gc:
             gc_bs = self.args.max_batch_size_fits_in_memory
-            print(f"[rank {get_rank()}] initializing GradCache with chunk_size={gc_bs}.")
+            print0(f"[rank {get_rank()}] initializing GradCache with chunk_size={gc_bs}.")
             self.gc = GradCache(
                 accelerator=self.accelerator,
                 chunk_sizes=[gc_bs, gc_bs],
@@ -234,8 +240,6 @@ class CustomTrainer(transformers.Trainer, TrainerNegativeFilterMixin):
                 "examples/train": train_table,
                 "examples/eval": eval_table,
             })
-        if (self.args.hn_tune_threshold is not None) and (self.args.hn_tune_threshold >= 0.0):
-            self._init_hn_filter_model()
         
         # Option to run eval at beginning of training
         run_eval_on_start_of_training = False
@@ -370,6 +374,7 @@ class CustomTrainer(transformers.Trainer, TrainerNegativeFilterMixin):
             negative_document_inputs
             dataset_inputs
         """
+        # print("inputs.keys() =>", inputs.keys())
         query_inputs = inputs_for_key(inputs, key="query")
         document_inputs = inputs_for_key(inputs, key="document")
         random_document_inputs = inputs_for_key(inputs, key="random_document")

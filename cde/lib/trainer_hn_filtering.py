@@ -1,6 +1,5 @@
-from typing import Tuple
+from typing import Optional, Tuple
 
-import gc
 import glob
 import os
 
@@ -27,12 +26,12 @@ def save_embeddings(embeddings: torch.Tensor, file_path: str):
     print(f"Saved {len(embeddings)} embeddings to {file_path}.")
 
 
-MAX_NUM_EMBEDDINGS_PER_SHARD = 10_000_000
+MAX_NUM_EMBEDDINGS_PER_SHARD = 2_000_000
 
 class TrainerNegativeFilterMixin:
     """Filters hard negatives based on another pre-trained model."""
-    _document_embedding_index = None
-    _query_embedding_index = None
+    _initialized = False
+    _hn_filter_model: Optional[torch.nn.Module] = None
     @property
     def _filename_dir(self) -> str:
         dirname = md5_hash_kwargs(
@@ -53,6 +52,7 @@ class TrainerNegativeFilterMixin:
         return os.path.join(self._filename_dir, "finished")
     
     def _init_hn_filter_model(self):
+        if self._initialized: return
         if self._hn_filter_model is None:
             if self.args.hn_filter_model == "nomic":
                 self._hn_filter_model = SentenceTransformer(
@@ -90,6 +90,8 @@ class TrainerNegativeFilterMixin:
                 self._hn_filter_model.max_seq_length = self.model.config.max_seq_length
             else:
                 raise ValueError(f"Unknown hn_filter_model: {self.args.hn_filter_model}")
+        
+        self._initialized = True
 
         if not self.args.hn_filter_precompute_vectors:
             return
@@ -101,15 +103,29 @@ class TrainerNegativeFilterMixin:
             self._precompute_hn_index()
         
         num_shards = len(glob.glob(os.path.join(self._filename_dir, "corpus_shard_*.parquet")))
-        document_embedding_index = datasets.load_dataset("parquet", data_files=[self._filename_doc_index(shard) for shard in range(num_shards)])["train"]
+        document_embedding_index = datasets.load_dataset(
+            "parquet", 
+            data_files=[self._filename_doc_index(shard) for shard in range(num_shards)], 
+            keep_in_memory=False
+        )["train"]
         document_embedding_index = document_embedding_index.rename_column("embeddings", "document_embedding")
         
-        query_embedding_index = datasets.load_dataset("parquet", data_files=[self._filename_query_index(shard) for shard in range(num_shards)])["train"]
+        query_embedding_index = datasets.load_dataset(
+            "parquet", 
+            data_files=[self._filename_query_index(shard) for shard in range(num_shards)]
+        )["train"]
         query_embedding_index = query_embedding_index.rename_column("embeddings", "query_embedding")
 
         og_fingerprint = self.train_dataset.dataset._fingerprint
-        self.train_dataset.dataset = datasets.concatenate_datasets([self.train_dataset.dataset, document_embedding_index, query_embedding_index], axis=1)
+        self.train_dataset.dataset = datasets.concatenate_datasets([
+            self.train_dataset.dataset, document_embedding_index, query_embedding_index],
+            axis=1
+        )
+        self.train_dataset.dataset.set_format(
+            type="torch"# , columns=["query_embedding", "document_embedding"]
+        )
         self.train_dataset.dataset._fingerprint = og_fingerprint
+        print0(f"[trainer_hn_filter] Loaded embedding index. Num cache files = {len(self.train_dataset.dataset.cache_files)}")
     
     @property
     def _inference_batch_size(self) -> int:
@@ -190,25 +206,26 @@ class TrainerNegativeFilterMixin:
             pass
         print0("[trainer_hn_filter] Saved index to disk.")
     
-    def _get_embeddings_sentence_transformers(self, query_inputs, document_inputs) -> Tuple[torch.Tensor, torch.Tensor]:
-        model = self._hn_filter_model
-        queries = query_inputs["text"]
-        docs = document_inputs["text"]
-        with torch.no_grad():
-            query_embeddings = model.encode(
-                queries,
-                batch_size=(self._inference_batch_size * 2),
-                convert_to_tensor=True
-            )
-            doc_embeddings = model.encode(
-                docs,    
-                batch_size=(self._inference_batch_size * 2),
-                convert_to_tensor=True
-            )
-        return query_embeddings, doc_embeddings
+    # def _get_embeddings_sentence_transformers(self, query_inputs, document_inputs) -> Tuple[torch.Tensor, torch.Tensor]:
+    #     self._init_hn_filter_model()
+    #     model = self._hn_filter_model
+    #     queries = query_inputs["text"]
+    #     docs = document_inputs["text"]
+    #     with torch.no_grad():
+    #         query_embeddings = model.encode(
+    #             queries,
+    #             batch_size=self._inference_batch_size,
+    #             convert_to_tensor=True
+    #         )
+    #         doc_embeddings = model.encode(
+    #             docs,    
+    #             batch_size=self._inference_batch_size,
+    #             convert_to_tensor=True
+    #         )
+    #     return query_embeddings, doc_embeddings
             
     def _get_embeddings_nomic(self, query_inputs, document_inputs) -> Tuple[torch.Tensor, torch.Tensor]:
-        from cde.lib.tensor import forward_batched
+        self._init_hn_filter_model()
     
         queries = query_inputs["text"]
         docs = document_inputs["text"]
@@ -232,6 +249,7 @@ class TrainerNegativeFilterMixin:
     
     def _get_embeddings_stella(self, query_inputs, document_inputs) -> Tuple[torch.Tensor, torch.Tensor]:
         # https://huggingface.co/dunzhang/stella_en_1.5B_v5
+        self._init_hn_filter_model()
         query_prompt_name = "s2p_query"
     
         queries = query_inputs["text"]
@@ -242,17 +260,20 @@ class TrainerNegativeFilterMixin:
             query_embeddings = model.encode(
                 queries,
                 prompt_name=query_prompt_name, 
-                batch_size=(self._inference_batch_size * 2),
+                batch_size=(self._inference_batch_size),
                 convert_to_tensor=True
             )
             doc_embeddings = model.encode(
                 docs,    
-                batch_size=(self._inference_batch_size * 2),
+                batch_size=(self._inference_batch_size),
                 convert_to_tensor=True
             )
         return query_embeddings, doc_embeddings
     
     def _get_embeddings(self, query_inputs, document_inputs) -> Tuple[torch.Tensor, torch.Tensor]:
+        # print("query_inputs.keys() =>", query_inputs.keys())
+        # print("document_inputs.keys() =>", document_inputs.keys())
+        # print()
         if ("embedding" in query_inputs) and ("embedding" in document_inputs):
             return query_inputs["embedding"], document_inputs["embedding"]
         if self.args.hn_filter_model == "stella":
@@ -264,6 +285,8 @@ class TrainerNegativeFilterMixin:
 
     def _get_query_doc_scores(self, query_inputs, document_inputs) -> torch.Tensor:
         query_embeddings, doc_embeddings = self._get_embeddings(query_inputs, document_inputs)
+        query_embeddings = query_embeddings.to(self.args.device)
+        doc_embeddings = doc_embeddings.to(self.args.device)
         if self.args.hn_filter_model == "stella":
             return self._hn_filter_model.similarity(query_embeddings, doc_embeddings)
         else:
