@@ -421,7 +421,7 @@ class TrainingArguments(transformers.TrainingArguments):
         ############################################################################
         self.dataloader_num_workers = num_workers
         self.dataloader_persistent_workers = False # (num_workers > 0) # This may have been giving me weird deadlocks.
-        self.dataloader_prefetch_factor = 4096 if (num_workers > 0) else None
+        self.dataloader_prefetch_factor = 32 if (num_workers > 0) else None
         self.dataloader_pin_memory = True
         today_date = datetime.date.today()
         formatted_date = today_date.strftime("%Y-%m-%d")
