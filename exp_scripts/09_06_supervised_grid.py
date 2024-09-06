@@ -21,7 +21,7 @@ executor.update_parameters(
     slurm_qos=os.environ["SLURM_QOS"]
 )
 
-command_str = "torchrun --nproc_per_node 8 finetune.py --per_device_train_batch_size {batch_size} --per_device_eval_batch_size 256 --use_wandb 1 --dataset nomic_supervised --sampling_strategy cluster_within_domain --num_train_epochs {epochs} --learning_rate {learning_rate} --embedder nomic-ai/nomic-embed-text-v1-unsupervised --clustering_model gtr_base --clustering_query_to_doc 1 --automatically_deduplicate_documents 0 --automatically_deduplicate_queries 0 --arch {architecture} --ddp_find_unused_parameters 0 --eval_rerank_topk {corpus_size} --lr_scheduler_type constant_with_warmup --warmup_steps 5600 --disable_dropout 1 --max_seq_length 32 --logging_steps 2000 --train_cluster_size {cluster_size} --eval_cluster_size 256 --use_prefix 1 --transductive_corpus_size {corpus_size} --save_steps 99999999999 --logit_scale 50 --max_eval_batches 16 --exp_name 2024-09-06-filter-biencoder-cluster-sweep-supervised--{batch_size}-{cluster_size} --exp_group 2024-09-06-filter-biencoder-cluster-sweep-supervised --ddp_share_negatives_between_gpus 0 --torch_compile 0 --use_gc 1 --fp16 0 --bf16 1 --eval_steps 40000 --limit_layers 6 --sampling_strategy {sampling_strategy} --overwrite_output_dir --max_batch_size_fits_in_memory 2048 --wandb_exit_if_running_or_finished 1 --hn_tune_threshold 1.0" 
+command_str = "torchrun --nproc_per_node 8 finetune.py --per_device_train_batch_size {batch_size} --per_device_eval_batch_size 256 --use_wandb 1 --dataset nomic_supervised --sampling_strategy cluster_within_domain --num_train_epochs {epochs} --learning_rate {learning_rate} --embedder nomic-ai/nomic-embed-text-v1-unsupervised --clustering_model gtr_base --clustering_query_to_doc 1 --automatically_deduplicate_documents 0 --automatically_deduplicate_queries 0 --arch {architecture} --ddp_find_unused_parameters 0 --eval_rerank_topk {corpus_size} --lr_scheduler_type constant_with_warmup --warmup_steps 5600 --disable_dropout 1 --max_seq_length 32 --logging_steps 2000 --train_cluster_size {cluster_size} --eval_cluster_size 256 --use_prefix 1 --transductive_corpus_size {corpus_size} --save_steps 99999999999 --logit_scale 50 --max_eval_batches 16 --exp_name 2024-09-06-filter-biencoder-cluster-sweep-supervised--{batch_size}-{cluster_size} --exp_group 2024-09-06-filter-biencoder-cluster-sweep-supervised --ddp_share_negatives_between_gpus 0 --torch_compile 0 --use_gc 1 --fp16 0 --bf16 1 --eval_steps 40000 --limit_layers 6 --sampling_strategy {sampling_strategy} --overwrite_output_dir --max_batch_size_fits_in_memory 1024 --wandb_exit_if_running_or_finished 1 --hn_tune_threshold 1.0 --hn_filter_model stella --hn_filter_precompute_vectors 1" 
 
 args_dict = {
     "architecture": ["biencoder"],
@@ -43,9 +43,9 @@ with executor.batch():
         print(f"Job {idx+1}/{len(args_list)}:", args)
         result_command = command_str.format(**args)
         function = submitit.helpers.CommandFunction(shlex.split(result_command))
-        print(result_command)
-        # job = executor.submit(function)
-        # jobs.append(job)
+        # print(result_command)
+        job = executor.submit(function)
+        jobs.append(job)
 
 print(f"*** SUBMITIT: Successfully submitted {len(jobs)} jobs. ***")
 

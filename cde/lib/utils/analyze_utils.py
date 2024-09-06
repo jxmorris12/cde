@@ -2,6 +2,7 @@ from typing import Optional, List
 
 import logging
 import os
+import pickle
 
 import torch
 import transformers
@@ -13,6 +14,15 @@ from cde.lib import load_embedder_and_tokenizer, ModelConfig
 from cde.model import get_model_class
 from cde.run_args import ModelArguments, DataArguments, TrainingArguments
 from cde.trainer import CustomTrainer
+
+
+class CustomUnpickler(pickle.Unpickler):
+    def find_class(self, module, name):
+        module = module.replace("spider", "cde")
+        return super().find_class(module, name)
+
+class CustomPickle:
+    Unpickler = CustomUnpickler
 
 
 def load_trainer_from_checkpoint_and_args(
@@ -30,9 +40,9 @@ def load_trainer_from_checkpoint_and_args(
         model_folder
     )
     if os.path.exists(os.path.join(checkpoint_path, "data_args.bin")):
-        data_args = torch.load(open(os.path.join(checkpoint_path, "data_args.bin"), "rb"), weights_only=False)
-        model_args = torch.load(open(os.path.join(checkpoint_path, "model_args.bin"), "rb"), weights_only=False)
-        training_args = torch.load(open(os.path.join(checkpoint_path, "training_args.bin"), "rb"), weights_only=False)
+        data_args = torch.load(open(os.path.join(checkpoint_path, "data_args.bin"), "rb"), weights_only=False, pickle_module=CustomPickle)
+        model_args = torch.load(open(os.path.join(checkpoint_path, "model_args.bin"), "rb"), weights_only=False, pickle_module=CustomPickle)
+        training_args = torch.load(open(os.path.join(checkpoint_path, "training_args.bin"), "rb"), weights_only=False, pickle_module=CustomPickle)
         model_args.embedding_output_dim = None # backwards compatibility :-)
         training_args.accelerator_config.gradient_accumulation_kwargs = None # backwards compatibility :-)
         training_args.use_wandb = 0
@@ -41,9 +51,6 @@ def load_trainer_from_checkpoint_and_args(
         
         from accelerate.state import PartialState
         training_args.distributed_state = PartialState()
-        # print("got device:", training_args.device, "//", training_args._setup_devices, training_args._n_gpu)
-        # print("//", training_args.distributed_state.device)
-        # TODO: Make this work proprly with DDP.
     else:
         raise RuntimeError("must have data_args.bin and model_args.bin available to load from disk")
     transformers.set_seed(training_args.seed)

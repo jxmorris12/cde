@@ -161,7 +161,7 @@ class TrainerNegativeFilterMixin:
     
     def _init_hn_filter_model(self):
         if self._initialized: return
-        if self._hn_filter_model is None:
+        if (self._hn_filter_model is None):
             if self.args.hn_filter_model == "nomic":
                 self._hn_filter_model = SentenceTransformer(
                     "nomic-ai/nomic-embed-text-v1", 
@@ -171,7 +171,7 @@ class TrainerNegativeFilterMixin:
                 self._hn_filter_model.to(self.args.device)
             elif self.args.hn_filter_model == "stella":
                 self._hn_filter_model = SentenceTransformer(
-                    "dunzhang/stella_en_1.5B_v5", 
+                    "dunzhang/stella_en_400M_v5", 
                     trust_remote_code=True, 
                     device="cuda" if torch.cuda.is_available() else "cpu",
                     model_kwargs={
@@ -179,7 +179,7 @@ class TrainerNegativeFilterMixin:
                         # "attn_implementation": "flash_attention_2",
                     }
                 )
-                print0(f"[trainer_hn_filter] Loaded model stella_en_1.5B_v5 and set max_seq_length to {self.model.config.max_seq_length}.")
+                print0(f"[trainer_hn_filter] Loaded model stella_en_400M_v5 and set max_seq_length to {self.model.config.max_seq_length}.")
                 self._hn_filter_model.max_seq_length = self.model.config.max_seq_length
             elif self.args.hn_filter_model == "sbert":
                 self._hn_filter_model = SentenceTransformer(
@@ -334,7 +334,7 @@ class TrainerNegativeFilterMixin:
         return query_embeddings, doc_embeddings
     
     def _get_embeddings_stella(self, query_inputs, document_inputs) -> Tuple[torch.Tensor, torch.Tensor]:
-        # https://huggingface.co/dunzhang/stella_en_1.5B_v5
+        # https://huggingface.co/dunzhang/stella_en_400M_v5
         self._init_hn_filter_model()
         query_prompt_name = "s2p_query"
     

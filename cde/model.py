@@ -484,7 +484,8 @@ class DatasetTransformer(transformers.PreTrainedModel):
         if config.disable_dropout:
             disable_dropout(self)
         
-        if self.config.transductive_tie_token_embeddings:
+        transductive_tie_token_embeddings = vars(self.config).get("transductive_tie_token_embeddings", False)
+        if transductive_tie_token_embeddings:
             self.second_stage_model.backbone.embeddings.word_embeddings.weight = (
                 self.first_stage_model.embedder.embeddings.word_embeddings.weight
             )

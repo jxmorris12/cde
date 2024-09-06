@@ -14,7 +14,6 @@ from cde.lib.utils import analyze_utils
 
 from mteb import MTEB
 from mteb import HFDataLoader
-# from cde.lib.eval.mteb import MTEB
 
 TASK_LIST_RETRIEVAL = [
     "HotpotQA",
