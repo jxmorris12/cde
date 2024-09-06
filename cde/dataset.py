@@ -21,15 +21,12 @@ import torch.multiprocessing as mp
 import tqdm
 
 from cde.lib import (
-    count_cpus,
     datasets_fast_load_from_disk,
     download_url, 
-    download_url_and_unzip, 
     get_cde_cache_dir,
     get_num_proc,
     get_rank,
     get_reranking_results,
-    get_world_size,
     print0
 )
 

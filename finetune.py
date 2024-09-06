@@ -116,7 +116,7 @@ def main():
 
     # transformers.logging.set_verbosity_error()
     # datasets.logging.set_verbosity_error()
-    datasets.utils.logging.disable_progress_bar()
+    datasets.utils.logging.enable_progress_bar()
 
     torch.set_float32_matmul_precision('high')
 

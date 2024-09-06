@@ -2,7 +2,6 @@ from typing import Optional, Tuple
 
 import glob
 import os
-import shutil
 
 import datasets
 import pyarrow as pa
@@ -48,7 +47,16 @@ class TrainerNegativeFilterMixin:
 
     @property
     def _scratch_filename_dir(self) -> str:
-        return os.path.join("/scratch", "jxm", "cde", "hn_embeddings", self._filename_hash)
+        return os.path.join(get_cde_cache_dir(), "hn_embeddings", self._filename_hash)
+        # return os.path.join("/scratch", "jxm", "cde", "hn_embeddings", self._filename_hash)
+
+    @property
+    def _scratch_filename_document(self) -> str:
+        return os.path.join(self._scratch_filename_dir, f"corpus_final.parquet")
+    
+    @property
+    def _scratch_filename_query(self) -> str:
+        return os.path.join(self._scratch_filename_dir, f"query_final.parquet")
 
     @property
     def _scratch_cache_dir(self) -> str:
@@ -73,16 +81,54 @@ class TrainerNegativeFilterMixin:
     def _move_hn_to_scratch(self):
         scratch_dir = self._scratch_filename_dir
         os.makedirs(scratch_dir, exist_ok=True)
-        fsx_files = glob.glob(os.path.join(self._filename_dir, "*.parquet"))
-        scratch_files = glob.glob(os.path.join(self._scratch_filename_dir, "*.parquet"))
-        if len(fsx_files) == len(scratch_files):
-            print0(f"[trainer_hn_filter] Found {len(fsx_files)} files hn on scratch at {scratch_dir}. Continuing.")
+        if os.path.exists(self._scratch_filename_document) and os.path.exists(self._scratch_filename_query):
+            print0(f"[trainer_hn_filter] Found query files hn on scratch at {scratch_dir}. Continuing.")
             return
         print0(f"[trainer_hn_filter] Moving hn to scratch at {scratch_dir}. This is a one-time operation on this machine.")
-        for file in tqdm_if_main_worker(fsx_files, desc="Moving hn to scratch (only happens once)", colour="blue"):
-            dest = os.path.join(scratch_dir, os.path.basename(file))
-            if os.path.exists(dest): continue
-            shutil.copy(file, dest)
+        
+        datasets.utils.enable_progress_bars()
+        
+        num_shards = len(glob.glob(os.path.join(self._filename_dir, "corpus_shard_*.parquet")))
+        if not os.path.exists(self._scratch_filename_document):
+            print0(f"[trainer_hn_filter] Loading document embeddings from {self._filename_dir}...")
+            document_embedding_index = datasets.load_dataset(
+                "parquet", 
+                data_files=[self._filename_doc_index(shard, scratch=False) for shard in range(num_shards)], 
+                keep_in_memory=False,
+                num_proc=32,
+            )["train"]
+            document_embedding_index = document_embedding_index.rename_column("embeddings", "document_embedding")
+            print0(f"[trainer_hn_filter] Loaded document embeddings from {self._filename_dir}...")
+            document_embedding_index = document_embedding_index.flatten_indices()
+            # document_embedding_index.set_format(type="torch")
+            num_cleaned_files = document_embedding_index.cleanup_cache_files()
+            document_embedding_index.save_to_disk(
+                self._scratch_filename_document, 
+                # max_shard_size="10MB",
+                # num_proc=32,
+            )
+            print0(f"[trainer_hn_filter] Cleaned {num_cleaned_files} files and saved document embeddings to {self._scratch_filename_document}.")
+
+        if not os.path.exists(self._scratch_filename_query):
+            print0(f"[trainer_hn_filter] Loading query embeddings from {self._filename_dir}...")
+            query_embedding_index = datasets.load_dataset(
+                "parquet", 
+                data_files=[self._filename_query_index(shard, scratch=False) for shard in range(num_shards)],
+                keep_in_memory=False,
+                num_proc=32,
+            )["train"]
+            # TODO: Make this faster by queries.save_to_disk(queries_path) and then loading it back in
+            query_embedding_index = query_embedding_index.rename_column("embeddings", "query_embedding")
+            print0(f"[trainer_hn_filter] Loaded query embeddings from {self._filename_dir}...")
+            query_embedding_index = query_embedding_index.flatten_indices()
+            # query_embedding_index.set_format(type="torch")
+            num_cleaned_files = query_embedding_index.cleanup_cache_files()
+            query_embedding_index.save_to_disk(
+                self._scratch_filename_query, 
+                # max_shard_size="10MB",
+                # num_proc=32,
+            )
+            print0(f"[trainer_hn_filter] Cleaned {num_cleaned_files} files and saved query embeddings to {self._scratch_filename_query}.")
 
     def _load_hn_index(self):
         if self._is_main_worker:
@@ -91,25 +137,15 @@ class TrainerNegativeFilterMixin:
             torch.distributed.barrier()
         except ValueError:
             pass # not in DDP
-        num_shards = len(glob.glob(os.path.join(self._filename_dir, "corpus_shard_*.parquet")))
-        document_embedding_index = datasets.load_dataset(
-            "parquet", 
-            data_files=[self._filename_doc_index(shard, scratch=True) for shard in range(num_shards)], 
-            cache_dir=self._scratch_cache_dir,
-            keep_in_memory=False,
-            num_proc=32,
-        )["train"]
-        document_embedding_index = document_embedding_index.rename_column("embeddings", "document_embedding")
         
-        query_embedding_index = datasets.load_dataset(
-            "parquet", 
-            data_files=[self._filename_query_index(shard, scratch=True) for shard in range(num_shards)],
-            cache_dir=self._scratch_cache_dir,
-            keep_in_memory=False,
-            num_proc=32,
-        )["train"]
-        # TODO: Make this faster by queries.save_to_disk(queries_path) and then loading it back in
-        query_embedding_index = query_embedding_index.rename_column("embeddings", "query_embedding")
+        document_embedding_index = datasets.load_from_disk(
+            self._scratch_filename_document, 
+            keep_in_memory=False
+        )
+        query_embedding_index = datasets.load_from_disk(
+            self._scratch_filename_query, 
+            keep_in_memory=False
+        )
 
         og_fingerprint = self.train_dataset.dataset._fingerprint
         self.train_dataset.dataset = datasets.concatenate_datasets([
@@ -117,10 +153,10 @@ class TrainerNegativeFilterMixin:
             axis=1
         )
         self.train_dataset.dataset.set_format(type="torch")
-        self.train_dataset.dataset.flatten_indices(
-            cache_file_name=os.path.join(self._scratch_cache_dir, self.train_dataset.dataset._fingerprint), 
-            writer_batch_size=20_000
-        )
+        # self.train_dataset.dataset.flatten_indices(
+        #     cache_file_name=os.path.join(self._scratch_cache_dir, self.train_dataset.dataset._fingerprint), 
+        #     writer_batch_size=20_000
+        # )
         self.train_dataset.dataset._fingerprint = og_fingerprint
     
     def _init_hn_filter_model(self):
@@ -182,6 +218,7 @@ class TrainerNegativeFilterMixin:
         return min(self.args.max_batch_size_fits_in_memory, self.args.per_device_train_batch_size)
         
     def _precompute_hn_index(self):
+        batch_size = self._inference_batch_size
         # Precompute vectors for hard negatives
         train_dataset_length = (len(self.train_dataset) // (batch_size * get_world_size())) * batch_size * get_world_size()
         print0(f"Precomputing embeddings for {len(self.train_dataset)} samples: {train_dataset_length} across {get_world_size()} workers and {len(self.train_dataset) - train_dataset_length} on self.")
@@ -239,6 +276,7 @@ class TrainerNegativeFilterMixin:
             if self._is_main_worker:
                 all_query_embeddings.extend(batch_query_embeddings.cpu().to(torch.float16).numpy().tolist())
                 all_doc_embeddings.extend(batch_doc_embeddings.cpu().to(torch.float16).numpy().tolist())
+        
         # Save the index to disk
         if self._is_main_worker:
             os.makedirs(self._filename_dir, exist_ok=True)
@@ -308,12 +346,12 @@ class TrainerNegativeFilterMixin:
             query_embeddings = model.encode(
                 queries,
                 prompt_name=query_prompt_name, 
-                batch_size=(self._inference_batch_size),
+                batch_size=self._inference_batch_size,
                 convert_to_tensor=True
             )
             doc_embeddings = model.encode(
                 docs,    
-                batch_size=(self._inference_batch_size),
+                batch_size=self._inference_batch_size,
                 convert_to_tensor=True
             )
         return query_embeddings, doc_embeddings
