@@ -101,6 +101,13 @@ def main():
         query_prefix="search_query: " if data_args.use_prefix else "",
         document_prefix="search_document: " if data_args.use_prefix else "",
     )
+    first_stage_mteb_encoder = DenseEncoder(
+        model_name_or_path=trainer.model.config.embedder,
+        encoder=trainer.model.first_stage_model,
+        max_seq_length=trainer.model.config.max_seq_length,
+        query_prefix="search_query: " if data_args.use_prefix else "",
+        document_prefix="search_document: " if data_args.use_prefix else "",
+    )
 
     for task_idx, task in enumerate(TASK_LIST_RETRIEVAL):
         print(f"Beginning {task} ({task_idx+1} / {len(TASK_LIST_RETRIEVAL)})")
@@ -115,6 +122,7 @@ def main():
         ##################################################
         results = evaluation.run(
             mteb_encoder, 
+            first_stage_model=first_stage_mteb_encoder,
             output_folder=os.path.join("results_mteb", args.model_key, str(args.cluster_size)),
             batch_size=512, 
             corpus_chunk_size=500_000,

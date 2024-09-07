@@ -27,10 +27,12 @@ class DenseRetrievalExactSearch:
         batch_size: int = 128,
         corpus_chunk_size: int = 50000,
         previous_results: str = None,
+        first_stage_model=None,
         **kwargs,
     ):
         # Model is class that provides encode_corpus() and encode_queries()
         self.model = model
+        self.first_stage_model = first_stage_model
         self.batch_size = batch_size
         self.score_functions = {"cos_sim": cos_sim, "dot": dot_score}
         self.score_function_desc = {
@@ -56,7 +58,9 @@ class DenseRetrievalExactSearch:
     def search(
         self,
         corpus: dict[str, dict[str, str]],
+        corpus_cluster_ids: dict[int, List[str]],
         queries: dict[str, str],
+        query_cluster_ids: dict[str, int],
         top_k: int,
         score_function: str,
         return_sorted: bool = False,
@@ -79,13 +83,38 @@ class DenseRetrievalExactSearch:
 
         # Do clustering here.
         breakpoint()
+        relevant_doc_ids = set(
+            doc_id
+            for c_id in query_cluster_ids.values() 
+            for doc_id in corpus_cluster_ids[c_id]
+        )
+        relevant_docs = [corpus[doc_id] for doc_id in relevant_doc_ids]
+        relevant_doc_embeddings = self.first_stage_model.encode_documents(
+            relevant_docs,
+            batch_size=self.batch_size,
+            show_progress_bar=self.show_progress_bar,
+            convert_to_tensor=self.convert_to_tensor,
+        )
+        relevant_docs_idx = { i: doc_id for i, doc_id in enumerate(relevant_doc_ids) }
+
+        # Get first-stage embeddings for 
+        # all relevant documents
+        query_dataset_embeddings = []
+        for q_id in queries.keys():
+            query_dataset_embeddings.append(
+                torch.stack([
+                    relevant_doc_embeddings[relevant_docs_idx[c_id]]
+                    for c_id in query_cluster_ids[q_id]
+                ])
+            )
+        query_dataset_embeddings = torch.stack(query_dataset_embeddings)
 
         query_embeddings = self.model.encode_queries(
             queries,
             batch_size=self.batch_size,
             show_progress_bar=self.show_progress_bar,
             convert_to_tensor=self.convert_to_tensor,
-            **kwargs,
+            dataset_embeddings=query_dataset_embeddings,
         )
 
         logger.info("Sorting Corpus by document length (Longest first)...")
@@ -105,6 +134,12 @@ class DenseRetrievalExactSearch:
 
         itr = range(0, len(corpus), self.corpus_chunk_size)
 
+        # Reverse corpus mapping
+        doc_clusters = {}
+        for cluster_id, doc_ids in corpus_cluster_ids.items():
+            for doc_id in doc_ids:
+                doc_clusters[doc_id] = cluster_id
+
         result_heaps = {
             qid: [] for qid in query_ids
         }  # Keep only the top-k docs for each query
@@ -122,6 +157,19 @@ class DenseRetrievalExactSearch:
                     self.corpus_embeddings[kwargs["qid"]][batch_num]
                 )
             else:
+                # Get doc dataset embeddings
+                doc_dataset_embeddings = []
+                for doc_id in sub_corpus_ids:
+                    cluster_id = doc_clusters[doc_id]
+                    sub_dataset_embeddings = []
+                    for cdoc_id in corpus_cluster_ids[cluster_id]:
+                        sub_dataset_embeddings.append(
+                            relevant_doc_embeddings[relevant_docs_idx[cdoc_id]]
+                        )
+                    sub_dataset_embeddings = torch.stack(sub_dataset_embeddings)
+                    doc_dataset_embeddings.append(sub_dataset_embeddings)
+                doc_dataset_embeddings = torch.stack(doc_dataset_embeddings)
+
                 # Encode chunk of corpus
                 sub_corpus = corpus[corpus_start_idx:corpus_end_idx]
                 sub_corpus_ids = corpus_ids[corpus_start_idx:corpus_end_idx]
@@ -132,6 +180,7 @@ class DenseRetrievalExactSearch:
                     batch_size=self.batch_size,
                     show_progress_bar=self.show_progress_bar,
                     convert_to_tensor=self.convert_to_tensor,
+                    dataset_embeddings=doc_dataset_embeddings,
                 )
                 if self.save_corpus_embeddings and "qid" in kwargs:
                     self.corpus_embeddings[kwargs["qid"]].append(sub_corpus_embeddings)
@@ -284,30 +333,6 @@ class DenseRetrievalExactSearch:
         raise NotImplementedError(
             "You must implement a predict method for your reranker model"
         )
-    
-    def _encode_first_stage(
-            self,
-            neighbor_sentence_ids,
-            full_corpus,
-            batch_size: int
-        ):
-        nbr_ids = list(set(n for n_list in neighbor_sentence_ids for n in n_list))
-        minicorpus = [full_corpus[_id] for _id in ids_set]
-        # TODO: Hack this less
-        self.model.model_is_on_device = False
-        prev_model_on_device = self.model.model_is_on_device
-        prev_encoder = self.model.encoder
-        self.model.encoder = self.first_stage_model
-        encodings = self.model.encode(minicorpus)
-        encodings_dict = zip(nbr_ids, encodings)
-        dataset_embeddings = torch.stack([
-            torch.stack([encodings_dict[n_id] for n_id in n_list])
-            for n_list in nbr_ids
-        ])
-        self.model.model_is_on_device = prev_model_on_device
-        self.model.encoder = prev_encoder
-        return dataset_embeddings
-
 
     def encode_corpus(self, 
             corpus: List[Dict[str, str]], 
@@ -345,21 +370,7 @@ class DenseRetrievalExactSearch:
             # can't just delete, cuz assign by reference on kwargs
             new_kwargs = kwargs
         
-        # TODO: Argparse for topk
-        # TODO: Do something non-random
-        neighbor_topk = 256
-        neighbor_sentence_ids = [
-            random.choices(len(full_corpus), k=neighbor_topk)
-        ]
-        dataset_embeddings = self._encode_first_stage(
-            neighbor_sentence_ids,
-            full_corpus,
-            batch_size=batch_size,
-        )
-        first_stage_embeddings = self.model.encode_first_stage(
-            sentences=neighbor_sentences,
-            batch_size=batch_size,
-        )
+        
         corpus_embeddings = self.model.encode_second_stage(
             sentences, 
             first_stage_embeddings=first_stage_embeddings, 
@@ -397,23 +408,24 @@ class RetrievalEvaluator(Evaluator):
         retriever=None,
         k_values: List[int] = [1, 3, 5, 10, 20, 100, 1000],
         score_function: str = "cos_sim",
+        first_stage_model=None,
         **kwargs,
     ):
         super().__init__(**kwargs)
         self.is_cross_encoder = False
         if is_cross_encoder_compatible(retriever):
+            assert False
             logger.info(
                 "The custom predict function of the model will be used if not a SentenceTransformer CrossEncoder"
             )
             self.retriever = DenseRetrievalExactSearch(retriever, **kwargs)
             self.is_cross_encoder = True
-        elif is_dres_compatible(retriever):
+        else: 
+            assert is_dres_compatible(retriever)
             logger.info(
                 "The custom encode_queries and encode_corpus functions of the model will be used"
             )
-            self.retriever = DenseRetrievalExactSearch(retriever, **kwargs)
-        else:
-            self.retriever = DenseRetrievalExactSearch(DRESModel(retriever), **kwargs)
+            self.retriever = DenseRetrievalExactSearch(retriever, first_stage_model=first_stage_model, **kwargs)
         self.k_values = k_values
         self.top_k = (
             max(k_values) if "top_k" not in kwargs else kwargs["top_k"]
@@ -421,16 +433,28 @@ class RetrievalEvaluator(Evaluator):
         self.score_function = score_function
 
     def __call__(
-        self, corpus: dict[str, dict[str, str]], queries: dict[str, str],
+        self, 
+        corpus: dict[str, dict[str, str]],
+        corpus_cluster_ids: dict[int, List[str]],
+        queries: dict[str, str],
+        query_cluster_ids: dict[str, int],
     ) -> dict[str, dict[str, float]]:
         if not self.retriever:
             raise ValueError("Model/Technique has not been provided!")
 
         if self.is_cross_encoder:
-            return self.retriever.search_cross_encoder(corpus, queries, self.top_k)
+            assert False # not currently supported
+            return self.retriever.search_cross_encoder(
+                corpus, queries, self.top_k
+            )
         else:
             return self.retriever.search(
-                corpus, queries, self.top_k, self.score_function
+                corpus, 
+                corpus_cluster_ids, 
+                queries, 
+                query_cluster_ids,
+                self.top_k, 
+                self.score_function
             )
 
     @staticmethod

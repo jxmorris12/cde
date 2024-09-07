@@ -218,6 +218,7 @@ class MTEB:
     def run(
         self,
         model,
+        first_stage_model=None,
         verbosity=1,
         output_folder="results/result",
         eval_splits=None,
@@ -300,7 +301,11 @@ class MTEB:
             for split in task_eval_splits:
                 tick = time()
                 results = task.evaluate(
-                    model, split, output_folder=output_folder, **kwargs
+                    model, 
+                    split=split, 
+                    output_folder=output_folder, 
+                    first_stage_model=first_stage_model, 
+                    **kwargs
                 )
                 tock = time()
                 logger.info(

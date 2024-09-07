@@ -4,6 +4,7 @@ import json
 import logging
 import math
 import os
+import pickle
 
 from collections import defaultdict
 from time import time
@@ -14,6 +15,7 @@ import datasets
 from datasets import Features, Value, load_dataset
 import numpy as np
 import torch
+import tqdm
 
 from ..evaluation.evaluators import RetrievalEvaluator
 from .AbsTask import AbsTask
@@ -42,26 +44,26 @@ def cluster_corpus_uncached(
         seed=42,
     )
     # Compute centroids and per-id assignments.
-    breakpoint()
     centroids = []
     cluster_ids = {}
     for i in range(num_clusters):
-        cluster_idxs = np.where(assignments == 0)[0]
-        cluster_ids = corpus_ds.select(cluster_idxs)["id"]
+        cluster_idxs = np.where(assignments == i)[0]
         centroid = embedding_ds.select(cluster_idxs)["embeds"].mean(dim=0)
         centroids.append(centroid)
-        cluster_ids[i] = cluster_ids
+        cluster_ids[i] = corpus_ds.select(cluster_idxs)["id"]
     
     centroids = torch.stack(centroids).numpy()
     return centroids, cluster_ids
 
 def cluster_corpus(
-    corpus_ds: datasets.Dataset,
-    embedding_ds: datasets.Dataset,
-    cluster_size: int) -> Tuple[torch.Tensor, Dict[int, List[str]]]:
+        corpus_ds: datasets.Dataset,
+        embedding_ds: datasets.Dataset,
+        cluster_size: int
+    ) -> Tuple[torch.Tensor, Dict[int, List[str]]]:
     cache_dir = os.path.join(
         get_cde_cache_dir(),
-        "mteb_cache", "cluster"
+        "mteb_cache", 
+        "cluster"
     )
     os.makedirs(cache_dir, exist_ok=True)
     cache_file = os.path.join(
@@ -69,15 +71,22 @@ def cluster_corpus(
         f"{corpus_ds._fingerprint}_{cluster_size}_clusters"
     )
     if os.path.exists(cache_file):
-        data = np.load(cache_file)
+        print(f"[AbsTaskRetrieval] Loading cached cluster data from {cache_file}")
+        data = pickle.load(open(cache_file, "rb"))
         centroids = data["centroids"]
         cluster_ids = data["cluster_ids"]
     else:
-        centroids, cluster_ids = cluster_corpus_uncached(corpus_ds, embedding_ds, cluster_size)
-        np.savez_compressed(
-            cache_file,
-            centroids=centroids,
-            cluster_ids=cluster_ids,
+        centroids, cluster_ids = cluster_corpus_uncached(
+            corpus_ds, 
+            embedding_ds, 
+            cluster_size
+        )
+        pickle.dump(
+            {
+                "centroids": centroids,
+                "cluster_ids": cluster_ids,
+            },
+            open(cache_file, "wb"),
         )
     return torch.tensor(centroids), cluster_ids
 
@@ -170,23 +179,45 @@ class HFDataLoader:
 
         self.qrels.map(qrels_dict_init)
         self.qrels = qrels_dict
-        self.queries = self.queries.filter(lambda x: x["id"] in self.qrels)
+        self.queries = self.queries.filter(lambda x: x["id"] in self.qrels).flatten_indices()
         logger.info("Loaded %d %s Queries.", len(self.queries), split.upper())
         logger.info("Query Example: %s", self.queries[0])
 
-        return self.corpus, self.queries, self.qrels
+        # queries MIPS
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        query_embeddings = self._embed(self.queries, key="query")["embeds"]
+        query_embeddings /= query_embeddings.norm(p=2, dim=1, keepdim=True)
+        qe = query_embeddings.to(device)
+        ce = self.corpus_cluster_centroids.to(device)
+        query_cluster_ids = {}
+        for i in tqdm.trange(len(qe), desc="Query MIPS", colour="red", leave=False):
+            # Dataset is formatted in a weird way so I have to do this instead of self.queries[i].
+            query_id = self.queries.select([i])["id"][0]
+            centroid_idx = (qe[i] @ ce.T).argmax(dim=0).item()
+            query_cluster_ids[query_id] = centroid_idx
+        breakpoint()
 
-    def _embed(self, dataset: datasets.Dataset) -> torch.Tensor:
+        return (
+            self.corpus, 
+            self.queries, 
+            self.qrels, 
+            self.corpus_cluster_ids,
+            query_cluster_ids
+        )
+
+    def _embed(self, dataset: datasets.Dataset, key: str) -> torch.Tensor:
         # TODO implement true embedding & caching
         # TODO determine the best data structure for this? maybe use faiss?
-        return embed_with_cache(
+        embeddings = embed_with_cache(
             self.cluster_embedder,
-            dataset._fingerprint + "_queries", 
+            dataset._fingerprint + "_" + key, 
             dataset,
             "text",
             save_to_disk=True,
             batch_size=2048,
         )
+        assert len(embeddings) == len(dataset)
+        return embeddings
 
     def load_corpus(self) -> dict[str, dict[str, str]]:
         if not self.hf_repo:
@@ -226,11 +257,15 @@ class HFDataLoader:
             ]
         )
         self.corpus = corpus_ds
-        self.corpus_embeddings = self._embed(self.corpus)
+        corpus_embeddings_ds = self._embed(self.corpus, key="corpus")
+        corpus_embeddings = corpus_embeddings_ds["embeds"]
+        corpus_embeddings /= corpus_embeddings.norm(p=2, dim=1, keepdim=True)
+        self.corpus_embeddings = corpus_embeddings
+
         self.corpus_cluster_centroids, self.corpus_cluster_ids = (
-                cluster_corpus(
+            cluster_corpus(
                 corpus_ds=corpus_ds,
-                embedding_ds=self.corpus_embeddings, 
+                embedding_ds=corpus_embeddings_ds, 
                 cluster_size=self.cluster_size
             )
         )
@@ -251,13 +286,12 @@ class HFDataLoader:
                 keep_in_memory=self.keep_in_memory,
             )
         queries_ds = next(iter(queries_ds.values()))  # get first split
-        queries_ds = queries_ds.cast_column("_id", Value("string"))
+        # queries_ds = queries_ds.cast_column("_id", Value("string"))
         queries_ds = queries_ds.rename_column("_id", "id")
-        queries_ds = queries_ds.remove_columns(
-            [col for col in queries_ds.column_names if col not in ["id", "text"]]
-        )
+        # queries_ds = queries_ds.remove_columns(
+        #     [col for col in queries_ds.column_names if col not in ["id", "text"]]
+        # )
         self.queries = queries_ds
-        self.query_embeddings = self._embed(self.queries)
 
     def _load_qrels(self, split):
         if self.hf_repo:
@@ -309,23 +343,27 @@ class AbsTaskRetrieval(AbsTask):
         if self.data_loaded:
             return
         self.corpus, self.queries, self.relevant_docs = {}, {}, {}
+        self.corpus_cluster_ids = {}
+        self.query_cluster_ids = {}
         self.corpus_ds, self.queries_ds = {}, {}
         dataset_path = self.metadata_dict["dataset"]["path"]
         hf_repo_qrels = (
             dataset_path + "-qrels" if "clarin-knext" in dataset_path else None
         )
         for split in kwargs.get("eval_splits", self.metadata_dict["eval_splits"]):
-            corpus, queries, qrels = HFDataLoader(
-                hf_repo=dataset_path,
-                hf_repo_qrels=hf_repo_qrels,
-                streaming=False,
-                keep_in_memory=False,
-                cluster_embedder=self.cluster_embedder,
-                cluster_size=self.cluster_size,
-            ).load(split=split)
+            (corpus, queries, qrels, cluster_ids, query_cluster_ids) = (
+                HFDataLoader(
+                    hf_repo=dataset_path,
+                    hf_repo_qrels=hf_repo_qrels,
+                    streaming=False,
+                    keep_in_memory=False,
+                    cluster_embedder=self.cluster_embedder,
+                    cluster_size=self.cluster_size,
+                ).load(split=split)
+            )
             # Conversion from DataSet
             self.corpus_ds[split], self.queries_ds[split] = corpus, queries
-            queries = {query["id"]: query["text"] for query in queries}
+            queries = dict(zip(queries["id"], queries["text"]))
             corpus = {
                 doc["id"]: {"title": doc["title"], "text": doc["text"]}
                 for doc in corpus
@@ -335,11 +373,17 @@ class AbsTaskRetrieval(AbsTask):
                 queries,
                 qrels,
             )
+            self.corpus_cluster_ids[split] = cluster_ids
+            self.query_cluster_ids[split] = query_cluster_ids
 
         self.data_loaded = True
 
-    def evaluate(self, model, split="test", **kwargs):
-        retriever = RetrievalEvaluator(model, **kwargs)
+    def evaluate(self, model, split="test", first_stage_model=None, **kwargs):
+        retriever = RetrievalEvaluator(
+            model,
+            first_stage_model=first_stage_model,
+            **kwargs
+        )
 
         scores = {}
     
@@ -348,16 +392,33 @@ class AbsTaskRetrieval(AbsTask):
             self.queries[split],
             self.relevant_docs[split],
         )
+        corpus_cluster_ids = self.corpus_cluster_ids[split]
+        query_cluster_ids = self.query_cluster_ids[split]
+
         scores = self._evaluate_split(
-            retriever, corpus, queries, relevant_docs, None, **kwargs
+            retriever, 
+            corpus, 
+            corpus_cluster_ids, 
+            queries, 
+            query_cluster_ids, 
+            relevant_docs, 
+            None, 
+            **kwargs
         )
         return scores
 
     def _evaluate_split(
-        self, retriever, corpus, queries, relevant_docs, lang=None, **kwargs
+        self, 
+        retriever,
+        corpus, 
+        corpus_cluster_ids,
+        queries, 
+        query_cluster_ids,
+        relevant_docs, 
+        lang=None, **kwargs
     ):
         start_time = time()
-        results = retriever(corpus, queries)
+        results = retriever(corpus, corpus_cluster_ids, queries, query_cluster_ids)
         end_time = time()
         logger.info(
             "Time taken to retrieve: {:.2f} seconds".format(end_time - start_time)

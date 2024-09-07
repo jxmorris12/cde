@@ -29,6 +29,7 @@ class AbsTask(ABC):
         
         self.cluster_embedder = kwargs.get("cluster_embedder", None)
         self.cluster_size = kwargs.get("cluster_size", None)
+        # self.first_stage_model = kwargs.get("first_stage_model", None)
 
         self.seed = seed
         random.seed(self.seed)
