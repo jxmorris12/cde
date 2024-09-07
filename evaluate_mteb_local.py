@@ -86,7 +86,7 @@ def parse_args() -> argparse.ArgumentParser:
 def main():
     args = parse_args()
     model_folder = MODEL_FOLDER_DICT[args.model_key]
-    trainer, (model_args, data_args, training_args) = analyze_utils.load_trainer_from_checkpoint_and_args(
+    trainer, (_model_args, data_args, _training_args) = analyze_utils.load_trainer_from_checkpoint_and_args(
         model_folder=model_folder,
         load_from_checkpoint=True,
         return_args=True
@@ -125,14 +125,16 @@ def main():
             first_stage_model=first_stage_mteb_encoder,
             output_folder=os.path.join("results_mteb", args.model_key, str(args.cluster_size)),
             batch_size=512, 
-            corpus_chunk_size=500_000,
+            # corpus_chunk_size=500,
+            corpus_chunk_size=10_000,
+            # corpus_chunk_size=50_000,
             verbosity=2,
             eval_splits=[split]
         )
         print(task)
         print("\t", results)
         if len(results):
-            print("NDCG@10 =>", results[task]['ndcg_at_10'])
+            print("NDCG@10 =>", results[task][split]['ndcg_at_10'])
         print()
     
 

@@ -89,7 +89,7 @@ class DenseRetrievalExactSearch:
             batch_size=self.batch_size,
             show_progress_bar=self.show_progress_bar,
             convert_to_tensor=self.convert_to_tensor,
-        )
+        ).cpu()
         all_docs_idx = { doc_id: i for i, doc_id in enumerate(all_doc_ids) }
 
         transductive_corpus_size = self.model.encoder.config.transductive_corpus_size
@@ -113,8 +113,8 @@ class DenseRetrievalExactSearch:
 
         query_text = [queries[qid] for qid in query_ids]
         query_text_ds = datasets.Dataset.from_dict({ 
-            "text": query_text, 
-            "dataset_embeddings": query_dataset_embeddings 
+                "text": query_text, 
+                "dataset_embeddings": query_dataset_embeddings 
             }
         )
         query_text_ds.set_format("torch")
@@ -166,33 +166,47 @@ class DenseRetrievalExactSearch:
                 )
             else:
                 # Get doc dataset embeddings
-                doc_dataset_embeddings = []
                 sub_corpus_ids = corpus_ids[corpus_start_idx:corpus_end_idx]
-                for doc_id in sub_corpus_ids:
-                    cluster_id = doc_clusters[doc_id]
-                    sub_dataset_embeddings = []
-                    nn_ids = corpus_cluster_ids[cluster_id]
-                    if len(nn_ids) < transductive_corpus_size:
-                        n_additional_docs = transductive_corpus_size - len(nn_ids)
-                        nn_ids += random.sample(list(all_doc_ids), n_additional_docs)
-                    nn_ids = nn_ids[:transductive_corpus_size]
-                    sub_dataset_embeddings.append(
-                        torch.stack([
-                            all_doc_embeddings[all_docs_idx[nn_id]]
-                            for nn_id in nn_ids
-                        ])
-                    )
-                    sub_dataset_embeddings = torch.stack(sub_dataset_embeddings)
-                    doc_dataset_embeddings.append(sub_dataset_embeddings)
 
                 # Encode chunk of corpus
                 sub_corpus = corpus_text[corpus_start_idx:corpus_end_idx]
                 def sub_corpus_gen():
-                    for doc, e in zip(sub_corpus, doc_dataset_embeddings):
-                        yield { "text": '{} {}'.format(doc.get('title', ''), doc['text']).strip(), "dataset_embeddings": e }
-                sub_corpus_ds = datasets.Dataset.from_generator(
-                    sub_corpus_gen, keep_in_memory=True)
-                sub_corpus_ds.set_format("torch")
+                    # for doc_id in tqdm.tqdm(sub_corpus_ids, desc="stacking doc embeddings", colour="green"):
+                    doc_dataset_embeddings = []
+                    for doc_id in sub_corpus_ids:
+                        cluster_id = doc_clusters[doc_id]
+                        sub_dataset_embeddings = []
+                        nn_ids = corpus_cluster_ids[cluster_id]
+                        if len(nn_ids) < transductive_corpus_size:
+                            n_additional_docs = transductive_corpus_size - len(nn_ids)
+                            nn_ids += random.sample(list(all_doc_ids), n_additional_docs)
+                        nn_ids = nn_ids[:transductive_corpus_size]
+                        sub_dataset_embeddings.append(
+                            torch.stack([
+                                all_doc_embeddings[all_docs_idx[nn_id]]
+                                for nn_id in nn_ids
+                            ])
+                        )
+                        sub_dataset_embeddings = torch.stack(sub_dataset_embeddings)
+                        doc_dataset_embeddings.append(sub_dataset_embeddings)
+                    
+                    doc = corpus[doc_id]
+                    yield { 
+                        "text": '{} {}'.format(doc.get('title', ''), doc['text']).strip(), 
+                        "dataset_embeddings": torch.stack(doc_dataset_embeddings)
+                    }
+
+                print(f"creating dataset from {len(sub_corpus)} docs/embeddings")
+                sub_corpus_ds = datasets.IterableDataset.from_generator(
+                    sub_corpus_gen
+                )
+                sub_corpus_ds = sub_corpus_ds.with_format("torch")
+                # sub_corpus_ds = datasets.Dataset.from_dict({ 
+                #     "text": ['{} {}'.format(doc.get('title', ''), doc['text']).strip() for doc in sub_corpus], 
+                #     "dataset_embeddings": torch.cat(doc_dataset_embeddings)
+                # })
+                # sub_corpus_ds.set_format("torch")
+                print(f"created IterableDataset from {len(sub_corpus)} docs/embeddings")
                 sub_corpus_embeddings = self.model.encode_corpus(
                     sub_corpus_ds,
                     batch_size=self.batch_size,

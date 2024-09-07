@@ -171,27 +171,38 @@ class DenseEncoder(torch.nn.Module):
                 raise RuntimeError("unknown dataset format to encode")
         
         os.environ["TOKENIZERS_PARALLELISM"] = "0"
-        dataset.set_transform(
-            functools.partial(
-                self.tokenize_transform, 
-                prefix=prefix,
-                col=col, 
-                max_length=self.max_length,
-            )
+
+        tokenize_fn = functools.partial(
+            self.tokenize_transform, 
+            prefix=prefix,
+            col=col, 
+            max_length=self.max_length,
         )
+        if isinstance(dataset, datasets.IterableDataset):
+            dataset = dataset.map(tokenize_fn, batched=True)
+            dataset = dataset.remove_columns([col])
+        else:
+            dataset.set_transform(tokenize_fn)
         data_collator = transformers.DataCollatorWithPadding(self.tokenizer, pad_to_multiple_of=8)
         effective_batch_size = (batch_size * max(1, self.gpu_count))
         num_workers = len(os.sched_getaffinity(0))
-        effective_batch_size = min(effective_batch_size, max(1, len(dataset) // num_workers))
 
-        print(f"[DenseEncoder] created dataloader with {num_workers} workers, effective_batch_size={effective_batch_size}, len(dataset)={len(dataset)}")
+        try:
+            len_dataset = len(dataset)
+            effective_batch_size = min(effective_batch_size, max(1, len(dataset) // num_workers))
+        except TypeError:
+            # iterable dataset has no len
+            len_dataset = "unknown"
+            effective_batch_size = batch_size
+
+        print(f"[DenseEncoder] created dataloader with {num_workers} workers, effective_batch_size={effective_batch_size}, len(dataset)={len_dataset}")
         return torch.utils.data.DataLoader(
             dataset,
             batch_size=effective_batch_size,
             shuffle=False,
             drop_last=False,
             num_workers=num_workers, 
-            prefetch_factor=4,
+            prefetch_factor=(4 if num_workers > 0 else None),
             collate_fn=data_collator,
             persistent_workers=False,
             pin_memory=True
@@ -225,8 +236,13 @@ class DenseEncoder(torch.nn.Module):
         )
         self._consider_putting_model_on_device()
 
-        show_progress_bar = (len(dataset) >= 128) and show_progress_bar
-        print(f"[DenseEncoder] encode() calling embed_dataloader (len(dataset)={len(dataset)}, convert_to_tensor={convert_to_tensor})")
+        try: 
+            len_dataset = len(dataset)
+        except TypeError:
+            len_dataset = 0
+
+        show_progress_bar = (len_dataset >= 128) and show_progress_bar
+        print(f"[DenseEncoder] encode() calling embed_dataloader (len(dataset)={len_dataset}, convert_to_tensor={convert_to_tensor})")
         encoded_embeds = embed_dataloader(
             self.encoder,
             data_loader, 
