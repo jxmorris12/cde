@@ -12,8 +12,7 @@ from typing import Dict, List, Tuple
 import pytrec_eval
 import torch
 import tqdm
-from sentence_transformers import CrossEncoder, SentenceTransformer
-from sentence_transformers.models import Transformer, WordEmbeddings
+from sentence_transformers import CrossEncoder
 
 from .Evaluator import Evaluator
 from .utils import cos_sim, dot_score, download, hole, mrr, recall_cap, top_k_accuracy
@@ -84,35 +83,33 @@ class DenseRetrievalExactSearch:
 
         # Do clustering here.
         all_doc_ids = list(corpus.keys())
-        relevant_doc_ids = set(
-            doc_id
-            for c_id in query_cluster_ids.values() 
-            for doc_id in corpus_cluster_ids[c_id]
-        )
-        relevant_docs = [corpus[doc_id] for doc_id in relevant_doc_ids]
-        relevant_doc_embeddings = self.first_stage_model.encode_corpus(
-            relevant_docs,
+        all_docs = [corpus[doc_id] for doc_id in all_doc_ids]
+        all_doc_embeddings = self.first_stage_model.encode_corpus(
+            all_docs,
             batch_size=self.batch_size,
             show_progress_bar=self.show_progress_bar,
             convert_to_tensor=self.convert_to_tensor,
         )
-        relevant_docs_idx = { doc_id: i for i, doc_id in enumerate(relevant_doc_ids) }
+        all_docs_idx = { doc_id: i for i, doc_id in enumerate(all_doc_ids) }
+
+        transductive_corpus_size = self.model.encoder.config.transductive_corpus_size
 
         # Get first-stage embeddings for 
         # all relevant documents
         query_dataset_embeddings = []
         for q_id in queries.keys():
             nn_ids = corpus_cluster_ids[query_cluster_ids[q_id]]
-            if len(nn_ids) < self.model.encoder.config.transductive_corpus_size:
-                n_additional_docs = self.model.encoder.config.transductive_corpus_size - len(nn_ids)
-                nn_ids += random.sample(all_doc_ids, n_additional_docs)
+            if len(nn_ids) < transductive_corpus_size:
+                n_additional_docs = transductive_corpus_size - len(nn_ids)
+                nn_ids += random.sample(list(all_doc_ids), n_additional_docs)
+            nn_ids = nn_ids[:transductive_corpus_size]
             query_dataset_embeddings.append(
                 torch.stack([
-                    relevant_doc_embeddings[relevant_docs_idx[nn_id]]
+                    all_doc_embeddings[all_docs_idx[nn_id]]
                     for nn_id in nn_ids
                 ])
             )
-        print("len(query_text)", len(queries))
+        assert len(set([e.shape for e in query_dataset_embeddings])) == 1
 
         query_text = [queries[qid] for qid in query_ids]
         query_text_ds = datasets.Dataset.from_dict({ 
@@ -120,6 +117,7 @@ class DenseRetrievalExactSearch:
             "dataset_embeddings": query_dataset_embeddings 
             }
         )
+        query_text_ds.set_format("torch")
         query_embeddings = self.model.encode_queries(
             query_text_ds,
             batch_size=self.batch_size,
@@ -142,7 +140,7 @@ class DenseRetrievalExactSearch:
             )
         )
 
-        itr = range(0, len(corpus_text), self.corpus_chunk_size)
+        itr = tqdm.trange(0, len(corpus_text), self.corpus_chunk_size, desc="Embedding corpus")
 
         # Reverse corpus mapping
         doc_clusters = {}
@@ -173,10 +171,17 @@ class DenseRetrievalExactSearch:
                 for doc_id in sub_corpus_ids:
                     cluster_id = doc_clusters[doc_id]
                     sub_dataset_embeddings = []
-                    for cdoc_id in corpus_cluster_ids[cluster_id]:
-                        sub_dataset_embeddings.append(
-                            relevant_doc_embeddings[relevant_docs_idx[cdoc_id]]
-                        )
+                    nn_ids = corpus_cluster_ids[cluster_id]
+                    if len(nn_ids) < transductive_corpus_size:
+                        n_additional_docs = transductive_corpus_size - len(nn_ids)
+                        nn_ids += random.sample(list(all_doc_ids), n_additional_docs)
+                    nn_ids = nn_ids[:transductive_corpus_size]
+                    sub_dataset_embeddings.append(
+                        torch.stack([
+                            all_doc_embeddings[all_docs_idx[nn_id]]
+                            for nn_id in nn_ids
+                        ])
+                    )
                     sub_dataset_embeddings = torch.stack(sub_dataset_embeddings)
                     doc_dataset_embeddings.append(sub_dataset_embeddings)
 

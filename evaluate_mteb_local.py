@@ -6,7 +6,6 @@ import random
 
 import datasets
 
-from cde.lib import cluster_dataset
 from cde.lib.embed import DenseEncoder
 from cde.lib.model_configs import MODEL_FOLDER_DICT
 from cde.lib.utils import analyze_utils
@@ -16,6 +15,8 @@ from cde.lib.eval.mteb import MTEB
 
 
 TASK_LIST_RETRIEVAL = [
+    "FiQA2018", 
+    "TRECCOVID",
     "HotpotQA",
     "ArguAna",
     "ClimateFEVER",
@@ -39,14 +40,14 @@ TASK_LIST_RETRIEVAL = [
     "SCIDOCS",
     "SciFact",
     "Touche2020",
-    "TRECCOVID",
+    # "TRECCOVID",
     "FEVER",
     "MSMARCO",
 ]
 
 # TASK_LIST_RETRIEVAL = ["SCIDOCS", "SciFact", "NFCorpus", "TRECCOVID", "Touche2020"] # Small datasets.
-TASK_LIST_RETRIEVAL = ["TRECCOVID"]
-TASK_LIST_RETRIEVAL = ["NFCorpus"]
+# TASK_LIST_RETRIEVAL = ["TRECCOVID"]
+# TASK_LIST_RETRIEVAL = ["NFCorpus"]
 # TASK_LIST_RETRIEVAL = ["FiQA2018"]
 
 
@@ -78,7 +79,6 @@ def parse_args() -> argparse.ArgumentParser:
         help="Cluster size for evaluation", 
         type=int, 
         default=256,
-        choices=MODEL_FOLDER_DICT.keys()
     )
     return parser.parse_args()
 
@@ -132,7 +132,7 @@ def main():
         print(task)
         print("\t", results)
         if len(results):
-            print("NDCG@10 =>", results.to_dict()['scores'][split][0]['ndcg_at_10'])
+            print("NDCG@10 =>", results[task]['ndcg_at_10'])
         print()
     
 

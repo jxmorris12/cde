@@ -34,7 +34,7 @@ def cluster_corpus_uncached(
     ) -> Dict[int, List[str]]:
     X = embedding_ds["embeds"]
     # TODO (cache results)
-    num_clusters = math.ceil(len(X) / cluster_size)
+    num_clusters = max(1, math.ceil(len(X) / cluster_size))
     _, assignments = paired_kmeans_faiss(
         q=X,
         X=X,
@@ -255,6 +255,7 @@ class HFDataLoader:
                 if col not in ["id", "text", "title"]
             ]
         )
+        corpus_ds = corpus_ds.flatten_indices()
         self.corpus = corpus_ds
         corpus_embeddings_ds = self._embed(self.corpus, key="corpus")
         corpus_embeddings = corpus_embeddings_ds["embeds"]
@@ -363,6 +364,7 @@ class AbsTaskRetrieval(AbsTask):
             # Conversion from DataSet
             self.corpus_ds[split], self.queries_ds[split] = corpus, queries
             queries = dict(zip(queries["id"], queries["text"]))
+            corpus.set_format(output_all_columns=True) # Necessary for some reason.
             corpus = {
                 doc["id"]: {"title": doc["title"], "text": doc["text"]}
                 for doc in corpus
