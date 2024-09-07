@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import datasets
 import heapq
 import json
 import logging
 import os
+import random
 from collections import defaultdict
 from typing import Dict, List, Tuple
 
@@ -79,42 +81,50 @@ class DenseRetrievalExactSearch:
         logger.info("Encoding Queries...")
         query_ids = list(queries.keys())
         self.results = {qid: {} for qid in query_ids}
-        queries = [queries[qid] for qid in query_ids]
 
         # Do clustering here.
-        breakpoint()
+        all_doc_ids = list(corpus.keys())
         relevant_doc_ids = set(
             doc_id
             for c_id in query_cluster_ids.values() 
             for doc_id in corpus_cluster_ids[c_id]
         )
         relevant_docs = [corpus[doc_id] for doc_id in relevant_doc_ids]
-        relevant_doc_embeddings = self.first_stage_model.encode_documents(
+        relevant_doc_embeddings = self.first_stage_model.encode_corpus(
             relevant_docs,
             batch_size=self.batch_size,
             show_progress_bar=self.show_progress_bar,
             convert_to_tensor=self.convert_to_tensor,
         )
-        relevant_docs_idx = { i: doc_id for i, doc_id in enumerate(relevant_doc_ids) }
+        relevant_docs_idx = { doc_id: i for i, doc_id in enumerate(relevant_doc_ids) }
 
         # Get first-stage embeddings for 
         # all relevant documents
         query_dataset_embeddings = []
         for q_id in queries.keys():
+            nn_ids = corpus_cluster_ids[query_cluster_ids[q_id]]
+            if len(nn_ids) < self.model.encoder.config.transductive_corpus_size:
+                n_additional_docs = self.model.encoder.config.transductive_corpus_size - len(nn_ids)
+                nn_ids += random.sample(all_doc_ids, n_additional_docs)
             query_dataset_embeddings.append(
                 torch.stack([
-                    relevant_doc_embeddings[relevant_docs_idx[c_id]]
-                    for c_id in query_cluster_ids[q_id]
+                    relevant_doc_embeddings[relevant_docs_idx[nn_id]]
+                    for nn_id in nn_ids
                 ])
             )
-        query_dataset_embeddings = torch.stack(query_dataset_embeddings)
+        print("len(query_text)", len(queries))
 
+        query_text = [queries[qid] for qid in query_ids]
+        query_text_ds = datasets.Dataset.from_dict({ 
+            "text": query_text, 
+            "dataset_embeddings": query_dataset_embeddings 
+            }
+        )
         query_embeddings = self.model.encode_queries(
-            queries,
+            query_text_ds,
             batch_size=self.batch_size,
             show_progress_bar=self.show_progress_bar,
             convert_to_tensor=self.convert_to_tensor,
-            dataset_embeddings=query_dataset_embeddings,
         )
 
         logger.info("Sorting Corpus by document length (Longest first)...")
@@ -123,7 +133,7 @@ class DenseRetrievalExactSearch:
             key=lambda k: len(corpus[k].get("title", "") + corpus[k].get("text", "")),
             reverse=True,
         )
-        corpus = [corpus[cid] for cid in corpus_ids]
+        corpus_text = [corpus[cid] for cid in corpus_ids]
 
         logger.info("Encoding Corpus in batches... Warning: This might take a while!")
         logger.info(
@@ -132,7 +142,7 @@ class DenseRetrievalExactSearch:
             )
         )
 
-        itr = range(0, len(corpus), self.corpus_chunk_size)
+        itr = range(0, len(corpus_text), self.corpus_chunk_size)
 
         # Reverse corpus mapping
         doc_clusters = {}
@@ -159,6 +169,7 @@ class DenseRetrievalExactSearch:
             else:
                 # Get doc dataset embeddings
                 doc_dataset_embeddings = []
+                sub_corpus_ids = corpus_ids[corpus_start_idx:corpus_end_idx]
                 for doc_id in sub_corpus_ids:
                     cluster_id = doc_clusters[doc_id]
                     sub_dataset_embeddings = []
@@ -168,19 +179,20 @@ class DenseRetrievalExactSearch:
                         )
                     sub_dataset_embeddings = torch.stack(sub_dataset_embeddings)
                     doc_dataset_embeddings.append(sub_dataset_embeddings)
-                doc_dataset_embeddings = torch.stack(doc_dataset_embeddings)
 
                 # Encode chunk of corpus
-                sub_corpus = corpus[corpus_start_idx:corpus_end_idx]
-                sub_corpus_ids = corpus_ids[corpus_start_idx:corpus_end_idx]
+                sub_corpus = corpus_text[corpus_start_idx:corpus_end_idx]
+                def sub_corpus_gen():
+                    for doc, e in zip(sub_corpus, doc_dataset_embeddings):
+                        yield { "text": '{} {}'.format(doc.get('title', ''), doc['text']).strip(), "dataset_embeddings": e }
+                sub_corpus_ds = datasets.Dataset.from_generator(
+                    sub_corpus_gen, keep_in_memory=True)
+                sub_corpus_ds.set_format("torch")
                 sub_corpus_embeddings = self.model.encode_corpus(
-                    sub_corpus,
-                    sub_corpus_ids,
-                    corpus,
+                    sub_corpus_ds,
                     batch_size=self.batch_size,
                     show_progress_bar=self.show_progress_bar,
                     convert_to_tensor=self.convert_to_tensor,
-                    dataset_embeddings=doc_dataset_embeddings,
                 )
                 if self.save_corpus_embeddings and "qid" in kwargs:
                     self.corpus_embeddings[kwargs["qid"]].append(sub_corpus_embeddings)
@@ -250,84 +262,6 @@ class DenseRetrievalExactSearch:
         assert isinstance(previous_results, dict)
         assert isinstance(previous_results[list(previous_results.keys())[0]], dict)
         return previous_results
-
-    def search_cross_encoder(
-        self,
-        corpus: Dict[str, Dict[str, str]],
-        queries: Dict[str, str],
-        top_k: int,
-        instructions: Dict[str, str] | None = None,
-        **kwargs,
-    ) -> Dict[str, Dict[str, float]]:
-        """This function provides support for reranker (or cross-encoder) models that encoder query and document at the same time (typically with attention).
-        Some notable examples include MonoBERT, MonoT5, RankLlama, etc.
-        Note: you must provide the path to the results to rerank to the __init__ function as `previous_results`
-        """
-        pairs = []  # create the pairs for reranking
-        for qid in queries.keys():
-            q_results = self.previous_results[qid]
-            # take the top-k only
-            q_results_sorted = {
-                k: v
-                for k, v in sorted(
-                    q_results.items(), key=lambda item: item[1], reverse=True
-                )
-            }
-            top_n = [k for k, v in list(q_results_sorted.items())[:top_k]]
-            query = queries[qid]
-            for doc_id in top_n:
-                corpus_item = (
-                    corpus[doc_id].get("title", "") + " " + corpus[doc_id]["text"]
-                ).strip()
-                pairs.append(
-                    (
-                        query,
-                        corpus_item,
-                        instructions[query] if instructions is not None else None,
-                        qid,
-                        doc_id,
-                    )
-                )
-
-        logger.info(f"Reranking the top {top_k} in batches... This might take a while!")
-        itr = range(0, len(pairs), self.batch_size)
-
-        results = {qid: {} for qid in queries.keys()}
-        for batch_num, corpus_start_idx in enumerate(
-            tqdm.tqdm(itr, leave=False, disable=not self.show_progress_bar)
-        ):
-            corpus_end_idx = min(corpus_start_idx + self.batch_size, len(pairs))
-            cur_batch = pairs[corpus_start_idx:corpus_end_idx]
-
-            (
-                queries_in_pair,
-                corpus_in_pair,
-                instructions_in_pair,
-                query_ids,
-                corpus_ids,
-            ) = zip(*cur_batch)
-
-            assert (
-                len(queries_in_pair) == len(corpus_in_pair) == len(instructions_in_pair)
-            )
-
-            if isinstance(self.model, CrossEncoder):
-                # can't take instructions, so add them here
-                queries_in_pair = [
-                    f"{q} {i}".strip()
-                    for i, q in zip(instructions_in_pair, queries_in_pair)
-                ]
-                scores = self.model.predict(list(zip(queries_in_pair, corpus_in_pair)))
-            else:
-                # may use the instructions in a unique way, so give them also
-                scores = self.model.predict(
-                    list(zip(queries_in_pair, corpus_in_pair, instructions_in_pair))
-                )
-
-            for i, score in enumerate(scores):
-                results[query_ids[i]][corpus_ids[i]] = float(score)
-
-        return results
 
     def predict(self, queries, passages, **kwargs):
         raise NotImplementedError(

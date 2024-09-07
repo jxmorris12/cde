@@ -195,7 +195,6 @@ class HFDataLoader:
             query_id = self.queries.select([i])["id"][0]
             centroid_idx = (qe[i] @ ce.T).argmax(dim=0).item()
             query_cluster_ids[query_id] = centroid_idx
-        breakpoint()
 
         return (
             self.corpus, 

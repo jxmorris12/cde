@@ -119,7 +119,8 @@ class DenseEncoder(torch.nn.Module):
             padding=True,
             truncation=True,
         )
-        return batch_dict
+        other_cols = [k for k in examples.keys() if k != col]
+        return {**batch_dict, **{k: examples[k] for k in other_cols}}
 
     def _consider_putting_model_on_device(self) -> None:
         if self.model_is_on_device:
@@ -143,7 +144,7 @@ class DenseEncoder(torch.nn.Module):
         self.model_is_on_device = True
     
     def encode_corpus(self, corpus: List[Dict[str, str]], *args, **kwargs) -> np.ndarray:
-        if isinstance(corpus[0], dict):
+        if isinstance(corpus, list) and isinstance(corpus[0], dict) and 'text' in corpus[0]:
             passages = ['{} {}'.format(doc.get('title', ''), doc['text']).strip() for doc in corpus]
         else:
             passages = corpus
@@ -180,7 +181,6 @@ class DenseEncoder(torch.nn.Module):
         )
         data_collator = transformers.DataCollatorWithPadding(self.tokenizer, pad_to_multiple_of=8)
         effective_batch_size = (batch_size * max(1, self.gpu_count))
-        max_num_batches = int(math.ceil(len(dataset) / effective_batch_size))
         num_workers = len(os.sched_getaffinity(0))
         effective_batch_size = min(effective_batch_size, max(1, len(dataset) // num_workers))
 
@@ -234,6 +234,7 @@ class DenseEncoder(torch.nn.Module):
             convert_to_tensor=convert_to_tensor,
             show_progress_bar=show_progress_bar,
             output_device=output_device,
+            **kwargs,
             **self.model_kwargs
         )
         print("[DenseEncoder] encode() done calling embed_dataloader")

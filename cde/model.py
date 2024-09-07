@@ -363,18 +363,22 @@ class DatasetConditionedBiencoder(transformers.PreTrainedModel, ContextualModelM
             output_hidden_states: bool = False,
             null_dataset_embedding: bool = False,
         ) -> torch.Tensor:
+        # print("[0] dataset_embeddings.shape =", dataset_embeddings.shape)
         soft_prompt = self._prepare_dataset_embeddings(
             input_ids=input_ids,
             dataset_embeddings=dataset_embeddings,
             null_dataset_embedding=null_dataset_embedding,
         )
+        # print("[1] soft_prompt.shape =", soft_prompt.shape)
         backbone_attention_mask = torch.ones(
             soft_prompt.shape[0:2],
             dtype=torch.long,
             device=soft_prompt.device,
         )
         inputs_embeds = self.backbone.embeddings(input_ids) # (b, s) -> (b, s, d)
+        # print("[2] inputs_embeds.shape =", inputs_embeds.shape)
         inputs_embeds = torch.cat((soft_prompt, inputs_embeds), dim=1) # (v, 4+b+s, d)
+        # print("[3] inputs_embeds.shape =", inputs_embeds.shape)
         attention_mask = torch.cat((backbone_attention_mask, attention_mask), dim=1)
         output = self.backbone(
             inputs_embeds=inputs_embeds,
