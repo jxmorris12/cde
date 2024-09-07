@@ -57,7 +57,6 @@ class DenseRetrievalExactSearch:
         self,
         corpus: dict[str, dict[str, str]],
         queries: dict[str, str],
-        rerank_results,
         top_k: int,
         score_function: str,
         return_sorted: bool = False,
@@ -78,19 +77,8 @@ class DenseRetrievalExactSearch:
         self.results = {qid: {} for qid in query_ids}
         queries = [queries[qid] for qid in query_ids]
 
-        neighbor_topk = 256
-        neighbor_sentence_ids = [
-            sorted(
-                rerank_results[id], 
-                key=lambda item: item[1], 
-                reverse=True
-            )[:neighbor_topk] 
-            for id in query_ids
-        ]
-        neighbor_sentences = [corpus[id] for id in neighbor_sentence_ids]
-        dataset_embeddings = self._encode_first_stage(
-            neighbor_sentences
-        )
+        # Do clustering here.
+        breakpoint()
 
         query_embeddings = self.model.encode_queries(
             queries,
@@ -141,7 +129,6 @@ class DenseRetrievalExactSearch:
                     sub_corpus,
                     sub_corpus_ids,
                     corpus,
-                    rerank_results,
                     batch_size=self.batch_size,
                     show_progress_bar=self.show_progress_bar,
                     convert_to_tensor=self.convert_to_tensor,
@@ -325,7 +312,6 @@ class DenseRetrievalExactSearch:
     def encode_corpus(self, 
             corpus: List[Dict[str, str]], 
             full_corpus: List[Dict[str, str]],
-            rerank_results, 
             batch_size: int, 
             **kwargs
         ):
@@ -435,7 +421,7 @@ class RetrievalEvaluator(Evaluator):
         self.score_function = score_function
 
     def __call__(
-        self, corpus: dict[str, dict[str, str]], queries: dict[str, str], rerank_results,
+        self, corpus: dict[str, dict[str, str]], queries: dict[str, str],
     ) -> dict[str, dict[str, float]]:
         if not self.retriever:
             raise ValueError("Model/Technique has not been provided!")
@@ -444,7 +430,7 @@ class RetrievalEvaluator(Evaluator):
             return self.retriever.search_cross_encoder(corpus, queries, self.top_k)
         else:
             return self.retriever.search(
-                corpus, queries, rerank_results, self.top_k, self.score_function
+                corpus, queries, self.top_k, self.score_function
             )
 
     @staticmethod

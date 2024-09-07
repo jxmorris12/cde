@@ -286,7 +286,6 @@ def embed_with_cache(
     max_dataset_size = 10_000_000
     i = 0
     while i < len(embeddings):
-        print("[embed_with_cache] creating dataset from dict // i =", i)
         dataset = datasets.Dataset.from_dict({
             "embeds": embeddings[i : i + max_dataset_size] 
         })

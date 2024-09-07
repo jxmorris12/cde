@@ -12,10 +12,10 @@ executor = submitit.AutoExecutor(folder="log_submitit")
 
 ONE_DAY_IN_MIN = 24 * 60
 executor.update_parameters(
-    timeout_min=(3 * ONE_DAY_IN_MIN), 
-    gpus_per_node=8, 
-    cpus_per_task=96,
-    slurm_array_parallelism=5,
+    timeout_min=(ONE_DAY_IN_MIN), 
+    gpus_per_node=1, 
+    cpus_per_task=12,
+    slurm_array_parallelism=32,
     slurm_account=os.environ["SLURM_ACCT_NAME"],
     slurm_partition=os.environ["SLURM_PARTITION_NAME"], 
     slurm_qos=os.environ["SLURM_QOS"]

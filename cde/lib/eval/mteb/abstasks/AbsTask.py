@@ -26,7 +26,9 @@ class AbsTask(ABC):
         self.is_multilingual = False
         self.is_crosslingual = False
         self.save_suffix = kwargs.get("save_suffix", "")
-        self.embedder_rerank = kwargs.get("embedder_rerank", None)
+        
+        self.cluster_embedder = kwargs.get("cluster_embedder", None)
+        self.cluster_size = kwargs.get("cluster_size", None)
 
         self.seed = seed
         random.seed(self.seed)

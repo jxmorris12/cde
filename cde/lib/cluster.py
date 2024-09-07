@@ -22,10 +22,7 @@ from .dist import (
     get_world_size, 
     print0
 )
-from .embed import (
-    DenseEncoder, 
-    embed_with_cache,
-)
+from .embed import embed_with_cache
 from .misc import (
     get_cache_location_from_kwargs,
     tqdm_if_main_worker

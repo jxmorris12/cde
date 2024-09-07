@@ -1,9 +1,9 @@
-from __future__ import annotations
+from typing import List
 
 import json
 import logging
+import math
 import os
-import pickle
 
 from collections import defaultdict
 from time import time
@@ -12,15 +12,74 @@ from typing import Dict, Tuple
 
 import datasets
 from datasets import Features, Value, load_dataset
+import numpy as np
 import torch
-
-from cde.lib import get_reranking_results
 
 from ..evaluation.evaluators import RetrievalEvaluator
 from .AbsTask import AbsTask
 
+from cde.lib import get_cde_cache_dir
+from cde.lib.cluster import embed_with_cache
+from cde.lib.cluster_faiss import paired_kmeans_faiss
+
 logger = logging.getLogger(__name__)
 
+
+def cluster_corpus_uncached(
+        corpus_ds: datasets.Dataset,
+        embedding_ds: datasets.Dataset, 
+        cluster_size: int
+    ) -> Dict[int, List[str]]:
+    X = embedding_ds["embeds"]
+    # TODO (cache results)
+    num_clusters = math.ceil(len(X) / cluster_size)
+    _, assignments = paired_kmeans_faiss(
+        q=X,
+        X=X,
+        k=num_clusters,
+        max_iters=40,
+        n_redo=2,
+        seed=42,
+    )
+    # Compute centroids and per-id assignments.
+    breakpoint()
+    centroids = []
+    cluster_ids = {}
+    for i in range(num_clusters):
+        cluster_idxs = np.where(assignments == 0)[0]
+        cluster_ids = corpus_ds.select(cluster_idxs)["id"]
+        centroid = embedding_ds.select(cluster_idxs)["embeds"].mean(dim=0)
+        centroids.append(centroid)
+        cluster_ids[i] = cluster_ids
+    
+    centroids = torch.stack(centroids).numpy()
+    return centroids, cluster_ids
+
+def cluster_corpus(
+    corpus_ds: datasets.Dataset,
+    embedding_ds: datasets.Dataset,
+    cluster_size: int) -> Tuple[torch.Tensor, Dict[int, List[str]]]:
+    cache_dir = os.path.join(
+        get_cde_cache_dir(),
+        "mteb_cache", "cluster"
+    )
+    os.makedirs(cache_dir, exist_ok=True)
+    cache_file = os.path.join(
+        cache_dir,
+        f"{corpus_ds._fingerprint}_{cluster_size}_clusters"
+    )
+    if os.path.exists(cache_file):
+        data = np.load(cache_file)
+        centroids = data["centroids"]
+        cluster_ids = data["cluster_ids"]
+    else:
+        centroids, cluster_ids = cluster_corpus_uncached(corpus_ds, embedding_ds, cluster_size)
+        np.savez_compressed(
+            cache_file,
+            centroids=centroids,
+            cluster_ids=cluster_ids,
+        )
+    return torch.tensor(centroids), cluster_ids
 
 # Adapted from https://github.com/beir-cellar/beir/blob/f062f038c4bfd19a8ca942a9910b1e0d218759d4/beir/datasets/data_loader_hf.py#L10
 class HFDataLoader:
@@ -30,11 +89,12 @@ class HFDataLoader:
         hf_repo_qrels: str = None,
         data_folder: str = None,
         prefix: str = None,
-        embedder_rerank: str = None,
+        cluster_size: int = 64,
         corpus_file: str = "corpus.jsonl",
         query_file: str = "queries.jsonl",
         qrels_folder: str = "qrels",
         qrels_file: str = "",
+        cluster_embedder: str = "",
         streaming: bool = False,
         keep_in_memory: bool = False,
     ):
@@ -65,9 +125,10 @@ class HFDataLoader:
                 os.path.join(data_folder, qrels_folder) if data_folder else None
             )
             self.qrels_file = qrels_file
+        self.cluster_size = cluster_size
         self.streaming = streaming
         self.keep_in_memory = keep_in_memory
-        self.embedder_rerank = embedder_rerank
+        self.cluster_embedder = cluster_embedder
 
     @staticmethod
     def check(fIn: str, ext: str):
@@ -80,34 +141,9 @@ class HFDataLoader:
             raise ValueError(
                 "File {} must be present with extension {}".format(fIn, ext)
             )
-    
-    def _get_reranking_results_cached(self, split: str):
-        cache_path = datasets.config.HF_DATASETS_CACHE # something like /home/jxm3/.cache/huggingface/datasets
-        rerank_folder = os.path.join(
-            cache_path,
-            "mteb_rerank", 
-            self.corpus._fingerprint, 
-        )
-        os.makedirs(rerank_folder, exist_ok=True)
-        rerank_path = os.path.join(
-            rerank_folder,
-            self.embedder_rerank.replace("/", "__")
-        )
-        print("[HFDataLoader] loading rerank results at path", rerank_path)
-        if os.path.exists(rerank_path):
-            rerank_results = pickle.load(open(rerank_path, 'rb'))
-        else:
-            rerank_results = get_reranking_results(
-                data_path="",
-                split=split,
-                model_name=self.embedder_rerank,
-                hf_data_loader=self,
-            )
-            pickle.dump(rerank_results, open(rerank_path, 'wb'))
-        return rerank_results
-
+        
     def load(
-        self, split="test", do_reranking: bool = False
+        self, split="test"
     ) -> Tuple[Dict[str, dict[str, str]], dict[str, str], dict[str, dict[str, int]]]:
         if not self.hf_repo:
             self.qrels_file = os.path.join(self.qrels_folder, split + ".tsv")
@@ -138,26 +174,19 @@ class HFDataLoader:
         logger.info("Loaded %d %s Queries.", len(self.queries), split.upper())
         logger.info("Query Example: %s", self.queries[0])
 
-        if do_reranking:
-            self.rerank_results = self._get_reranking_results_cached(
-                split=split,
-            )
-            return self.corpus, self.queries, self.rerank_results, self.qrels
-        else:
-            self.rerank_results = {}
-            return self.corpus, self.queries, self.qrels
+        return self.corpus, self.queries, self.qrels
 
     def _embed(self, dataset: datasets.Dataset) -> torch.Tensor:
         # TODO implement true embedding & caching
         # TODO determine the best data structure for this? maybe use faiss?
-        print(f"fake-embedding ds of len {len(dataset)} with embedder_rerank = {self.embedder_rerank}")
-        return torch.randn(len(dataset), 32)
-
-    def _embed_corpus(self, dataset: datasets.Dataset) -> torch.Tensor:
-        return self._embed(dataset=dataset)
-    
-    def _embed_queries(self, dataset: datasets.Dataset) -> torch.Tensor:
-        return self._embed(dataset=dataset)
+        return embed_with_cache(
+            self.cluster_embedder,
+            dataset._fingerprint + "_queries", 
+            dataset,
+            "text",
+            save_to_disk=True,
+            batch_size=2048,
+        )
 
     def load_corpus(self) -> dict[str, dict[str, str]]:
         if not self.hf_repo:
@@ -197,7 +226,14 @@ class HFDataLoader:
             ]
         )
         self.corpus = corpus_ds
-        self.corpus_embeddings = self._embed_corpus(self.corpus)
+        self.corpus_embeddings = self._embed(self.corpus)
+        self.corpus_cluster_centroids, self.corpus_cluster_ids = (
+                cluster_corpus(
+                corpus_ds=corpus_ds,
+                embedding_ds=self.corpus_embeddings, 
+                cluster_size=self.cluster_size
+            )
+        )
 
     def _load_queries(self):
         if self.hf_repo:
@@ -221,6 +257,7 @@ class HFDataLoader:
             [col for col in queries_ds.column_names if col not in ["id", "text"]]
         )
         self.queries = queries_ds
+        self.query_embeddings = self._embed(self.queries)
 
     def _load_qrels(self, split):
         if self.hf_repo:
@@ -271,20 +308,21 @@ class AbsTaskRetrieval(AbsTask):
     def load_data(self, **kwargs):
         if self.data_loaded:
             return
-        self.corpus, self.queries, self.rerank_results, self.relevant_docs = {}, {}, {}, {}
+        self.corpus, self.queries, self.relevant_docs = {}, {}, {}
         self.corpus_ds, self.queries_ds = {}, {}
         dataset_path = self.metadata_dict["dataset"]["path"]
         hf_repo_qrels = (
             dataset_path + "-qrels" if "clarin-knext" in dataset_path else None
         )
         for split in kwargs.get("eval_splits", self.metadata_dict["eval_splits"]):
-            corpus, queries, rerank_results, qrels = HFDataLoader(
+            corpus, queries, qrels = HFDataLoader(
                 hf_repo=dataset_path,
                 hf_repo_qrels=hf_repo_qrels,
                 streaming=False,
                 keep_in_memory=False,
-                embedder_rerank=self.embedder_rerank,
-            ).load(split=split, do_reranking=True)
+                cluster_embedder=self.cluster_embedder,
+                cluster_size=self.cluster_size,
+            ).load(split=split)
             # Conversion from DataSet
             self.corpus_ds[split], self.queries_ds[split] = corpus, queries
             queries = {query["id"]: query["text"] for query in queries}
@@ -292,10 +330,9 @@ class AbsTaskRetrieval(AbsTask):
                 doc["id"]: {"title": doc["title"], "text": doc["text"]}
                 for doc in corpus
             }
-            self.corpus[split], self.queries[split], self.rerank_results[split], self.relevant_docs[split] = (
+            self.corpus[split], self.queries[split], self.relevant_docs[split] = (
                 corpus,
                 queries,
-                rerank_results,
                 qrels,
             )
 
@@ -305,35 +342,22 @@ class AbsTaskRetrieval(AbsTask):
         retriever = RetrievalEvaluator(model, **kwargs)
 
         scores = {}
-        if self.is_crosslingual or self.is_multilingual:
-            assert False # disabling for our purposes :-)
-            for lang in self.hf_subsets:
-                logger.info(f"Language: {lang}")
-                corpus, queries, relevant_docs = (
-                    self.corpus[lang][split],
-                    self.queries[lang][split],
-                    self.relevant_docs[lang][split],
-                )
-                scores[lang] = self._evaluate_split(
-                    retriever, corpus, queries, relevant_docs, lang, **kwargs
-                )
-        else:
-            corpus, queries, relevant_docs, rerank_results = (
-                self.corpus[split],
-                self.queries[split],
-                self.relevant_docs[split],
-                self.rerank_results[split]
-            )
-            scores = self._evaluate_split(
-                retriever, corpus, queries, rerank_results, relevant_docs, None, **kwargs
-            )
+    
+        corpus, queries, relevant_docs = (
+            self.corpus[split],
+            self.queries[split],
+            self.relevant_docs[split],
+        )
+        scores = self._evaluate_split(
+            retriever, corpus, queries, relevant_docs, None, **kwargs
+        )
         return scores
 
     def _evaluate_split(
-        self, retriever, corpus, queries, rerank_results, relevant_docs, lang=None, **kwargs
+        self, retriever, corpus, queries, relevant_docs, lang=None, **kwargs
     ):
         start_time = time()
-        results = retriever(corpus, queries, rerank_results)
+        results = retriever(corpus, queries)
         end_time = time()
         logger.info(
             "Time taken to retrieve: {:.2f} seconds".format(end_time - start_time)
