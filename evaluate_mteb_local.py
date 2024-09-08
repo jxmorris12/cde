@@ -46,7 +46,8 @@ TASK_LIST_RETRIEVAL = [
     "MSMARCO",
 ]
 
-TASK_LIST_RETRIEVAL = ["SCIDOCS", "SciFact", "NFCorpus", "TRECCOVID", "Touche2020"] # Small datasets.
+TASK_LIST_RETRIEVAL = ["SCIDOCS", "SciFact", "NFCorpus", "TRECCOVID"] # Tiny datasets.
+# TASK_LIST_RETRIEVAL = ["SCIDOCS", "SciFact", "NFCorpus", "TRECCOVID", "Touche2020"] # Small datasets.
 # TASK_LIST_RETRIEVAL = ["TRECCOVID"]
 # TASK_LIST_RETRIEVAL = ["NFCorpus"]
 # TASK_LIST_RETRIEVAL = ["FiQA2018"]
@@ -127,9 +128,9 @@ def main():
             first_stage_model=first_stage_mteb_encoder,
             output_folder=os.path.join("results_mteb", args.model_key, str(args.cluster_size)),
             batch_size=512, 
-            corpus_chunk_size=500,
+            # corpus_chunk_size=500,
             # corpus_chunk_size=10_000,
-            # corpus_chunk_size=50_000,
+            corpus_chunk_size=50_000,
             verbosity=2,
             eval_splits=[split]
         )

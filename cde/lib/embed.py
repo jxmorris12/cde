@@ -23,6 +23,7 @@ def embed_dataloader(
         encoder, 
         data_loader, col: str, 
         show_progress_bar: bool = True, 
+        leave_progress_bar: bool = True, 
         convert_to_tensor: bool = True,
         output_device: str = "cuda",
         **kwargs
@@ -30,7 +31,8 @@ def embed_dataloader(
     encoded_embeds = []
     pbar = tqdm_if_main_worker(
         data_loader, desc=f"Encoding {col}", 
-        disable=(not show_progress_bar)
+        disable=(not show_progress_bar),
+        leave=leave_progress_bar,
     )
     embed_device = ("cuda" if torch.cuda.is_available() else "cpu")
     for batch_dict in pbar:
@@ -126,20 +128,20 @@ class DenseEncoder(torch.nn.Module):
         if self.model_is_on_device:
             return
         if self.encoder is None:
-            print("[DE] initializing from", self.model_name_or_path)
+            print("[DenseEncoder] initializing from", self.model_name_or_path)
             self.encoder = transformers.AutoModel.from_pretrained(
                 self.model_name_or_path, 
                 torch_dtype=torch.float16
             )
             self.encoder.eval()
         if hasattr(self.encoder, "decoder") and hasattr(self.encoder, "encoder"):
-            print("[DE] taking encoder from an encoder-decoder model")
+            print("[DenseEncoder] taking encoder from an encoder-decoder model")
             self.encoder = self.encoder.encoder
         if self.gpu_count > 0:
             self.encoder.cuda()
 
         if self.gpu_count > 1:
-            print(f"[DE] Wrapped DenseEncoder in {self.gpu_count} GPUs")
+            print(f"[DenseEncoder] Wrapped DenseEncoder in {self.gpu_count} GPUs")
             self.encoder = torch.nn.DataParallel(self.encoder)
         self.model_is_on_device = True
     
