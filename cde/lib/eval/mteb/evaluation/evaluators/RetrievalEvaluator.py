@@ -1,16 +1,20 @@
 from __future__ import annotations
+from typing import Dict, Generator, List, Tuple
 
-from typing import Generator, Dict
-
-import datasets
+import concurrent.futures
 import heapq
+import functools
 import json
+import hashlib
 import logging
 import os
 import random
 from collections import defaultdict
-from typing import Dict, List, Tuple
 
+
+import datasets
+import numpy as np
+import pyarrow as pa
 import pytrec_eval
 import torch
 import torch.multiprocessing as mp
@@ -22,6 +26,33 @@ from .utils import cos_sim, dot_score, download, hole, mrr, recall_cap, top_k_ac
 
 logger = logging.getLogger(__name__)
 
+
+def sub_corpus_gen_func(
+        doc_id: int, 
+        corpus,
+        doc_clusters, 
+        corpus_cluster_ids, 
+        transductive_corpus_size, 
+        all_doc_ids, 
+        all_docs_idx,
+        all_doc_embeddings
+    ) -> dict[str, torch.Tensor]:
+    cluster_id = doc_clusters[doc_id]
+    nn_ids = corpus_cluster_ids[cluster_id]
+    if len(nn_ids) < transductive_corpus_size:
+        n_additional_docs = transductive_corpus_size - len(nn_ids)
+        nn_ids += random.sample(list(all_doc_ids), n_additional_docs)
+    nn_ids = nn_ids[:transductive_corpus_size]
+    sub_dataset_embeddings = torch.stack([
+            all_doc_embeddings[all_docs_idx[nn_id]]
+            for nn_id in nn_ids
+        ])
+
+    doc = corpus[doc_id]
+    return { 
+        "text": '{} {}'.format(doc.get('title', ''), doc['text']).strip(), 
+        "dataset_embeddings": sub_dataset_embeddings
+    }
 
 # Adapted from https://github.com/beir-cellar/beir/blob/f062f038c4bfd19a8ca942a9910b1e0d218759d4/beir/retrieval/search/dense/exact_search.py#L12
 class DenseRetrievalExactSearch:
@@ -92,10 +123,14 @@ class DenseRetrievalExactSearch:
             batch_size=self.batch_size,
             show_progress_bar=self.show_progress_bar,
             convert_to_tensor=self.convert_to_tensor,
-        ).cpu()
+            output_device="cpu",
+        )
         all_docs_idx = { doc_id: i for i, doc_id in enumerate(all_doc_ids) }
 
-        transductive_corpus_size = self.model.encoder.config.transductive_corpus_size
+        if hasattr(self.model.encoder, "module"):
+            transductive_corpus_size = self.model.encoder.module.config.transductive_corpus_size
+        else:
+            transductive_corpus_size = self.model.encoder.config.transductive_corpus_size
 
         # Get first-stage embeddings for 
         # all relevant documents
@@ -173,58 +208,85 @@ class DenseRetrievalExactSearch:
 
                 # Encode chunk of corpus
                 sub_corpus = corpus_text[corpus_start_idx:corpus_end_idx]
-                def sub_corpus_gen(doc_id: int) -> dict[str, torch.Tensor]:
-                    # for doc_id in tqdm.tqdm(sub_corpus_ids, desc="stacking doc embeddings", colour="green"):
-                    cluster_id = doc_clusters[doc_id]
-                    nn_ids = corpus_cluster_ids[cluster_id]
-                    if len(nn_ids) < transductive_corpus_size:
-                        n_additional_docs = transductive_corpus_size - len(nn_ids)
-                        nn_ids += random.sample(list(all_doc_ids), n_additional_docs)
-                    nn_ids = nn_ids[:transductive_corpus_size]
-                    sub_dataset_embeddings = torch.stack([
-                            all_doc_embeddings[all_docs_idx[nn_id]]
-                            for nn_id in nn_ids
-                        ])
-                
-                    doc = corpus[doc_id]
-                    return { 
-                        "text": '{} {}'.format(doc.get('title', ''), doc['text']).strip(), 
-                        "dataset_embeddings": sub_dataset_embeddings
-                    }
-                # examples = list(map(sub_corpus_gen, sub_corpus_ids))
-                # mp.set_start_method("spawn", force=True)
-                # with mp.Pool(mp.cpu_count()) as pool:
-                #     examples = pool.map(
-                #         sub_corpus_gen, 
-                #         tqdm.tqdm(sub_corpus_ids, desc="stacking doc embeddings", colour="green")
-                #     )
-                # pool.close()
-                # pool.join()
-                import concurrent.futures
-                with concurrent.futures.ThreadPoolExecutor() as executor:
-                    examples = list(
-                        tqdm.tqdm(
-                            executor.map(
-                                sub_corpus_gen, 
-                                sub_corpus_ids
-                            ), 
-                            desc="stacking doc embeddings", 
-                            total=len(sub_corpus_ids), 
-                            colour="green"
-                        )
+                texts = []
+                dataset_embeddings = []
+                mp_num_workers = min(8, len(os.sched_getaffinity(0)))
+                print(f"[DRES] stacking {len(sub_corpus_ids)} dataset embeddings with {mp_num_workers} workers in multiproc")
+                with mp.Pool(mp_num_workers) as pool:
+                    manager = mp.Manager()
+                    # doc_clusters_m = (doc_clusters)
+                    doc_clusters_m = manager.dict(doc_clusters)
+                    # corpus_cluster_ids_m = (corpus_cluster_ids)
+                    corpus_cluster_ids_m = manager.dict(corpus_cluster_ids)
+                    # all_doc_ids_m = (all_doc_ids)
+                    all_doc_ids_m = manager.list(all_doc_ids)
+                    # corpus_m = (corpus)
+                    corpus_m = manager.dict(corpus)
+                    # all_docs_idx_m = (all_docs_idx)
+                    all_docs_idx_m = manager.dict(all_docs_idx)
+                    # all_doc_embeddings.share_memory_()
+                    sub_corpus_gen = functools.partial(
+                        sub_corpus_gen_func, 
+                        corpus=corpus_m,
+                        transductive_corpus_size=transductive_corpus_size, 
+                        doc_clusters=doc_clusters_m, 
+                        corpus_cluster_ids=corpus_cluster_ids_m, 
+                        all_doc_ids=all_doc_ids_m, 
+                        all_docs_idx=all_docs_idx_m,
+                        all_doc_embeddings=all_doc_embeddings,
                     )
+                    for ex in (
+                        list(
+                            tqdm.tqdm(pool.imap(sub_corpus_gen, sub_corpus_ids), total=len(sub_corpus_ids),desc="Inner stacking", colour="red")), 
+                    ):
+                        texts.append(ex["text"])
+                        dataset_embeddings.append(
+                            ex["dataset_embeddings"].numpy().astype(np.float16).tolist()
+                        )
+                pool.close()
+                pool.join()
 
-                print(f"creating dataset from {len(sub_corpus)} docs/embeddings")
+                # with concurrent.futures.ThreadPoolExecutor() as executor:
+                #     for ex in (
+                #         tqdm.tqdm(
+                #             executor.map(
+                #                 sub_corpus_gen, 
+                #                 sub_corpus_ids
+                #             ), 
+                #             desc="stacking doc embeddings", 
+                #             total=len(sub_corpus_ids), 
+                #             colour="green"
+                #         )
+                #     ):
+                #         texts.append(ex["text"])
+                #         dataset_embeddings.append(
+                #             ex["dataset_embeddings"].numpy().astype(np.float16).tolist()
+                #         )
+
+                print(f"creating pa.Table from {len(sub_corpus)} docs/embeddings")
                 # sub_corpus_ds = datasets.IterableDataset.from_generator(
                 #     sub_corpus_gen
                 # )
                 # sub_corpus_ds = sub_corpus_ds.with_format("torch")
-                sub_corpus_ds = datasets.Dataset.from_list(
-                    examples, 
-                    # features=query_text_ds.features
+                # T = pa.Tensor.from_numpy(x, dim_names="xyz")
+                text_array = pa.array(texts)
+                dataset_embeddings = pa.array(dataset_embeddings)
+                pa_table = pa.Table.from_arrays(
+                    [text_array, dataset_embeddings], 
+                    names=['text', 'dataset_embeddings']
                 )
+                print(f"creating datasets.Dataset from {len(sub_corpus)} docs/embeddings")
+                sub_corpus_ds = datasets.Dataset(
+                    pa_table,
+                    # give a random fingerprint bc it's not useful
+                    # and this will bypass the expensive fingerprinting step
+                    fingerprint=hashlib.sha256(os.urandom(64)).hexdigest()
+                )
+                # sub_corpus_ds = datasets.Dataset.from_list(
+                #     examples, 
+                # )
                 sub_corpus_ds.set_format("torch")
-                print(f"created IterableDataset from {len(sub_corpus)} docs/embeddings")
+                print(f"created Dataset from {len(sub_corpus)} docs/embeddings")
                 sub_corpus_embeddings = self.model.encode_corpus(
                     sub_corpus_ds,
                     batch_size=self.batch_size,

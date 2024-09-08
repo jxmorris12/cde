@@ -170,7 +170,7 @@ class DenseEncoder(torch.nn.Module):
             else:
                 raise RuntimeError("unknown dataset format to encode")
         
-        os.environ["TOKENIZERS_PARALLELISM"] = "0"
+        os.environ["TOKENIZERS_PARALLELISM"] = "1"
 
         tokenize_fn = functools.partial(
             self.tokenize_transform, 
@@ -185,7 +185,7 @@ class DenseEncoder(torch.nn.Module):
             dataset.set_transform(tokenize_fn)
         data_collator = transformers.DataCollatorWithPadding(self.tokenizer, pad_to_multiple_of=8)
         effective_batch_size = (batch_size * max(1, self.gpu_count))
-        num_workers = len(os.sched_getaffinity(0))
+        num_workers = min(len(os.sched_getaffinity(0)), self.gpu_count * 4)
 
         try:
             len_dataset = len(dataset)
@@ -204,7 +204,6 @@ class DenseEncoder(torch.nn.Module):
             num_workers=num_workers, 
             prefetch_factor=(4 if num_workers > 0 else None),
             collate_fn=data_collator,
-            persistent_workers=False,
             pin_memory=True
         )
     
@@ -242,7 +241,7 @@ class DenseEncoder(torch.nn.Module):
             len_dataset = 0
 
         show_progress_bar = (len_dataset >= 128) and show_progress_bar
-        print(f"[DenseEncoder] encode() calling embed_dataloader (len(dataset)={len_dataset}, convert_to_tensor={convert_to_tensor})")
+        print(f"[DenseEncoder] encode() calling embed_dataloader (len(dataset)={len_dataset}, convert_to_tensor={convert_to_tensor}, output_device={output_device})")
         encoded_embeds = embed_dataloader(
             self.encoder,
             data_loader, 
@@ -257,7 +256,7 @@ class DenseEncoder(torch.nn.Module):
         if isinstance(dataset, datasets.Dataset):
             num_cleaned_cache_files = dataset.cleanup_cache_files()
             if num_cleaned_cache_files: 
-                print(f"cleaned {num_cleaned_cache_files} files")
+                print(f"[DenseEncoder] cleaned {num_cleaned_cache_files} files")
 
         return encoded_embeds
 
