@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Generator, Dict
+
 import datasets
 import heapq
 import json
@@ -11,6 +13,7 @@ from typing import Dict, List, Tuple
 
 import pytrec_eval
 import torch
+import torch.multiprocessing as mp
 import tqdm
 from sentence_transformers import CrossEncoder
 
@@ -170,42 +173,57 @@ class DenseRetrievalExactSearch:
 
                 # Encode chunk of corpus
                 sub_corpus = corpus_text[corpus_start_idx:corpus_end_idx]
-                def sub_corpus_gen():
+                def sub_corpus_gen(doc_id: int) -> dict[str, torch.Tensor]:
                     # for doc_id in tqdm.tqdm(sub_corpus_ids, desc="stacking doc embeddings", colour="green"):
-                    doc_dataset_embeddings = []
-                    for doc_id in sub_corpus_ids:
-                        cluster_id = doc_clusters[doc_id]
-                        sub_dataset_embeddings = []
-                        nn_ids = corpus_cluster_ids[cluster_id]
-                        if len(nn_ids) < transductive_corpus_size:
-                            n_additional_docs = transductive_corpus_size - len(nn_ids)
-                            nn_ids += random.sample(list(all_doc_ids), n_additional_docs)
-                        nn_ids = nn_ids[:transductive_corpus_size]
-                        sub_dataset_embeddings.append(
-                            torch.stack([
-                                all_doc_embeddings[all_docs_idx[nn_id]]
-                                for nn_id in nn_ids
-                            ])
-                        )
-                        sub_dataset_embeddings = torch.stack(sub_dataset_embeddings)
-                        doc_dataset_embeddings.append(sub_dataset_embeddings)
-                    
+                    cluster_id = doc_clusters[doc_id]
+                    nn_ids = corpus_cluster_ids[cluster_id]
+                    if len(nn_ids) < transductive_corpus_size:
+                        n_additional_docs = transductive_corpus_size - len(nn_ids)
+                        nn_ids += random.sample(list(all_doc_ids), n_additional_docs)
+                    nn_ids = nn_ids[:transductive_corpus_size]
+                    sub_dataset_embeddings = torch.stack([
+                            all_doc_embeddings[all_docs_idx[nn_id]]
+                            for nn_id in nn_ids
+                        ])
+                
                     doc = corpus[doc_id]
-                    yield { 
+                    return { 
                         "text": '{} {}'.format(doc.get('title', ''), doc['text']).strip(), 
-                        "dataset_embeddings": torch.stack(doc_dataset_embeddings)
+                        "dataset_embeddings": sub_dataset_embeddings
                     }
+                # examples = list(map(sub_corpus_gen, sub_corpus_ids))
+                # mp.set_start_method("spawn", force=True)
+                # with mp.Pool(mp.cpu_count()) as pool:
+                #     examples = pool.map(
+                #         sub_corpus_gen, 
+                #         tqdm.tqdm(sub_corpus_ids, desc="stacking doc embeddings", colour="green")
+                #     )
+                # pool.close()
+                # pool.join()
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as executor:
+                    examples = list(
+                        tqdm.tqdm(
+                            executor.map(
+                                sub_corpus_gen, 
+                                sub_corpus_ids
+                            ), 
+                            desc="stacking doc embeddings", 
+                            total=len(sub_corpus_ids), 
+                            colour="green"
+                        )
+                    )
 
                 print(f"creating dataset from {len(sub_corpus)} docs/embeddings")
-                sub_corpus_ds = datasets.IterableDataset.from_generator(
-                    sub_corpus_gen
+                # sub_corpus_ds = datasets.IterableDataset.from_generator(
+                #     sub_corpus_gen
+                # )
+                # sub_corpus_ds = sub_corpus_ds.with_format("torch")
+                sub_corpus_ds = datasets.Dataset.from_list(
+                    examples, 
+                    # features=query_text_ds.features
                 )
-                sub_corpus_ds = sub_corpus_ds.with_format("torch")
-                # sub_corpus_ds = datasets.Dataset.from_dict({ 
-                #     "text": ['{} {}'.format(doc.get('title', ''), doc['text']).strip() for doc in sub_corpus], 
-                #     "dataset_embeddings": torch.cat(doc_dataset_embeddings)
-                # })
-                # sub_corpus_ds.set_format("torch")
+                sub_corpus_ds.set_format("torch")
                 print(f"created IterableDataset from {len(sub_corpus)} docs/embeddings")
                 sub_corpus_embeddings = self.model.encode_corpus(
                     sub_corpus_ds,
