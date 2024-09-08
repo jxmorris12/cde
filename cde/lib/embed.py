@@ -39,7 +39,7 @@ def embed_dataloader(
         if "token_type_ids" in batch_dict:
             batch_dict.pop("token_type_ids")
         batch_dict = move_to_cuda(batch_dict)
-        with torch.autocast(embed_device, dtype=torch.bfloat16):
+        with torch.autocast(embed_device, dtype=torch.bfloat16), torch.no_grad():
             outputs = encoder(**batch_dict, **kwargs)
         if hasattr(outputs, 'pooler_output'):
             embeds = outputs.pooler_output

@@ -17,6 +17,7 @@ import pyarrow as pa
 import pytrec_eval
 import torch
 import torch.multiprocessing as mp
+import transformers
 import tqdm
 from sentence_transformers import CrossEncoder
 
@@ -98,8 +99,8 @@ class DenseRetrievalExactSearch:
             convert_to_tensor=True,
             output_device="cpu",
         )
-        # all_doc_embeddings = all_doc_embeddings.to(torch.float16)
-        # all_doc_embeddings.share_memory_()
+        all_doc_embeddings = all_doc_embeddings
+        all_doc_embeddings.share_memory_()
         all_docs_idx = { doc_id: i for i, doc_id in enumerate(all_doc_ids) }
 
         if hasattr(self.model.encoder, "module"):
@@ -190,51 +191,47 @@ class DenseRetrievalExactSearch:
                     nn_ids = nn_ids[:transductive_corpus_size]
                     nn_doc_idxs = torch.tensor([all_docs_idx[nn_id] for nn_id in nn_ids])
                     doc = corpus[doc_id]
+                    text = '{} {}'.format(doc.get('title', ''), doc['text']).strip()
                     return { 
-                        "text": '{} {}'.format(doc.get('title', ''), doc['text']).strip(), 
+                        "text": text, 
                         "nn_doc_idxs": nn_doc_idxs
                     }
                 
                 def example_id_transform(ex):
                     texts = []
                     nn_doc_idxs = []
-                    # print("collecting, ex.keys()")
                     for c_id in ex["id"]:
-                        # print("iterating ->", c_id)
                         ex = sub_corpus_gen(c_id)
                         nn_doc_idxs.append(ex["nn_doc_idxs"])
                         texts.append(ex["text"])
                     
                     nn_doc_idxs = torch.stack(nn_doc_idxs)
-                    # print("[1] indexing")
                     dataset_embeddings = all_doc_embeddings[nn_doc_idxs].clone()
-                    # print("[2] done")
-                    # print("[3] tokenizing")
                     batch_dict = self.model.tokenizer(
-                        [self.model.document_prefix + ex["text"][:self.model._max_num_chars] for t in texts],
+                        [(self.model.document_prefix + t) for t in texts],
                         max_length=self.model.max_length,
                         padding=True,
                         truncation=True,
                         return_tensors="pt",
                     )
-                    output_ex = {**batch_dict, "dataset_embeddings": dataset_embeddings}
-                    print("[4] returning:", {k: v.shape for k,v in output_ex.items()})
-                    return output_ex
+                    return  {**batch_dict, "dataset_embeddings": dataset_embeddings}
                 
                 dataset = datasets.Dataset.from_dict({ "id": sub_corpus_ids })
                 dataset.set_transform(example_id_transform)
 
-                num_workers = min(len(os.sched_getaffinity(0)), self.model.gpu_count)
-                effective_batch_size = min(self.batch_size, max(1, len(dataset) // max(1, num_workers)))
-                print("[DRES] making dataloader with num_workers={num_workers} // effective_batch_size =", effective_batch_size)
+                num_workers = min(len(os.sched_getaffinity(0)), self.model.gpu_count * 8)
+                effective_batch_size = min(256, max(1, len(dataset) // max(1, num_workers)))
+                print(f"[DenseRetrievalExactSearch] making dataloader with num_workers={num_workers} // effective_batch_size = {effective_batch_size}")
+                data_collator = transformers.DataCollatorWithPadding(self.model.tokenizer, pad_to_multiple_of=8)
                 data_loader = torch.utils.data.DataLoader(
                     dataset,
                     batch_size=effective_batch_size,
                     shuffle=False,
                     drop_last=False,
+                    # num_workers=0, 
                     num_workers=num_workers, 
                     pin_memory=True,
-                    collate_fn=None,
+                    collate_fn=data_collator,
                 )
                 sub_corpus_embeddings = embed_dataloader(
                     self.model.encoder,
@@ -243,15 +240,9 @@ class DenseRetrievalExactSearch:
                     convert_to_tensor=True,
                     show_progress_bar=True,
                     leave_progress_bar=False,
-                    output_device="cpu",
+                    output_device="cuda",
                     **self.model.model_kwargs
                 )
-                # sub_corpus_embeddings = self.model.encode_corpus(
-                #     sub_corpus_ds,
-                #     batch_size=self.batch_size,
-                #     show_progress_bar=self.show_progress_bar,
-                #     convert_to_tensor=self.convert_to_tensor,
-                # )
                 if self.save_corpus_embeddings and "qid" in kwargs:
                     self.corpus_embeddings[kwargs["qid"]].append(sub_corpus_embeddings)
 
@@ -260,6 +251,7 @@ class DenseRetrievalExactSearch:
                 query_embeddings, sub_corpus_embeddings
             )
             cos_scores[torch.isnan(cos_scores)] = -1
+            # breakpoint()
 
             # Get top-k values
             cos_scores_top_k_values, cos_scores_top_k_idx = torch.topk(
