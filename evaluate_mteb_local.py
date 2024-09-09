@@ -1,3 +1,4 @@
+
 import faiss # Need to import first for some reason.
 
 import argparse
@@ -12,8 +13,6 @@ from cde.lib.model_configs import MODEL_FOLDER_DICT
 from cde.lib.utils import analyze_utils
 
 from cde.lib.eval.mteb import MTEB
-
-
 
 TASK_LIST_RETRIEVAL = [
     "FiQA2018", 
@@ -46,7 +45,8 @@ TASK_LIST_RETRIEVAL = [
     "MSMARCO",
 ]
 
-TASK_LIST_RETRIEVAL = ["NFCorpus"] # Tiniest dataset, I think.
+TASK_LIST_RETRIEVAL = [ "FEVER" ] # A big one
+# TASK_LIST_RETRIEVAL = ["NFCorpus"] # Tiniest dataset, I think.
 # TASK_LIST_RETRIEVAL = ["SCIDOCS", "SciFact", "NFCorpus"] # Tiny datasets.
 # TASK_LIST_RETRIEVAL = ["SCIDOCS", "SciFact", "NFCorpus", "TRECCOVID", "Touche2020"] # Small datasets.
 # TASK_LIST_RETRIEVAL = ["TRECCOVID"]
@@ -131,7 +131,7 @@ def main():
             batch_size=512, 
             # corpus_chunk_size=500,
             # corpus_chunk_size=10_000,
-            corpus_chunk_size=50_000,
+            corpus_chunk_size=100_000,
             verbosity=2,
             eval_splits=[split]
         )

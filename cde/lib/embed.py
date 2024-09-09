@@ -1,8 +1,8 @@
 from typing import Dict, List, Mapping, Optional, Union
 
 import functools
-import math
 import os
+import uuid
 
 import datasets
 import numpy as np
@@ -166,7 +166,7 @@ class DenseEncoder(torch.nn.Module):
         ) -> torch.utils.data.DataLoader:
         if isinstance(dataset, list):
             if isinstance(dataset[0], str):
-                dataset = datasets.Dataset.from_dict({ col: dataset })
+                dataset = datasets.Dataset.from_dict({ col: dataset }) #, fingerprint=str(uuid.uuid4()))
             elif isinstance(dataset[0], dict):
                 dataset = datasets.Dataset.from_list(dataset)
             else:

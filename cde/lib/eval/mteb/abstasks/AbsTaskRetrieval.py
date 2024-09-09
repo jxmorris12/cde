@@ -367,7 +367,7 @@ class AbsTaskRetrieval(AbsTask):
             corpus.set_format(output_all_columns=True) # Necessary for some reason.
             corpus = {
                 doc["id"]: {"title": doc["title"], "text": doc["text"]}
-                for doc in corpus
+                for doc in tqdm.tqdm(corpus, desc="Loading corpus", colour="green")
             }
             self.corpus[split], self.queries[split], self.relevant_docs[split] = (
                 corpus,

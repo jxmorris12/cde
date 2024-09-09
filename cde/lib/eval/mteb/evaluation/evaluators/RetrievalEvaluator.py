@@ -4,7 +4,6 @@ from typing import Dict, Generator, List, Tuple
 import concurrent.futures
 import heapq
 import json
-import hashlib
 import logging
 import os
 import random
@@ -13,10 +12,8 @@ from collections import defaultdict
 
 import datasets
 import numpy as np
-import pyarrow as pa
 import pytrec_eval
 import torch
-import torch.multiprocessing as mp
 import transformers
 import tqdm
 from sentence_transformers import CrossEncoder
@@ -27,6 +24,7 @@ from .utils import cos_sim, dot_score, download, hole, mrr, recall_cap, top_k_ac
 from cde.lib.embed import embed_dataloader
 
 logger = logging.getLogger(__name__)
+
 
 # Adapted from https://github.com/beir-cellar/beir/blob/f062f038c4bfd19a8ca942a9910b1e0d218759d4/beir/retrieval/search/dense/exact_search.py#L12
 class DenseRetrievalExactSearch:
@@ -100,6 +98,7 @@ class DenseRetrievalExactSearch:
             output_device="cpu",
         )
         all_doc_embeddings = all_doc_embeddings
+        all_doc_embeddings = all_doc_embeddings.to(torch.float16)
         all_doc_embeddings.share_memory_()
         all_docs_idx = { doc_id: i for i, doc_id in enumerate(all_doc_ids) }
 
@@ -111,11 +110,13 @@ class DenseRetrievalExactSearch:
         # Get first-stage embeddings for 
         # all relevant documents
         query_dataset_embeddings = []
-        for q_id in queries.keys():
+        for q_id in tqdm.tqdm(queries.keys(), desc="Collecting nearest neighbors for queries"):
             nn_ids = corpus_cluster_ids[query_cluster_ids[q_id]]
             if len(nn_ids) < transductive_corpus_size:
                 n_additional_docs = transductive_corpus_size - len(nn_ids)
-                nn_ids += random.sample(list(all_doc_ids), n_additional_docs)
+                nn_ids += (
+                    random.sample(all_doc_ids, n_additional_docs)
+                )
             nn_ids = nn_ids[:transductive_corpus_size]
             nn_doc_idxs = torch.tensor([all_docs_idx[nn_id] for nn_id in nn_ids])
             query_dataset_embeddings.append(
@@ -137,12 +138,13 @@ class DenseRetrievalExactSearch:
             convert_to_tensor=self.convert_to_tensor,
         )
 
-        logger.info("Sorting Corpus by document length (Longest first)...")
-        corpus_ids = sorted(
-            corpus,
-            key=lambda k: len(corpus[k].get("title", "") + corpus[k].get("text", "")),
-            reverse=True,
-        )
+        # logger.info("Sorting Corpus by document length (Longest first)...")
+        corpus_ids = list(corpus.keys())
+        # corpus_ids = sorted(
+        #     corpus,
+        #     key=lambda k: len(corpus[k].get("title", "") + corpus[k].get("text", "")),
+        #     reverse=True,
+        # )
         corpus_text = [corpus[cid] for cid in corpus_ids]
 
         logger.info("Encoding Corpus in batches... Warning: This might take a while!")
@@ -152,19 +154,101 @@ class DenseRetrievalExactSearch:
             )
         )
 
-        itr = tqdm.trange(0, len(corpus_text), self.corpus_chunk_size, desc="Embedding corpus")
-
         # Reverse corpus mapping
         doc_clusters = {}
         for cluster_id, doc_ids in corpus_cluster_ids.items():
             for doc_id in doc_ids:
                 doc_clusters[doc_id] = cluster_id
+        
+        # all_nn_ids = {}
+        # for doc_id in tqdm.tqdm(all_doc_ids, desc="Getting nearest neighbors for all docs"):
+        #     cluster_id = doc_clusters[doc_id]
+        #     nn_ids = corpus_cluster_ids[cluster_id]
+        #     if len(nn_ids) < transductive_corpus_size:
+        #         n_additional_docs = transductive_corpus_size - len(nn_ids)
+        #         nn_ids += random.sample(list(all_doc_ids), n_additional_docs)
+        #     nn_ids = nn_ids[:transductive_corpus_size]
+        #     all_nn_ids[doc_id] = torch.tensor([all_docs_idx[nn_id] for nn_id in nn_ids])
 
+        all_nn_ids = {}
+        def get_nearest_neighbors(doc_id):
+            cluster_id = doc_clusters[doc_id]
+            nn_ids = corpus_cluster_ids[cluster_id]
+            if len(nn_ids) < transductive_corpus_size:
+                n_additional_docs = transductive_corpus_size - len(nn_ids)
+                nn_ids += random.sample(all_doc_ids, n_additional_docs)
+            nn_ids = nn_ids[:transductive_corpus_size]
+            return torch.tensor([all_docs_idx[nn_id] for nn_id in nn_ids])
+        
+        with tqdm.tqdm(total=len(all_doc_ids), desc="Getting nearest neighbors for all docs") as pbar:
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                futures = {executor.submit(get_nearest_neighbors, doc_id): doc_id for doc_id in all_doc_ids}
+                for future in concurrent.futures.as_completed(futures):
+                    doc_id = futures[future]
+                    try:
+                        all_nn_ids[doc_id] = future.result()
+                    except Exception as e:
+                        print(f"Error getting nearest neighbors for document {doc_id}: {e}")
+                    finally:
+                        pbar.update(1)
+        
+        print("[DenseEncoder] Creating dataloader and preparing to encode docs...")
+        # Encode chunk of corpus
+        def example_id_transform(ex):
+            texts = []
+            nn_doc_idxs = []
+            for c_id in ex["id"]:
+                doc = corpus[c_id]
+                text = '{} {}'.format(doc.get('title', ''), doc['text']).strip()
+                nn_doc_idxs.append(all_nn_ids[c_id])
+                texts.append(text)
+            
+            os.environ["TOKENIZERS_PARALLELISM"] = "1"
+            
+            nn_doc_idxs = torch.stack(nn_doc_idxs)
+            dataset_embeddings = all_doc_embeddings[nn_doc_idxs].to(torch.float32)
+            batch_dict = self.model.tokenizer(
+                [(self.model.document_prefix + t)[:self.model._max_num_chars] for t in texts],
+                max_length=self.model.max_length,
+                padding=True,
+                truncation=True,
+                return_tensors="pt",
+            )
+            return  {**batch_dict, "dataset_embeddings": dataset_embeddings}
+        
+        dataset = datasets.Dataset.from_dict({ "id": corpus_ids })
+        dataset.set_transform(example_id_transform)
+
+        num_workers = min(len(os.sched_getaffinity(0)), self.model.gpu_count * 4)
+        effective_batch_size = min(128 * self.model.gpu_count, max(1, len(dataset) // max(1, num_workers)))
+        print(f"[DenseRetrievalExactSearch] making dataloader with num_workers={num_workers} // effective_batch_size = {effective_batch_size}")
+        data_collator = transformers.DataCollatorWithPadding(self.model.tokenizer, pad_to_multiple_of=8)
+        data_loader = torch.utils.data.DataLoader(
+            dataset,
+            batch_size=effective_batch_size,
+            shuffle=False,
+            drop_last=False,
+            num_workers=num_workers, 
+            pin_memory=True,
+            collate_fn=data_collator,
+        )
+        all_corpus_embeddings = embed_dataloader(
+            self.model.encoder,
+            data_loader, 
+            col="text",
+            convert_to_tensor=True,
+            show_progress_bar=True,
+            leave_progress_bar=False,
+            output_device="cpu",
+            **self.model.model_kwargs
+        )
+        
+        itr = tqdm.trange(0, len(corpus_text), self.corpus_chunk_size, desc=f"Embedding corpus in mini-batches of {self.corpus_chunk_size}")
         result_heaps = {
             qid: [] for qid in query_ids
         }  # Keep only the top-k docs for each query
         for batch_num, corpus_start_idx in enumerate(itr):
-            logger.info("Encoding Batch {}/{}...".format(batch_num + 1, len(itr)))
+            logger.info("Scoring batch {}/{}...".format(batch_num + 1, len(itr)))
             corpus_end_idx = min(corpus_start_idx + self.corpus_chunk_size, len(corpus))
 
             # Encode chunk of corpus
@@ -178,71 +262,8 @@ class DenseRetrievalExactSearch:
                 )
             else:
                 # Get doc dataset embeddings
-                sub_corpus_ids = corpus_ids[corpus_start_idx:corpus_end_idx]
+                sub_corpus_embeddings = all_corpus_embeddings[corpus_start_idx:corpus_end_idx].cuda()
 
-                # Encode chunk of corpus
-
-                def sub_corpus_gen(doc_id: int) -> dict[str, torch.Tensor]:
-                    cluster_id = doc_clusters[doc_id]
-                    nn_ids = corpus_cluster_ids[cluster_id]
-                    if len(nn_ids) < transductive_corpus_size:
-                        n_additional_docs = transductive_corpus_size - len(nn_ids)
-                        nn_ids += random.sample(list(all_doc_ids), n_additional_docs)
-                    nn_ids = nn_ids[:transductive_corpus_size]
-                    nn_doc_idxs = torch.tensor([all_docs_idx[nn_id] for nn_id in nn_ids])
-                    doc = corpus[doc_id]
-                    text = '{} {}'.format(doc.get('title', ''), doc['text']).strip()
-                    return { 
-                        "text": text, 
-                        "nn_doc_idxs": nn_doc_idxs
-                    }
-                
-                def example_id_transform(ex):
-                    texts = []
-                    nn_doc_idxs = []
-                    for c_id in ex["id"]:
-                        ex = sub_corpus_gen(c_id)
-                        nn_doc_idxs.append(ex["nn_doc_idxs"])
-                        texts.append(ex["text"])
-                    
-                    nn_doc_idxs = torch.stack(nn_doc_idxs)
-                    dataset_embeddings = all_doc_embeddings[nn_doc_idxs].clone()
-                    batch_dict = self.model.tokenizer(
-                        [(self.model.document_prefix + t) for t in texts],
-                        max_length=self.model.max_length,
-                        padding=True,
-                        truncation=True,
-                        return_tensors="pt",
-                    )
-                    return  {**batch_dict, "dataset_embeddings": dataset_embeddings}
-                
-                dataset = datasets.Dataset.from_dict({ "id": sub_corpus_ids })
-                dataset.set_transform(example_id_transform)
-
-                num_workers = min(len(os.sched_getaffinity(0)), self.model.gpu_count * 8)
-                effective_batch_size = min(256, max(1, len(dataset) // max(1, num_workers)))
-                print(f"[DenseRetrievalExactSearch] making dataloader with num_workers={num_workers} // effective_batch_size = {effective_batch_size}")
-                data_collator = transformers.DataCollatorWithPadding(self.model.tokenizer, pad_to_multiple_of=8)
-                data_loader = torch.utils.data.DataLoader(
-                    dataset,
-                    batch_size=effective_batch_size,
-                    shuffle=False,
-                    drop_last=False,
-                    # num_workers=0, 
-                    num_workers=num_workers, 
-                    pin_memory=True,
-                    collate_fn=data_collator,
-                )
-                sub_corpus_embeddings = embed_dataloader(
-                    self.model.encoder,
-                    data_loader, 
-                    col="text",
-                    convert_to_tensor=True,
-                    show_progress_bar=True,
-                    leave_progress_bar=False,
-                    output_device="cuda",
-                    **self.model.model_kwargs
-                )
                 if self.save_corpus_embeddings and "qid" in kwargs:
                     self.corpus_embeddings[kwargs["qid"]].append(sub_corpus_embeddings)
 
@@ -317,54 +338,6 @@ class DenseRetrievalExactSearch:
         raise NotImplementedError(
             "You must implement a predict method for your reranker model"
         )
-
-    def encode_corpus(self, 
-            corpus: List[Dict[str, str]], 
-            full_corpus: List[Dict[str, str]],
-            batch_size: int, 
-            **kwargs
-        ):
-        if (
-            "qid" in kwargs
-            and self.save_corpus_embeddings
-            and len(self.corpus_embeddings) > 0
-        ):
-            return self.corpus_embeddings[kwargs["qid"]]
-
-        if isinstance(corpus, dict):
-            sentences = [
-                (corpus["title"][i] + " " + corpus["text"][i]).strip()
-                if "title" in corpus
-                else corpus["text"][i].strip()
-                for i in range(len(corpus["text"]))
-            ]
-        else:
-            sentences = [
-                (doc["title"] + " " + doc["text"]).strip()
-                if "title" in doc
-                else doc["text"].strip()
-                for doc in corpus
-            ]
-
-        if "instructions" in kwargs:  # not used on the doc side
-            new_kwargs = {
-                k: v for k, v in kwargs.items() if k not in ["instructions", "qid"]
-            }
-        else:
-            # can't just delete, cuz assign by reference on kwargs
-            new_kwargs = kwargs
-        
-        
-        corpus_embeddings = self.model.encode_second_stage(
-            sentences, 
-            first_stage_embeddings=first_stage_embeddings, 
-            batch_size=batch_size, **new_kwargs
-        )
-        if self.save_corpus_embeddings and "qid" in kwargs:
-            if isinstance(corpus_embeddings, torch.tensor):
-                corpus_embeddings = corpus_embeddings.cpu().detach()
-            self.corpus_embeddings[kwargs["qid"]] = corpus_embeddings
-        return corpus_embeddings
 
     def encode(self, sentences: List[str], **kwargs):
         return self.model.encode(sentences, **kwargs)
