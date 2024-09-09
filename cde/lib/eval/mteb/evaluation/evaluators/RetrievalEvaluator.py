@@ -2,6 +2,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Tuple
 
 import functools
+import gc
 import heapq
 import json
 import logging
@@ -11,6 +12,7 @@ from collections import defaultdict
 
 
 import datasets
+import hashlib
 import pytrec_eval
 import torch
 import torch.multiprocessing as mp
@@ -24,6 +26,23 @@ from .utils import cos_sim, dot_score, download, hole, mrr, recall_cap, top_k_ac
 from cde.lib.embed import embed_dataloader
 
 logger = logging.getLogger(__name__)
+
+
+class UnhashableFunction:
+    def __init__(self, f):
+        self.f = f
+
+    def __call__(self, *args, **kwargs):
+        return self.f(*args, **kwargs)
+
+    def __getstate__(self):
+        raise ValueError("UnhashableFunction is not hashable")
+
+    def __reduce__(self):
+        raise ValueError("UnhashableFunction is not hashable")
+
+    def __hash__(self):
+        raise ValueError("UnhashableFunction is not hashable")
 
 # Encode chunk of corpus
 def example_id_transform_global(
@@ -202,17 +221,21 @@ class DenseRetrievalExactSearch:
         print("[DenseEncoder] Creating dataloader and preparing to encode docs...")
         
         dataset = datasets.Dataset.from_list([ { "id": _id, **ex } for _id, ex in corpus.items()])
-        mp_manager = mp.Manager()
-        all_nn_ids_g = mp_manager.dict(all_nn_ids)
+        gc.collect()
+        
+        # Disable very slow hashing from hf?
+        all_doc_embeddings.__repr__ = lambda _: hashlib.sha256(str(random.random()).encode()).hexdigest()
+
         example_id_transform = functools.partial(
             example_id_transform_global,
             tokenizer=self.model.tokenizer, 
             prefix=self.model.document_prefix, 
             max_num_chars=self.model._max_num_chars, 
             max_length=self.model.max_length,
-            all_nn_ids=all_nn_ids_g,
+            all_nn_ids=all_nn_ids,
             all_doc_embeddings=all_doc_embeddings,
         )
+        example_id_transform = UnhashableFunction(example_id_transform)
         dataset.set_transform(example_id_transform)
 
         num_workers = min(len(os.sched_getaffinity(0)), self.model.gpu_count * 8)

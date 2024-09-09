@@ -3,7 +3,7 @@
   "mteb_dataset_name": "NFCorpus",
   "mteb_version": "1.10.3",
   "test": {
-    "evaluation_time": 78.6,
+    "evaluation_time": 76.21,
     "map_at_1": 0.06391,
     "map_at_10": 0.14115,
     "map_at_100": 0.17495,
