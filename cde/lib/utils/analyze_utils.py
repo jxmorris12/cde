@@ -12,7 +12,7 @@ from cde.collate import TokenizedCollator
 from cde.dataset import BeirDataset
 from cde.lib import load_embedder_and_tokenizer, ModelConfig
 from cde.model import get_model_class
-from cde.run_args import ModelArguments, DataArguments, TrainingArguments
+# from cde.run_args import ModelArguments, DataArguments, TrainingArguments
 from cde.trainer import CustomTrainer
 
 

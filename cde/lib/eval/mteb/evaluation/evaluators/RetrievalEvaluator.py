@@ -238,7 +238,7 @@ class DenseRetrievalExactSearch:
         example_id_transform = UnhashableFunction(example_id_transform)
         dataset.set_transform(example_id_transform)
 
-        num_workers = min(len(os.sched_getaffinity(0)), self.model.gpu_count * 8)
+        num_workers = min(len(os.sched_getaffinity(0)), self.model.gpu_count * 4)
         effective_batch_size = min(128 * self.model.gpu_count, max(1, len(dataset) // max(1, num_workers)))
         print(f"[DenseRetrievalExactSearch] making dataloader with num_workers={num_workers} // effective_batch_size = {effective_batch_size}")
         data_collator = transformers.DataCollatorWithPadding(self.model.tokenizer, pad_to_multiple_of=8)
