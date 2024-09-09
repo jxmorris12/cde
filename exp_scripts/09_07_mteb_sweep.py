@@ -25,7 +25,7 @@ executor.update_parameters(
 command_str = "python evaluate_mteb_local.py --model_key {model} --cluster_size {cluster_size}" 
 
 args_dict = {
-    "model": ["cde--filter--5epoch", "cde--nofilter--5epoch"],
+    "model": ["cde--filter--5epoch"], #  "cde--base--5epoch"
     "cluster_size": [16384, 8192, 4096, 2048, 1024, 512, 256],
 }
 combinations = list(itertools.product(*args_dict.values()))

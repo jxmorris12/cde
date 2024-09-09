@@ -1,7 +1,7 @@
 from __future__ import annotations
-from typing import Dict, Generator, List, Tuple
+from typing import Any, Dict, List, Tuple
 
-import concurrent.futures
+import functools
 import heapq
 import json
 import logging
@@ -11,9 +11,9 @@ from collections import defaultdict
 
 
 import datasets
-import numpy as np
 import pytrec_eval
 import torch
+import torch.multiprocessing as mp
 import transformers
 import tqdm
 from sentence_transformers import CrossEncoder
@@ -25,6 +25,36 @@ from cde.lib.embed import embed_dataloader
 
 logger = logging.getLogger(__name__)
 
+# Encode chunk of corpus
+def example_id_transform_global(
+        ex: dict[str, list[Any]], 
+        tokenizer: transformers.PreTrainedTokenizer, 
+        prefix: str, 
+        max_num_chars: int, 
+        max_length: int, 
+        all_nn_ids: dict[str, torch.Tensor], 
+        all_doc_embeddings: torch.Tensor
+    ):
+    texts = []
+    nn_doc_idxs = []
+    titles = ex.get("title", ["" for _ in range(len(ex["text"]))])
+    for c_id, title, text in zip(ex["id"], titles, ex["text"]):
+        text = "{} {}".format(title, text).strip()
+        nn_doc_idxs.append(all_nn_ids[c_id])
+        texts.append(text)
+    
+    os.environ["TOKENIZERS_PARALLELISM"] = "1"
+    
+    nn_doc_idxs = torch.stack(nn_doc_idxs)
+    dataset_embeddings = all_doc_embeddings[nn_doc_idxs].to(torch.float32)
+    batch_dict = tokenizer(
+        [(prefix + t)[:max_num_chars] for t in texts],
+        max_length=max_length,
+        padding=True,
+        truncation=True,
+        return_tensors="pt",
+    )
+    return  {**batch_dict, "dataset_embeddings": dataset_embeddings}
 
 # Adapted from https://github.com/beir-cellar/beir/blob/f062f038c4bfd19a8ca942a9910b1e0d218759d4/beir/retrieval/search/dense/exact_search.py#L12
 class DenseRetrievalExactSearch:
@@ -110,13 +140,12 @@ class DenseRetrievalExactSearch:
         # Get first-stage embeddings for 
         # all relevant documents
         query_dataset_embeddings = []
+        random_nn_ids = random.sample(list(all_doc_ids), transductive_corpus_size)
         for q_id in tqdm.tqdm(queries.keys(), desc="Collecting nearest neighbors for queries"):
             nn_ids = corpus_cluster_ids[query_cluster_ids[q_id]]
             if len(nn_ids) < transductive_corpus_size:
-                n_additional_docs = transductive_corpus_size - len(nn_ids)
-                nn_ids += (
-                    random.sample(all_doc_ids, n_additional_docs)
-                )
+                # n_additional_docs = transductive_corpus_size - len(nn_ids)
+                nn_ids = nn_ids + random_nn_ids
             nn_ids = nn_ids[:transductive_corpus_size]
             nn_doc_idxs = torch.tensor([all_docs_idx[nn_id] for nn_id in nn_ids])
             query_dataset_embeddings.append(
@@ -160,66 +189,33 @@ class DenseRetrievalExactSearch:
             for doc_id in doc_ids:
                 doc_clusters[doc_id] = cluster_id
         
-        # all_nn_ids = {}
-        # for doc_id in tqdm.tqdm(all_doc_ids, desc="Getting nearest neighbors for all docs"):
-        #     cluster_id = doc_clusters[doc_id]
-        #     nn_ids = corpus_cluster_ids[cluster_id]
-        #     if len(nn_ids) < transductive_corpus_size:
-        #         n_additional_docs = transductive_corpus_size - len(nn_ids)
-        #         nn_ids += random.sample(list(all_doc_ids), n_additional_docs)
-        #     nn_ids = nn_ids[:transductive_corpus_size]
-        #     all_nn_ids[doc_id] = torch.tensor([all_docs_idx[nn_id] for nn_id in nn_ids])
-
         all_nn_ids = {}
-        def get_nearest_neighbors(doc_id):
+        for doc_id in tqdm.tqdm(all_doc_ids, desc="Getting nearest neighbors for all docs"):
             cluster_id = doc_clusters[doc_id]
-            nn_ids = corpus_cluster_ids[cluster_id]
+            nn_ids = corpus_cluster_ids[cluster_id] 
             if len(nn_ids) < transductive_corpus_size:
-                n_additional_docs = transductive_corpus_size - len(nn_ids)
-                nn_ids += random.sample(all_doc_ids, n_additional_docs)
+                nn_ids = nn_ids + random_nn_ids
             nn_ids = nn_ids[:transductive_corpus_size]
-            return torch.tensor([all_docs_idx[nn_id] for nn_id in nn_ids])
-        
-        with tqdm.tqdm(total=len(all_doc_ids), desc="Getting nearest neighbors for all docs") as pbar:
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                futures = {executor.submit(get_nearest_neighbors, doc_id): doc_id for doc_id in all_doc_ids}
-                for future in concurrent.futures.as_completed(futures):
-                    doc_id = futures[future]
-                    try:
-                        all_nn_ids[doc_id] = future.result()
-                    except Exception as e:
-                        print(f"Error getting nearest neighbors for document {doc_id}: {e}")
-                    finally:
-                        pbar.update(1)
-        
+            # random.shuffle(nn_ids)
+            all_nn_ids[doc_id] = torch.tensor([all_docs_idx[nn_id] for nn_id in nn_ids])
+
         print("[DenseEncoder] Creating dataloader and preparing to encode docs...")
-        # Encode chunk of corpus
-        def example_id_transform(ex):
-            texts = []
-            nn_doc_idxs = []
-            for c_id in ex["id"]:
-                doc = corpus[c_id]
-                text = '{} {}'.format(doc.get('title', ''), doc['text']).strip()
-                nn_doc_idxs.append(all_nn_ids[c_id])
-                texts.append(text)
-            
-            os.environ["TOKENIZERS_PARALLELISM"] = "1"
-            
-            nn_doc_idxs = torch.stack(nn_doc_idxs)
-            dataset_embeddings = all_doc_embeddings[nn_doc_idxs].to(torch.float32)
-            batch_dict = self.model.tokenizer(
-                [(self.model.document_prefix + t)[:self.model._max_num_chars] for t in texts],
-                max_length=self.model.max_length,
-                padding=True,
-                truncation=True,
-                return_tensors="pt",
-            )
-            return  {**batch_dict, "dataset_embeddings": dataset_embeddings}
         
-        dataset = datasets.Dataset.from_dict({ "id": corpus_ids })
+        dataset = datasets.Dataset.from_list([ { "id": _id, **ex } for _id, ex in corpus.items()])
+        mp_manager = mp.Manager()
+        all_nn_ids_g = mp_manager.dict(all_nn_ids)
+        example_id_transform = functools.partial(
+            example_id_transform_global,
+            tokenizer=self.model.tokenizer, 
+            prefix=self.model.document_prefix, 
+            max_num_chars=self.model._max_num_chars, 
+            max_length=self.model.max_length,
+            all_nn_ids=all_nn_ids_g,
+            all_doc_embeddings=all_doc_embeddings,
+        )
         dataset.set_transform(example_id_transform)
 
-        num_workers = min(len(os.sched_getaffinity(0)), self.model.gpu_count * 4)
+        num_workers = min(len(os.sched_getaffinity(0)), self.model.gpu_count * 8)
         effective_batch_size = min(128 * self.model.gpu_count, max(1, len(dataset) // max(1, num_workers)))
         print(f"[DenseRetrievalExactSearch] making dataloader with num_workers={num_workers} // effective_batch_size = {effective_batch_size}")
         data_collator = transformers.DataCollatorWithPadding(self.model.tokenizer, pad_to_multiple_of=8)

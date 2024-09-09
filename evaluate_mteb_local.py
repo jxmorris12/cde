@@ -45,7 +45,7 @@ TASK_LIST_RETRIEVAL = [
     "MSMARCO",
 ]
 
-TASK_LIST_RETRIEVAL = [ "FEVER" ] # A big one
+# TASK_LIST_RETRIEVAL = [ "FEVER" ] # A big one
 # TASK_LIST_RETRIEVAL = ["NFCorpus"] # Tiniest dataset, I think.
 # TASK_LIST_RETRIEVAL = ["SCIDOCS", "SciFact", "NFCorpus"] # Tiny datasets.
 # TASK_LIST_RETRIEVAL = ["SCIDOCS", "SciFact", "NFCorpus", "TRECCOVID", "Touche2020"] # Small datasets.
