@@ -29,8 +29,9 @@ logger = logging.getLogger(__name__)
 
 
 class TransformExamplesDataset(torch.utils.data.Dataset):
-    def __init__(self, dataset, tokenizer, prefix, max_num_chars, max_length, all_nn_ids, all_doc_embeddings):
+    def __init__(self, dataset: datasets.Dataset, corpus_id_to_idx: dict, tokenizer: transformers.PreTrainedTokenizer, prefix: str, max_num_chars: int, max_length: int, all_nn_ids: np.ndarray, all_doc_embeddings: np.ndarray):
         self.dataset = dataset
+        self.corpus_id_to_idx = corpus_id_to_idx
         self.tokenizer = tokenizer
         self.prefix = prefix
         self.max_num_chars = max_num_chars
@@ -38,18 +39,18 @@ class TransformExamplesDataset(torch.utils.data.Dataset):
         self.all_nn_ids = all_nn_ids
         self.all_doc_embeddings = all_doc_embeddings
     
-    def _transform(self, ex_batch):
+    def _transform(self, ex_batch: dict[str, Any]) -> dict[str, torch.Tensor]:
         texts = []
         nn_doc_idxs = []
         titles = ex_batch.get("title", ["" for _ in range(len(ex_batch["text"]))])
         for c_id, title, text in zip(ex_batch["id"], titles, ex_batch["text"]):
             text = "{} {}".format(title, text).strip()
-            nn_doc_idxs.append(self.all_nn_ids[c_id])
+            nn_doc_idxs.append(self.all_nn_ids[self.corpus_id_to_idx[c_id]])
             texts.append(text)
         
         os.environ["TOKENIZERS_PARALLELISM"] = "1"
         
-        nn_doc_idxs = torch.stack(nn_doc_idxs)
+        nn_doc_idxs = np.stack(nn_doc_idxs)
         dataset_embeddings = torch.tensor(self.all_doc_embeddings[nn_doc_idxs], dtype=torch.float32)
         batch_dict = self.tokenizer(
             [(self.prefix + t)[:self.max_num_chars] for t in texts],
@@ -218,15 +219,26 @@ class DenseRetrievalExactSearch:
             for doc_id in doc_ids:
                 doc_clusters[doc_id] = cluster_id
         
-        all_nn_ids = {}
-        for doc_id in tqdm.tqdm(all_doc_ids, desc="Getting nearest neighbors for all docs"):
+        all_nn_ids = np.zeros((len(all_doc_ids), transductive_corpus_size), dtype=np.int64)
+        for j, doc_id in tqdm.tqdm(enumerate(all_doc_ids), total=len(all_doc_ids), desc="Getting nearest neighbors for all docs"):
             cluster_id = doc_clusters[doc_id]
             nn_ids = corpus_cluster_ids[cluster_id] 
             if len(nn_ids) < transductive_corpus_size:
                 nn_ids = nn_ids + random_nn_ids
             # random.shuffle(nn_ids)
             nn_ids = nn_ids[:transductive_corpus_size]
-            all_nn_ids[doc_id] = torch.tensor([all_docs_idx[nn_id] for nn_id in nn_ids])
+            all_nn_ids[j] = np.array([all_docs_idx[nn_id] for nn_id in nn_ids])
+        
+        all_nn_ids_memmap_file = tempfile.NamedTemporaryFile()
+        memmap = np.memmap(
+            filename=all_nn_ids_memmap_file.name, 
+            dtype=np.int64, 
+            mode='w+', 
+            shape=all_nn_ids.shape
+        )
+        memmap[:] = all_nn_ids[:]
+        all_nn_ids = memmap
+        gc.collect()
 
         print("[DenseEncoder] Creating dataloader and preparing to encode docs...")
         
@@ -234,6 +246,7 @@ class DenseRetrievalExactSearch:
 
         dataset_wrapped = TransformExamplesDataset(
             dataset=dataset,
+            corpus_id_to_idx=dict(zip(all_doc_ids, range(len(all_doc_ids)))),
             tokenizer=self.model.tokenizer, 
             prefix=self.model.document_prefix, 
             max_num_chars=self.model._max_num_chars, 
@@ -267,6 +280,7 @@ class DenseRetrievalExactSearch:
             **self.model.model_kwargs
         )
         all_doc_embeddings_memmap_file.close()
+        all_nn_ids_memmap_file.close()
         
         itr = tqdm.trange(0, len(corpus_text), self.corpus_chunk_size, desc=f"Embedding corpus in mini-batches of {self.corpus_chunk_size}")
         result_heaps = {
