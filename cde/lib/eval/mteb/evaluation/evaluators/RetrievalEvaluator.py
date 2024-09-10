@@ -1,21 +1,21 @@
 from __future__ import annotations
 from typing import Any, Dict, List, Tuple
 
-import functools
+import ctypes
 import gc
 import heapq
 import json
 import logging
 import os
 import random
+import tempfile
 from collections import defaultdict
 
 
 import datasets
-import hashlib
+import numpy as np
 import pytrec_eval
 import torch
-import torch.multiprocessing as mp
 import transformers
 import tqdm
 from sentence_transformers import CrossEncoder
@@ -28,52 +28,44 @@ from cde.lib.embed import embed_dataloader
 logger = logging.getLogger(__name__)
 
 
-class UnhashableFunction:
-    def __init__(self, f):
-        self.f = f
-
-    def __call__(self, *args, **kwargs):
-        return self.f(*args, **kwargs)
-
-    def __getstate__(self):
-        raise ValueError("UnhashableFunction is not hashable")
-
-    def __reduce__(self):
-        raise ValueError("UnhashableFunction is not hashable")
-
-    def __hash__(self):
-        raise ValueError("UnhashableFunction is not hashable")
-
-# Encode chunk of corpus
-def example_id_transform_global(
-        ex: dict[str, list[Any]], 
-        tokenizer: transformers.PreTrainedTokenizer, 
-        prefix: str, 
-        max_num_chars: int, 
-        max_length: int, 
-        all_nn_ids: dict[str, torch.Tensor], 
-        all_doc_embeddings: torch.Tensor
-    ):
-    texts = []
-    nn_doc_idxs = []
-    titles = ex.get("title", ["" for _ in range(len(ex["text"]))])
-    for c_id, title, text in zip(ex["id"], titles, ex["text"]):
-        text = "{} {}".format(title, text).strip()
-        nn_doc_idxs.append(all_nn_ids[c_id])
-        texts.append(text)
+class TransformExamplesDataset(torch.utils.data.Dataset):
+    def __init__(self, dataset, tokenizer, prefix, max_num_chars, max_length, all_nn_ids, all_doc_embeddings):
+        self.dataset = dataset
+        self.tokenizer = tokenizer
+        self.prefix = prefix
+        self.max_num_chars = max_num_chars
+        self.max_length = max_length
+        self.all_nn_ids = all_nn_ids
+        self.all_doc_embeddings = all_doc_embeddings
     
-    os.environ["TOKENIZERS_PARALLELISM"] = "1"
+    def _transform(self, ex_batch):
+        texts = []
+        nn_doc_idxs = []
+        titles = ex_batch.get("title", ["" for _ in range(len(ex_batch["text"]))])
+        for c_id, title, text in zip(ex_batch["id"], titles, ex_batch["text"]):
+            text = "{} {}".format(title, text).strip()
+            nn_doc_idxs.append(self.all_nn_ids[c_id])
+            texts.append(text)
+        
+        os.environ["TOKENIZERS_PARALLELISM"] = "1"
+        
+        nn_doc_idxs = torch.stack(nn_doc_idxs)
+        dataset_embeddings = torch.tensor(self.all_doc_embeddings[nn_doc_idxs], dtype=torch.float32)
+        batch_dict = self.tokenizer(
+            [(self.prefix + t)[:self.max_num_chars] for t in texts],
+            max_length=self.max_length,
+            padding=True,
+            truncation=True,
+            return_tensors="pt",
+        )
+        return  {**batch_dict, "dataset_embeddings": dataset_embeddings}
     
-    nn_doc_idxs = torch.stack(nn_doc_idxs)
-    dataset_embeddings = torch.tensor(all_doc_embeddings[nn_doc_idxs], dtype=torch.float32)
-    batch_dict = tokenizer(
-        [(prefix + t)[:max_num_chars] for t in texts],
-        max_length=max_length,
-        padding=True,
-        truncation=True,
-        return_tensors="pt",
-    )
-    return  {**batch_dict, "dataset_embeddings": dataset_embeddings}
+    def __getitems__(self, idx_batch):
+        ex_batch = self.dataset[idx_batch]
+        return self._transform(ex_batch)
+    
+    def __len__(self):
+        return len(self.dataset)
 
 # Adapted from https://github.com/beir-cellar/beir/blob/f062f038c4bfd19a8ca942a9910b1e0d218759d4/beir/retrieval/search/dense/exact_search.py#L12
 class DenseRetrievalExactSearch:
@@ -147,9 +139,26 @@ class DenseRetrievalExactSearch:
             output_device="cpu",
         )
         all_doc_embeddings = all_doc_embeddings
-        all_doc_embeddings = all_doc_embeddings.to(torch.float16)
+        all_doc_embeddings = all_doc_embeddings # .to(torch.float16)
         all_doc_embeddings = all_doc_embeddings.numpy()
-        # all_doc_embeddings.share_memory_()
+
+        all_doc_embeddings_memmap_file = tempfile.NamedTemporaryFile()
+        memmap = np.memmap(
+            filename=all_doc_embeddings_memmap_file.name, 
+            dtype=np.float32, 
+            mode='w+', 
+            shape=all_doc_embeddings.shape
+        )
+        memmap[:] = all_doc_embeddings[:]
+        all_doc_embeddings = memmap
+        gc.collect()
+
+        # shared_array_base = mp.Array(ctypes.c_float, all_doc_embeddings.numel())
+        # shared_array = np.ctypeslib.as_array(shared_array_base.get_obj())
+        # shared_array = shared_array.reshape(*all_doc_embeddings)
+        # shared_array._fill(all_doc_embeddings)
+
+        
         all_docs_idx = { doc_id: i for i, doc_id in enumerate(all_doc_ids) }
 
         if hasattr(self.model.encoder, "module"):
@@ -215,17 +224,16 @@ class DenseRetrievalExactSearch:
             nn_ids = corpus_cluster_ids[cluster_id] 
             if len(nn_ids) < transductive_corpus_size:
                 nn_ids = nn_ids + random_nn_ids
-            nn_ids = nn_ids[:transductive_corpus_size]
             # random.shuffle(nn_ids)
+            nn_ids = nn_ids[:transductive_corpus_size]
             all_nn_ids[doc_id] = torch.tensor([all_docs_idx[nn_id] for nn_id in nn_ids])
 
         print("[DenseEncoder] Creating dataloader and preparing to encode docs...")
         
         dataset = datasets.Dataset.from_list([ { "id": _id, **ex } for _id, ex in corpus.items()])
-        gc.collect()
 
-        example_id_transform = functools.partial(
-            example_id_transform_global,
+        dataset_wrapped = TransformExamplesDataset(
+            dataset=dataset,
             tokenizer=self.model.tokenizer, 
             prefix=self.model.document_prefix, 
             max_num_chars=self.model._max_num_chars, 
@@ -233,21 +241,18 @@ class DenseRetrievalExactSearch:
             all_nn_ids=all_nn_ids,
             all_doc_embeddings=all_doc_embeddings,
         )
-        # Make this function unhashable to disable the extremely slow
-        # and useless fingerprinting process from HF.
-        example_id_transform = UnhashableFunction(example_id_transform)
-        dataset.set_transform(example_id_transform)
 
         num_workers = min(len(os.sched_getaffinity(0)), self.model.gpu_count * 4)
         effective_batch_size = min(128 * self.model.gpu_count, max(1, len(dataset) // max(1, num_workers)))
         print(f"[DenseRetrievalExactSearch] making dataloader with num_workers={num_workers} // effective_batch_size = {effective_batch_size}")
         data_collator = transformers.DataCollatorWithPadding(self.model.tokenizer, pad_to_multiple_of=8)
         data_loader = torch.utils.data.DataLoader(
-            dataset,
+            dataset_wrapped,
             batch_size=effective_batch_size,
             shuffle=False,
             drop_last=False,
             num_workers=num_workers, 
+            prefetch_factor=(4 if num_workers > 0 else None),
             pin_memory=True,
             collate_fn=data_collator,
         )
@@ -261,6 +266,7 @@ class DenseRetrievalExactSearch:
             output_device="cpu",
             **self.model.model_kwargs
         )
+        all_doc_embeddings_memmap_file.close()
         
         itr = tqdm.trange(0, len(corpus_text), self.corpus_chunk_size, desc=f"Embedding corpus in mini-batches of {self.corpus_chunk_size}")
         result_heaps = {

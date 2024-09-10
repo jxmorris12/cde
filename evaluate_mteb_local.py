@@ -19,7 +19,6 @@ TASK_LIST_RETRIEVAL = [
     "TRECCOVID",
     "HotpotQA",
     "ArguAna",
-    "ClimateFEVER",
     "CQADupstackAndroidRetrieval",
     "CQADupstackEnglishRetrieval",
     "CQADupstackGamingRetrieval",
@@ -32,22 +31,23 @@ TASK_LIST_RETRIEVAL = [
     "CQADupstackUnixRetrieval",
     "CQADupstackWebmastersRetrieval",
     "CQADupstackWordpressRetrieval",
-    "DBPedia",
     "FiQA2018",
     "NFCorpus",
-    "NQ",
-    "QuoraRetrieval",
     "SCIDOCS",
     "SciFact",
     "Touche2020",
-    # "TRECCOVID",
+    ##################################################
+    "QuoraRetrieval",
+    "NQ",
+    "ClimateFEVER",
+    "DBPedia",
     "FEVER",
     "MSMARCO",
 ]
 
 # TASK_LIST_RETRIEVAL = [ "FEVER" ] # A big one
 TASK_LIST_RETRIEVAL = ["NQ"] # ~2M - medium-to-large dataset for testing
-# TASK_LIST_RETRIEVAL = ["NFCorpus"] # Tiniest dataset, I think.
+TASK_LIST_RETRIEVAL = ["NFCorpus"] # Tiniest dataset, I think.
 # TASK_LIST_RETRIEVAL = ["SCIDOCS", "SciFact", "NFCorpus"] # Tiny datasets.
 # TASK_LIST_RETRIEVAL = ["SCIDOCS", "SciFact", "NFCorpus", "TRECCOVID", "Touche2020"] # Small datasets.
 # TASK_LIST_RETRIEVAL = ["TRECCOVID"]
