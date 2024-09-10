@@ -65,7 +65,7 @@ def example_id_transform_global(
     os.environ["TOKENIZERS_PARALLELISM"] = "1"
     
     nn_doc_idxs = torch.stack(nn_doc_idxs)
-    dataset_embeddings = all_doc_embeddings[nn_doc_idxs].to(torch.float32)
+    dataset_embeddings = torch.tensor(all_doc_embeddings[nn_doc_idxs], dtype=torch.float32)
     batch_dict = tokenizer(
         [(prefix + t)[:max_num_chars] for t in texts],
         max_length=max_length,
@@ -148,7 +148,8 @@ class DenseRetrievalExactSearch:
         )
         all_doc_embeddings = all_doc_embeddings
         all_doc_embeddings = all_doc_embeddings.to(torch.float16)
-        all_doc_embeddings.share_memory_()
+        all_doc_embeddings = all_doc_embeddings.numpy()
+        # all_doc_embeddings.share_memory_()
         all_docs_idx = { doc_id: i for i, doc_id in enumerate(all_doc_ids) }
 
         if hasattr(self.model.encoder, "module"):
@@ -168,7 +169,7 @@ class DenseRetrievalExactSearch:
             nn_ids = nn_ids[:transductive_corpus_size]
             nn_doc_idxs = torch.tensor([all_docs_idx[nn_id] for nn_id in nn_ids])
             query_dataset_embeddings.append(
-                all_doc_embeddings[nn_doc_idxs]
+                torch.tensor(all_doc_embeddings[nn_doc_idxs])
             )
         assert len(set([e.shape for e in query_dataset_embeddings])) == 1
 
@@ -222,9 +223,6 @@ class DenseRetrievalExactSearch:
         
         dataset = datasets.Dataset.from_list([ { "id": _id, **ex } for _id, ex in corpus.items()])
         gc.collect()
-        
-        # Disable very slow hashing from hf?
-        all_doc_embeddings.__repr__ = lambda _: hashlib.sha256(str(random.random()).encode()).hexdigest()
 
         example_id_transform = functools.partial(
             example_id_transform_global,
@@ -235,6 +233,8 @@ class DenseRetrievalExactSearch:
             all_nn_ids=all_nn_ids,
             all_doc_embeddings=all_doc_embeddings,
         )
+        # Make this function unhashable to disable the extremely slow
+        # and useless fingerprinting process from HF.
         example_id_transform = UnhashableFunction(example_id_transform)
         dataset.set_transform(example_id_transform)
 
