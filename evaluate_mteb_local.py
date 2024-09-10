@@ -46,8 +46,8 @@ TASK_LIST_RETRIEVAL = [
 ]
 
 # TASK_LIST_RETRIEVAL = [ "FEVER" ] # A big one
-# TASK_LIST_RETRIEVAL = ["NQ"] # ~2M - medium-to-large dataset for testing
-TASK_LIST_RETRIEVAL = ["NFCorpus"] # Tiniest dataset, I think.
+TASK_LIST_RETRIEVAL = ["NQ"] # ~2M - medium-to-large dataset for testing
+# TASK_LIST_RETRIEVAL = ["NFCorpus"] # Tiniest dataset, I think.
 # TASK_LIST_RETRIEVAL = ["SCIDOCS", "SciFact", "NFCorpus"] # Tiny datasets.
 # TASK_LIST_RETRIEVAL = ["SCIDOCS", "SciFact", "NFCorpus", "TRECCOVID", "Touche2020"] # Small datasets.
 # TASK_LIST_RETRIEVAL = ["TRECCOVID"]
@@ -120,7 +120,7 @@ def main():
             tasks=[task], 
             task_langs=["en"],
             cluster_embedder="sentence-transformers/gtr-t5-base",
-            cluster_size=256,
+            cluster_size=args.cluster_size,
         )
         split = "dev" if task == "MSMARCO" else "test"
         random.seed(42)
@@ -144,4 +144,7 @@ def main():
     
 
 if __name__ == '__main__':
+    # import torch.multiprocessing as mp
+    # mp.set_start_method("spawn")
+    # mp.set_start_method("forkserver")
     main()

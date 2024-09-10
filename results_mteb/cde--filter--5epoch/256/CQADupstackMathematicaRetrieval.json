@@ -3,7 +3,7 @@
   "mteb_dataset_name": "CQADupstackMathematicaRetrieval",
   "mteb_version": "1.10.3",
   "test": {
-    "evaluation_time": 495.32,
+    "evaluation_time": 488.76,
     "map_at_1": 0.1719,
     "map_at_10": 0.25168,
     "map_at_100": 0.26292,

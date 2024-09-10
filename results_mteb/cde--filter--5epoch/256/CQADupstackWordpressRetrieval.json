@@ -3,7 +3,7 @@
   "mteb_dataset_name": "CQADupstackWordpressRetrieval",
   "mteb_version": "1.10.3",
   "test": {
-    "evaluation_time": 1271.67,
+    "evaluation_time": 1295.2,
     "map_at_1": 0.22594,
     "map_at_10": 0.29856,
     "map_at_100": 0.30944,

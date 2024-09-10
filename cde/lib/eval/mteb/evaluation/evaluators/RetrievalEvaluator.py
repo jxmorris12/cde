@@ -141,17 +141,17 @@ class DenseRetrievalExactSearch:
         )
         all_doc_embeddings = all_doc_embeddings
         all_doc_embeddings = all_doc_embeddings # .to(torch.float16)
-        all_doc_embeddings = all_doc_embeddings.numpy()
+        all_doc_embeddings = all_doc_embeddings.numpy().astype(np.float16)
 
-        all_doc_embeddings_memmap_file = tempfile.NamedTemporaryFile()
-        memmap = np.memmap(
-            filename=all_doc_embeddings_memmap_file.name, 
-            dtype=np.float32, 
-            mode='w+', 
-            shape=all_doc_embeddings.shape
-        )
-        memmap[:] = all_doc_embeddings[:]
-        all_doc_embeddings = memmap
+        # all_doc_embeddings_memmap_file = tempfile.NamedTemporaryFile()
+        # memmap = np.memmap(
+        #     filename=all_doc_embeddings_memmap_file.name, 
+        #     dtype=np.float32, 
+        #     mode='r+', 
+        #     shape=all_doc_embeddings.shape
+        # )
+        # memmap[:] = all_doc_embeddings[:]
+        # all_doc_embeddings = memmap
         gc.collect()
 
         # shared_array_base = mp.Array(ctypes.c_float, all_doc_embeddings.numel())
@@ -199,11 +199,6 @@ class DenseRetrievalExactSearch:
 
         # logger.info("Sorting Corpus by document length (Longest first)...")
         corpus_ids = list(corpus.keys())
-        # corpus_ids = sorted(
-        #     corpus,
-        #     key=lambda k: len(corpus[k].get("title", "") + corpus[k].get("text", "")),
-        #     reverse=True,
-        # )
         corpus_text = [corpus[cid] for cid in corpus_ids]
 
         logger.info("Encoding Corpus in batches... Warning: This might take a while!")
@@ -229,15 +224,15 @@ class DenseRetrievalExactSearch:
             nn_ids = nn_ids[:transductive_corpus_size]
             all_nn_ids[j] = np.array([all_docs_idx[nn_id] for nn_id in nn_ids])
         
-        all_nn_ids_memmap_file = tempfile.NamedTemporaryFile()
-        memmap = np.memmap(
-            filename=all_nn_ids_memmap_file.name, 
-            dtype=np.int64, 
-            mode='w+', 
-            shape=all_nn_ids.shape
-        )
-        memmap[:] = all_nn_ids[:]
-        all_nn_ids = memmap
+        # all_nn_ids_memmap_file = tempfile.NamedTemporaryFile()
+        # memmap = np.memmap(
+        #     filename=all_nn_ids_memmap_file.name, 
+        #     dtype=np.int64, 
+        #     mode='c', 
+        #     shape=all_nn_ids.shape
+        # )
+        # memmap[:] = all_nn_ids[:]
+        # all_nn_ids = memmap
         gc.collect()
 
         print("[DenseEncoder] Creating dataloader and preparing to encode docs...")
@@ -255,8 +250,8 @@ class DenseRetrievalExactSearch:
             all_doc_embeddings=all_doc_embeddings,
         )
 
-        num_workers = min(len(os.sched_getaffinity(0)), self.model.gpu_count * 4)
-        effective_batch_size = min(128 * self.model.gpu_count, max(1, len(dataset) // max(1, num_workers)))
+        num_workers = min(len(os.sched_getaffinity(0)), self.model.gpu_count * 2)
+        effective_batch_size = min(self.batch_size // 2 * self.model.gpu_count, max(1, len(dataset) // max(1, num_workers)))
         print(f"[DenseRetrievalExactSearch] making dataloader with num_workers={num_workers} // effective_batch_size = {effective_batch_size}")
         data_collator = transformers.DataCollatorWithPadding(self.model.tokenizer, pad_to_multiple_of=8)
         data_loader = torch.utils.data.DataLoader(
@@ -268,6 +263,7 @@ class DenseRetrievalExactSearch:
             prefetch_factor=(4 if num_workers > 0 else None),
             pin_memory=True,
             collate_fn=data_collator,
+            # multiprocessing_context=("forkserver" if len(dataset_wrapped) > 500_000 else "fork"),
         )
         all_corpus_embeddings = embed_dataloader(
             self.model.encoder,
@@ -279,8 +275,8 @@ class DenseRetrievalExactSearch:
             output_device="cpu",
             **self.model.model_kwargs
         )
-        all_doc_embeddings_memmap_file.close()
-        all_nn_ids_memmap_file.close()
+        # all_doc_embeddings_memmap_file.close()
+        # all_nn_ids_memmap_file.close()
         
         itr = tqdm.trange(0, len(corpus_text), self.corpus_chunk_size, desc=f"Embedding corpus in mini-batches of {self.corpus_chunk_size}")
         result_heaps = {
