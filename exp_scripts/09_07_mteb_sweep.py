@@ -26,7 +26,7 @@ command_str = "python evaluate_mteb_local.py --model_key {model} --cluster_size 
 
 args_dict = {
     "model": ["cde--filter--5epoch"], #  "cde--base--5epoch"
-    "cluster_size": [16384, 8192, 4096, 2048, 1024, 512, 256],
+    "cluster_size": [16384, 8192, 4096, 2048, 1024, 512, 256, 64],
 }
 combinations = list(itertools.product(*args_dict.values()))
 args_list = [{key: value for key, value in zip(args_dict.keys(), combination)} for combination in combinations]

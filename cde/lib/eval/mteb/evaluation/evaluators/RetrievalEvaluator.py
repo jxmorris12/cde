@@ -141,7 +141,8 @@ class DenseRetrievalExactSearch:
         )
         all_doc_embeddings = all_doc_embeddings
         all_doc_embeddings = all_doc_embeddings # .to(torch.float16)
-        all_doc_embeddings = all_doc_embeddings.numpy().astype(np.float16)
+        all_doc_embeddings = all_doc_embeddings.numpy()
+        # all_doc_embeddings = all_doc_embeddings.astype(np.float16)
 
         # all_doc_embeddings_memmap_file = tempfile.NamedTemporaryFile()
         # memmap = np.memmap(

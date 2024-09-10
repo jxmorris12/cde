@@ -43,9 +43,9 @@ with executor.batch():
         print(f"Job {idx+1}/{len(args_list)}:", args)
         result_command = command_str.format(**args)
         function = submitit.helpers.CommandFunction(shlex.split(result_command))
-        # print(result_command)
-        job = executor.submit(function)
-        jobs.append(job)
+        print(result_command)
+        # job = executor.submit(function)
+        # jobs.append(job)
 
 print(f"*** SUBMITIT: Successfully submitted {len(jobs)} jobs. ***")
 
