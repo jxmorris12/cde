@@ -381,6 +381,12 @@ class CustomTrainer(transformers.Trainer, TrainerNegativeFilterMixin):
         negative_document_inputs = inputs_for_key(inputs, key="negative_document")
         dataset_inputs = inputs_for_key(inputs, key="dataset")
 
+        # Flatten hard negative ids
+        if len(negative_document_inputs["input_ids"].shape) == 3:
+            seq_length = negative_document_inputs["input_ids"].shape[2]
+            negative_document_inputs["input_ids"] = negative_document_inputs["input_ids"].reshape(-1, seq_length)
+            negative_document_inputs["attention_mask"] = negative_document_inputs["attention_mask"].reshape(-1, seq_length)
+
         batch_size = query_inputs["input_ids"].shape[0]
         if self.args.transductive_input_strategy == "fake":
             fake_seq_length = 128
@@ -560,10 +566,8 @@ class CustomTrainer(transformers.Trainer, TrainerNegativeFilterMixin):
             else:
                 smart_labels_neg = qd_scores >= self.args.hn_tune_threshold
             
-            # if self._is_main_worker:
-            #     breakpoint()
-            # torch.distributed.barrier()
-
+            assert smart_labels_neg.shape == smart_labels.shape, f"got different shapes {smart_labels_neg.shape} and {smart_labels.shape}"
+            
             smart_labels = smart_labels | smart_labels_neg
             hard_negatives_metrics = {
                 "smart_hn_exceed_threshold": (qd_scores >= self.args.hn_tune_threshold).long().sum(),
@@ -609,7 +613,9 @@ class CustomTrainer(transformers.Trainer, TrainerNegativeFilterMixin):
             "stats_document_first_token_value_mean": document_first_tokens.float().mean(),
             ###############################################################################
             "stats_one_hot_labels_sum": one_hot_labels.long().sum().detach(),
-            "stats_smart_labels_sum": smart_labels.long().sum().detach(),
+            "stats_smart_labels_sum": smart_labels.long().sum().detach(),"
+            "stats_smart_labels_shape_0": smart_labels.shape[0],
+            "stats_smart_labels_shape_1": smart_labels.shape[1],
             **hard_negatives_metrics,
         }
         if self.is_in_train:

@@ -2,7 +2,6 @@ from typing import Dict, List, Mapping, Optional, Union
 
 import functools
 import os
-import uuid
 
 import datasets
 import numpy as np
@@ -39,6 +38,10 @@ def embed_dataloader(
         if "token_type_ids" in batch_dict:
             batch_dict.pop("token_type_ids")
         batch_dict = move_to_cuda(batch_dict)
+        # TODO: Intelligently look into encoder kwargs and delete unmatching ones.
+        for unwanted_key in ["prompt_name", "request_qid"]:
+            if unwanted_key in kwargs:
+                kwargs.pop(unwanted_key)
         with torch.autocast(embed_device, dtype=torch.bfloat16), torch.no_grad():
             outputs = encoder(**batch_dict, **kwargs)
         if hasattr(outputs, 'pooler_output'):
@@ -172,7 +175,7 @@ class DenseEncoder(torch.nn.Module):
             else:
                 raise RuntimeError("unknown dataset format to encode")
         
-        os.environ["TOKENIZERS_PARALLELISM"] = "1"
+        os.environ["TOKENIZERS_PARALLELISM"] = "0"
 
         tokenize_fn = functools.partial(
             self.tokenize_transform, 

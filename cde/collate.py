@@ -61,8 +61,11 @@ class TokenizedCollator(transformers.DataCollatorWithPadding):
         out_ex = collections.defaultdict(list)
         for ex in features:
             for col in ex:
-                if isinstance(ex[col], list) and not len(ex[col]): continue
-                out_ex[col].append(ex[col])
+                if isinstance(ex[col], list):
+                    if not len(ex[col]): continue
+                    out_ex[col].extend(ex[col])
+                else:
+                    out_ex[col].append(ex[col])
 
 
         extra_keys = []

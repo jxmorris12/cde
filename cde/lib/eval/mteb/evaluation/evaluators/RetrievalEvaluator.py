@@ -8,7 +8,6 @@ import json
 import logging
 import os
 import random
-import tempfile
 from collections import defaultdict
 
 
@@ -48,12 +47,12 @@ class TransformExamplesDataset(torch.utils.data.Dataset):
             nn_doc_idxs.append(self.all_nn_ids[self.corpus_id_to_idx[c_id]])
             texts.append(text)
         
-        os.environ["TOKENIZERS_PARALLELISM"] = "1"
+        os.environ["TOKENIZERS_PARALLELISM"] = "0"
         
         nn_doc_idxs = np.stack(nn_doc_idxs)
         dataset_embeddings = torch.tensor(self.all_doc_embeddings[nn_doc_idxs], dtype=torch.float32)
         batch_dict = self.tokenizer(
-            [(self.prefix + t)[:self.max_num_chars] for t in texts],
+            [self.prefix + t[:self.max_num_chars] for t in texts],
             max_length=self.max_length,
             padding=True,
             truncation=True,
@@ -139,30 +138,12 @@ class DenseRetrievalExactSearch:
             convert_to_tensor=True,
             output_device="cpu",
         )
-        all_doc_embeddings = all_doc_embeddings
-        all_doc_embeddings = all_doc_embeddings # .to(torch.float16)
         all_doc_embeddings = all_doc_embeddings.numpy()
         # all_doc_embeddings = all_doc_embeddings.astype(np.float16)
 
-        # all_doc_embeddings_memmap_file = tempfile.NamedTemporaryFile()
-        # memmap = np.memmap(
-        #     filename=all_doc_embeddings_memmap_file.name, 
-        #     dtype=np.float32, 
-        #     mode='r+', 
-        #     shape=all_doc_embeddings.shape
-        # )
-        # memmap[:] = all_doc_embeddings[:]
-        # all_doc_embeddings = memmap
         gc.collect()
-
-        # shared_array_base = mp.Array(ctypes.c_float, all_doc_embeddings.numel())
-        # shared_array = np.ctypeslib.as_array(shared_array_base.get_obj())
-        # shared_array = shared_array.reshape(*all_doc_embeddings)
-        # shared_array._fill(all_doc_embeddings)
-
         
         all_docs_idx = { doc_id: i for i, doc_id in enumerate(all_doc_ids) }
-
         if hasattr(self.model.encoder, "module"):
             transductive_corpus_size = self.model.encoder.module.config.transductive_corpus_size
         else:
@@ -174,6 +155,7 @@ class DenseRetrievalExactSearch:
         random_nn_ids = random.sample(list(all_doc_ids), transductive_corpus_size)
         for q_id in tqdm.tqdm(queries.keys(), desc="Collecting nearest neighbors for queries"):
             nn_ids = corpus_cluster_ids[query_cluster_ids[q_id]]
+            # nn_ids = random_nn_ids
             if len(nn_ids) < transductive_corpus_size:
                 # n_additional_docs = transductive_corpus_size - len(nn_ids)
                 nn_ids = nn_ids + random_nn_ids
@@ -216,28 +198,23 @@ class DenseRetrievalExactSearch:
                 doc_clusters[doc_id] = cluster_id
         
         all_nn_ids = np.zeros((len(all_doc_ids), transductive_corpus_size), dtype=np.int64)
-        for j, doc_id in tqdm.tqdm(enumerate(all_doc_ids), total=len(all_doc_ids), desc="Getting nearest neighbors for all docs"):
+        for j, doc_id in tqdm.tqdm(
+                enumerate(all_doc_ids), 
+                total=len(all_doc_ids), 
+                desc="Getting nearest neighbors for all docs"
+            ):
             cluster_id = doc_clusters[doc_id]
             nn_ids = corpus_cluster_ids[cluster_id] 
+            # nn_ids = random_nn_ids
             if len(nn_ids) < transductive_corpus_size:
                 nn_ids = nn_ids + random_nn_ids
             # random.shuffle(nn_ids)
             nn_ids = nn_ids[:transductive_corpus_size]
             all_nn_ids[j] = np.array([all_docs_idx[nn_id] for nn_id in nn_ids])
         
-        # all_nn_ids_memmap_file = tempfile.NamedTemporaryFile()
-        # memmap = np.memmap(
-        #     filename=all_nn_ids_memmap_file.name, 
-        #     dtype=np.int64, 
-        #     mode='c', 
-        #     shape=all_nn_ids.shape
-        # )
-        # memmap[:] = all_nn_ids[:]
-        # all_nn_ids = memmap
         gc.collect()
 
         print("[DenseEncoder] Creating dataloader and preparing to encode docs...")
-        
         dataset = datasets.Dataset.from_list([ { "id": _id, **ex } for _id, ex in corpus.items()])
 
         dataset_wrapped = TransformExamplesDataset(
@@ -276,8 +253,6 @@ class DenseRetrievalExactSearch:
             output_device="cpu",
             **self.model.model_kwargs
         )
-        # all_doc_embeddings_memmap_file.close()
-        # all_nn_ids_memmap_file.close()
         
         itr = tqdm.trange(0, len(corpus_text), self.corpus_chunk_size, desc=f"Embedding corpus in mini-batches of {self.corpus_chunk_size}")
         result_heaps = {

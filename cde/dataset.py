@@ -216,10 +216,17 @@ class TokenizerMixin:
         )
         for col in ["query", "document", "negative_document", "text"]:
             if not len(ex.get(col, [])): continue 
-            ex_col = ex[col][:max_num_chars]
-            tokenized_col = tokenize_fn(ex_col)
-            ex[f'{col}_input_ids'] = tokenized_col.input_ids[0]
-            ex[f'{col}_attention_mask'] = tokenized_col.attention_mask[0]
+            ex_col = ex[col]
+            
+            if isinstance(ex_col, list):
+                tokenized_col = tokenize_fn([s[:max_num_chars] for s in ex_col])
+                ex[f'{col}_input_ids'] = tokenized_col.input_ids
+                ex[f'{col}_attention_mask'] = tokenized_col.attention_mask
+            else:
+                ex_col = ex_col[:max_num_chars]
+                tokenized_col = tokenize_fn(ex_col)
+                ex[f'{col}_input_ids'] = tokenized_col.input_ids[0]
+                ex[f'{col}_attention_mask'] = tokenized_col.attention_mask[0]
         return ex
 
 
@@ -462,7 +469,6 @@ class NomicSupervisedDataset(torch.utils.data.Dataset, TokenizerMixin):
             document_prefix = ""
         query = query_prefix + ex["query"]
         document = document_prefix + ex["document"]
-        random_idx = random.choice(range(len(self.dataset)))
         random_document = document_prefix + document
 
         num_hard_negatives = min(self.num_hard_negatives, len(ex["negative"]))

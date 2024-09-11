@@ -1,6 +1,4 @@
 import argparse
-import collections
-import functools
 import os
 import random
 
@@ -62,6 +60,7 @@ TASK_LIST_RETRIEVAL = [
 
 # TASK_LIST_RETRIEVAL = ["QuoraRetrieval"]
 # TASK_LIST_RETRIEVAL = ["NFCorpus"]
+TASK_LIST_RETRIEVAL = ["ArguAna"]
 
 def parse_args() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Process model key")
@@ -127,7 +126,7 @@ def main():
         trainer.model.first_stage_model.cuda()
         dataset_inputs = mteb_encoder.tokenizer(
             corpus_documents,
-            return_tensors="pt",
+            return_tensors="pt",s
             max_length=trainer.model.config.max_seq_length,
             padding=True,
             truncation=True,

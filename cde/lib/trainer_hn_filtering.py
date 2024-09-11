@@ -8,12 +8,14 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 from sentence_transformers import SentenceTransformer
 import torch
+import transformers
 
 from cde.lib import (
     gather,
     get_cde_cache_dir, 
     get_rank,
     get_world_size,
+    mean_pool,
     md5_hash_kwargs, 
     print0, 
     tqdm_if_main_worker
@@ -27,6 +29,22 @@ def save_embeddings(embeddings: torch.Tensor, file_path: str):
 
 
 MAX_NUM_EMBEDDINGS_PER_SHARD = 2_000_000
+
+class NomicEmbeddingModelWrapper(torch.nn.Module):
+    # TODO: Put this somewhere else
+    def __init__(self):
+        super().__init__()
+        self.model = transformers.AutoModel.from_pretrained(
+            "nomic-ai/nomic-embed-text-v1", 
+            trust_remote_code=True
+        )
+        self.model.eval()
+    
+    def forward(self, **kwargs):
+        output = self.model(**kwargs)
+        embeddings = mean_pool(output[0], kwargs["attention_mask"])
+        return torch.nn.functional.normalize(embeddings, p=2, dim=1)
+
 
 class TrainerNegativeFilterMixin:
     """Filters hard negatives based on another pre-trained model."""
@@ -162,12 +180,15 @@ class TrainerNegativeFilterMixin:
     def _init_hn_filter_model(self):
         if self._initialized: return
         if (self._hn_filter_model is None):
-            if self.args.hn_filter_model == "nomic":
+            if self.args.hn_filter_model == "nomic_st":
                 self._hn_filter_model = SentenceTransformer(
                     "nomic-ai/nomic-embed-text-v1", 
                     device="cuda" if torch.cuda.is_available() else "cpu",
                     trust_remote_code=True,
                 )
+                self._hn_filter_model.to(self.args.device)
+            elif self.args.hn_filter_model == "nomic":
+                self._hn_filter_model = NomicEmbeddingModelWrapper()
                 self._hn_filter_model.to(self.args.device)
             elif self.args.hn_filter_model == "stella":
                 self._hn_filter_model = SentenceTransformer(
@@ -311,6 +332,31 @@ class TrainerNegativeFilterMixin:
         return query_embeddings, doc_embeddings
             
     def _get_embeddings_nomic(self, query_inputs, document_inputs) -> Tuple[torch.Tensor, torch.Tensor]:
+        from cde.lib.tensor import forward_batched
+        
+        if self._hn_filter_model is None:
+            self._hn_filter_model = NomicEmbeddingModelWrapper()
+            self._hn_filter_model.to(self.args.device)
+
+        with torch.no_grad():
+            query_outputs = forward_batched(
+                model=self._hn_filter_model,
+                input_ids=query_inputs["input_ids"][:, :512],
+                attention_mask=query_inputs["attention_mask"][:, :512],
+                batch_size=(self.args.per_device_train_batch_size * 4),
+            )
+            doc_outputs = forward_batched(
+                model=self._hn_filter_model,
+                input_ids=document_inputs["input_ids"][:, :512],
+                attention_mask=document_inputs["attention_mask"][:, :512],
+                batch_size=(self.args.per_device_train_batch_size * 4),
+            )
+
+        query_embeddings = torch.nn.functional.normalize(query_outputs, p=2, dim=1)
+        doc_embeddings = torch.nn.functional.normalize(doc_outputs, p=2, dim=1)
+        return query_embeddings, doc_embeddings
+
+    def _get_embeddings_nomic_st(self, query_inputs, document_inputs) -> Tuple[torch.Tensor, torch.Tensor]:
         self._init_hn_filter_model()
     
         queries = query_inputs["text"]
@@ -366,6 +412,8 @@ class TrainerNegativeFilterMixin:
             return self._get_embeddings_stella(query_inputs, document_inputs)
         elif self.args.hn_filter_model == "nomic":
             return self._get_embeddings_nomic(query_inputs, document_inputs)
+        elif self.args.hn_filter_model == "nomic_st":
+            return self._get_embeddings_nomic_st(query_inputs, document_inputs)
         else:
             return self._get_embeddings_sentence_transformers(query_inputs, document_inputs)
 
