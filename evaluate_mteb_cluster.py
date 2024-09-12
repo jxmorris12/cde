@@ -6,7 +6,7 @@ import time
 import datasets
 import torch
 
-# from cde.lib import cluster_dataset
+from cde.lib import cluster_dataset
 from cde.lib.embed import DenseEncoder
 from cde.lib.model_configs import MODEL_FOLDER_DICT
 from cde.lib.utils import analyze_utils
@@ -155,6 +155,7 @@ TASK_LIST = (
 # TASK_LIST = TASK_LIST_CLUSTERING
 # TASK_LIST = TASK_LIST_PAIR_CLASSIFICATION
 # TASK_LIST = TASK_LIST_RERANKING
+TASK_LIST = ["ArguAna"]
 
 def parse_args() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Process model key")
@@ -163,6 +164,12 @@ def parse_args() -> argparse.ArgumentParser:
         help="The key for the model", 
         type=str, 
         choices=MODEL_FOLDER_DICT.keys()
+    )
+    parser.add_argument(
+        "--clustering_model",
+        help="The clustering model to use",
+        type=str,
+        default="gtr_base",
     )
     return parser.parse_args()
 
@@ -211,11 +218,7 @@ def main():
         evaluation.tasks[0].load_data()
         if hasattr(evaluation.tasks[0], 'corpus') and split in evaluation.tasks[0].corpus:
             corpus = evaluation.tasks[0].corpus[split]
-            documents = random.choices(list(corpus.values()), k=trainer.model.config.transductive_corpus_size)
-            corpus_documents = [
-                mteb_encoder.document_prefix + '{} {}'.format(doc.get('title', ''), doc['text']).strip() 
-                for doc in documents
-            ]
+            documents = list(corpus.values())
         elif hasattr(evaluation.tasks[0], 'dataset'):
             if isinstance(evaluation.tasks[0].dataset, datasets.Dataset):
                 dataset = evaluation.tasks[0].dataset
@@ -240,13 +243,20 @@ def main():
                 raise ValueError(f"No corpus or dataset - got {column_names}")
             if isinstance(documents[0], list):
                 documents = [sentence for doc in documents for sentence in doc]
-            documents = random.choices(documents, k=trainer.model.config.transductive_corpus_size)
-            corpus_documents = [
-                mteb_encoder.document_prefix + doc
-                for doc in documents
-            ]
         else:
             raise ValueError("No corpus or dataset available")
+        ##################################################
+        dataset_copy = datasets.Dataset.from_dict({ "text": documents })
+        clusters = cluster_dataset(
+            dataset=dataset,
+            query_to_doc=False,
+            model=args.clustering_model,
+            query_key="text",
+            document_key="text",
+            cluster_size=trainer.model.config.transductive_corpus_size,
+            downscale_and_normalize=True,
+        )
+        breakpoint()
         ##################################################
         print(corpus_documents[2])
         trainer.model.first_stage_model.cuda()

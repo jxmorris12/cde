@@ -805,10 +805,10 @@ class CustomTrainer(transformers.Trainer, TrainerNegativeFilterMixin):
             reset_memory()
         return all_metrics
 
-    def evaluate_retrieval_datasets(self, n: int = 64) -> Dict[str, float]:
+    def evaluate_retrieval_datasets(self) -> Dict[str, float]:
         model = self.model
         all_metrics = {}
-        n = 1024
+        n = self.args.num_eval_rerank_samples
         for eval_dataset_name, eval_dataset in self.retrieval_datasets.items():
             metric_key_prefix = f"eval_{eval_dataset_name}"
             metrics = self._retrieval_evaluate(

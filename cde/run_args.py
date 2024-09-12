@@ -70,6 +70,12 @@ class ModelArguments:
             "choices": ["biencoder", "dataset_prefix_biencoder", "transductive", "transductive__encoder_decoder", "two_head_mlp", "contextual_cross_attention"],
         }
     )
+    limit_layers_first_stage: Optional[int] = field(
+        default=None,
+        metadata={
+            "help": "If set, will load backbone and embedders with limited number of layers (first stage model)"
+        }
+    )
     limit_layers: Optional[int] = field(
         default=None,
         metadata={
@@ -394,6 +400,10 @@ class TrainingArguments(transformers.TrainingArguments):
         default=False, metadata={"help": "Whether or not to log to Weights & Biases."}
     )
     report_to: str = "wandb"
+    num_eval_rerank_samples: int = field(
+        default=64,
+        metadata={"help": "Number of samples to rerank during eval"}
+    )
 
     def __setattr__(self, name, value):
         super(transformers.TrainingArguments, self).__setattr__(name, value)

@@ -478,6 +478,7 @@ class DatasetTransformer(transformers.PreTrainedModel):
         
         biencoder_config = copy.deepcopy(config)
         biencoder_config.embedding_output_dim = None
+        biencoder_config.limit_layers = vars(self.config).get("limit_layers_first_stage", False)
         self.first_stage_model = BiEncoder(
             config=biencoder_config,
             embedder=embedder
