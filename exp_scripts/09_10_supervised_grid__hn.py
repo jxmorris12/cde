@@ -21,22 +21,24 @@ executor.update_parameters(
     slurm_qos=os.environ["SLURM_QOS"]
 )
 
-command_str = "torchrun --nproc_per_node 8 finetune.py --per_device_train_batch_size {batch_size} --per_device_eval_batch_size 256 --use_wandb 1 --dataset nomic_supervised --sampling_strategy cluster_within_domain --num_train_epochs 3 --learning_rate 2e-05 --embedder nomic-ai/nomic-bert-2048 --clustering_model gtr_base --clustering_query_to_doc 1 --ddp_find_unused_parameters 0 --eval_rerank_topk 128 --lr_scheduler_type constant_with_warmup --warmup_steps 5600 --disable_dropout 1 --max_seq_length 512 --logging_steps 200 --train_cluster_size {cluster_size} --eval_cluster_size 256 --use_prefix 1 --transductive_corpus_size 512 --save_strategy epoch --logit_scale 50 --max_eval_batches 16 --torch_compile 0 --use_gc 1 --fp16 0 --bf16 1 --eval_steps 400000 --max_batch_size_fits_in_memory 512 --disable_dropout 1 --arch transductive --exp_name 2024-09-10-filter-sweep-nomic-{cluster_size}-{batch_size}-{num_hard_negatives} --exp_group 2024-09-10-filter-sweep-nomic --use_wandb 1 --hn_filter_model nomic --hn_tune_threshold 1 --hn_filter_precompute_vectors=0 --sampling_strategy clustfer_within_domain --ddp_share_negatives_between_gpus 0 --max_batch_size_fits_in_memory 256 --use_wandb 1 --num_hard_negatives {num_hard_negatives}" 
+command_str = "torchrun --nproc_per_node 8 finetune.py --per_device_train_batch_size {batch_size} --per_device_eval_batch_size 256 --use_wandb 1 --dataset nomic_supervised --sampling_strategy cluster_within_domain --num_train_epochs 3 --learning_rate 2e-05 --embedder nomic-ai/nomic-bert-2048 --clustering_model gtr_base --clustering_query_to_doc 1 --ddp_find_unused_parameters 0 --eval_rerank_topk 512 --lr_scheduler_type constant_with_warmup --warmup_steps 100 --disable_dropout 1 --max_seq_length 512 --logging_steps 200 --train_cluster_size {cluster_size} --eval_cluster_size 256 --use_prefix 1 --transductive_corpus_size 512 --save_strategy epoch --logit_scale 50 --max_eval_batches 16 --torch_compile 0 --use_gc 1 --fp16 0 --bf16 1 --eval_steps 2000 --disable_dropout 1 --arch transductive --exp_name 2024-09-10-filter-sweep-5-nomic-{cluster_size}-{batch_size}-{num_hard_negatives} --exp_group 2024-09-10-filter-sweep-5-nomic --use_wandb 1 --hn_filter_model nomic --hn_tune_threshold 1 --hn_filter_precompute_vector 0 --sampling_strategy cluster_within_domain --ddp_share_negatives_between_gpus 0 --max_batch_size_fits_in_memory 128 --use_wandb 1 --num_hard_negatives {num_hard_negatives} --model_state_dict_from_path /fsx-checkpoints/jxm/cde/2024-08-10-transductive-pretrain-transductive-long-12node-filter --ddp_find_unused_parameters 1" 
 
 args_dict = {
-    "architecture": ["biencoder"],
+    "architecture": ["transductive"],
     "sampling_strategy": ["cluster_within_domain"],
     "corpus_size": [512],
     ##############################################################
     "cluster_size": [64, 256, 1024, 4096, 16384, 131072, 131072*2, 131072*4, 131072*8, 131072*16, 131072*32],
-    "batch_size": [4096, 2048, 1024, 512, 256],
-    "num_hard_negatives": [1, 3, 7, 15],
+    "batch_size": [4096, 2048, 1024, 512],
+    "num_hard_negatives": [0, 1, 3, 7],
     ##############################################################
     "epochs": [3],
     "learning_rate": [2e-5],
 }
 combinations = list(itertools.product(*args_dict.values()))
 args_list = [{key: value for key, value in zip(args_dict.keys(), combination)} for combination in combinations]
+
+args_list.reverse()
 
 jobs = []
 with executor.batch():
@@ -45,8 +47,8 @@ with executor.batch():
         result_command = command_str.format(**args)
         function = submitit.helpers.CommandFunction(shlex.split(result_command))
         print(result_command)
-        # job = executor.submit(function)
-        # jobs.append(job)
+        job = executor.submit(function)
+        jobs.append(job)
 
 print(f"*** SUBMITIT: Successfully submitted {len(jobs)} jobs. ***")
 

@@ -382,7 +382,7 @@ class CustomTrainer(transformers.Trainer, TrainerNegativeFilterMixin):
         dataset_inputs = inputs_for_key(inputs, key="dataset")
 
         # Flatten hard negative ids
-        if len(negative_document_inputs["input_ids"].shape) == 3:
+        if len(negative_document_inputs.get("input_ids", torch.tensor([])).shape) == 3:
             seq_length = negative_document_inputs["input_ids"].shape[2]
             negative_document_inputs["input_ids"] = negative_document_inputs["input_ids"].reshape(-1, seq_length)
             negative_document_inputs["attention_mask"] = negative_document_inputs["attention_mask"].reshape(-1, seq_length)
@@ -613,7 +613,7 @@ class CustomTrainer(transformers.Trainer, TrainerNegativeFilterMixin):
             "stats_document_first_token_value_mean": document_first_tokens.float().mean(),
             ###############################################################################
             "stats_one_hot_labels_sum": one_hot_labels.long().sum().detach(),
-            "stats_smart_labels_sum": smart_labels.long().sum().detach(),"
+            "stats_smart_labels_sum": smart_labels.long().sum().detach(),
             "stats_smart_labels_shape_0": smart_labels.shape[0],
             "stats_smart_labels_shape_1": smart_labels.shape[1],
             **hard_negatives_metrics,

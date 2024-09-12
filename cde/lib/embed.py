@@ -95,6 +95,8 @@ class DenseEncoder(torch.nn.Module):
             encoder: Optional[torch.nn.Module] = None,
             query_prefix: str = "",
             document_prefix: str = "",
+            normalize_embeds: bool = False,
+            default_doc_prefix: bool = False,
         ):
         super().__init__()
         self.encoder = encoder
@@ -109,6 +111,8 @@ class DenseEncoder(torch.nn.Module):
         self.document_prefix = document_prefix
         self.model_kwargs = {}
         self._max_num_chars = (self.max_length * 4)
+        self.normalize_embeds = normalize_embeds
+        self.default_doc_prefix = default_doc_prefix
 
     def tokenize_transform(
             self,
@@ -118,6 +122,11 @@ class DenseEncoder(torch.nn.Module):
             max_length: int,
         ) -> Dict[str, torch.Tensor]:
         texts = examples[col]
+        if not len(prefix):
+            # jxm added (9/11/24):
+            # temporarily disable no-prefix mode to check
+            # for bugs
+            raise ValueError("empty prefix")
         batch_dict = self.tokenizer(
             [prefix + t[:self._max_num_chars] for t in texts],
             max_length=max_length,
@@ -232,6 +241,9 @@ class DenseEncoder(torch.nn.Module):
         Returns:
             `List[np.ndarray]` or `List[tensor]`: List of embeddings for the given sentences
         """
+        if not len(prefix) and self.default_doc_prefix:
+            prefix = self.document_prefix
+
         data_loader = self._create_dataloader(
             dataset=dataset,
             col=col,
@@ -262,6 +274,9 @@ class DenseEncoder(torch.nn.Module):
             num_cleaned_cache_files = dataset.cleanup_cache_files()
             if num_cleaned_cache_files: 
                 print(f"[DenseEncoder] cleaned {num_cleaned_cache_files} files")
+        
+        if self.normalize_embeds:
+            encoded_embeds = torch.nn.functional.normalize(encoded_embeds, p=2, dim=-1)
 
         return encoded_embeds
 

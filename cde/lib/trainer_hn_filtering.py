@@ -343,13 +343,13 @@ class TrainerNegativeFilterMixin:
                 model=self._hn_filter_model,
                 input_ids=query_inputs["input_ids"][:, :512],
                 attention_mask=query_inputs["attention_mask"][:, :512],
-                batch_size=(self.args.per_device_train_batch_size * 4),
+                batch_size=(self._inference_batch_size * 2),
             )
             doc_outputs = forward_batched(
                 model=self._hn_filter_model,
                 input_ids=document_inputs["input_ids"][:, :512],
                 attention_mask=document_inputs["attention_mask"][:, :512],
-                batch_size=(self.args.per_device_train_batch_size * 4),
+                batch_size=(self._inference_batch_size * 2),
             )
 
         query_embeddings = torch.nn.functional.normalize(query_outputs, p=2, dim=1)
@@ -365,12 +365,12 @@ class TrainerNegativeFilterMixin:
         model = self._hn_filter_model
         with torch.no_grad():
             query_embeddings = model.encode(
-                [f"search_query: " + q for q in queries],    
+                [f"search_query: {q}" for q in queries],    
                 batch_size=(self._inference_batch_size),
                 convert_to_tensor=True
             )
             doc_embeddings = model.encode(
-                [f"search_document: " + d for d in docs],    
+                [f"search_document: {d}" for d in docs],    
                 batch_size=(self._inference_batch_size),
                 convert_to_tensor=True
             )

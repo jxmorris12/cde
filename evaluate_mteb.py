@@ -1,17 +1,62 @@
 import argparse
 import os
 import random
+import time
 
 import datasets
 import torch
 
-from cde.lib import cluster_dataset
+# from cde.lib import cluster_dataset
 from cde.lib.embed import DenseEncoder
 from cde.lib.model_configs import MODEL_FOLDER_DICT
 from cde.lib.utils import analyze_utils
 
 from mteb import MTEB
-from mteb import HFDataLoader
+
+
+os.environ['OPENBLAS_NUM_THREADS'] = '16'
+
+TASK_LIST_CLASSIFICATION = [
+    "AmazonCounterfactualClassification",
+    "AmazonPolarityClassification",
+    "AmazonReviewsClassification",
+    "Banking77Classification",
+    "EmotionClassification",
+    "ImdbClassification",
+    "MassiveIntentClassification",
+    "MassiveScenarioClassification",
+    "MTOPDomainClassification",
+    "MTOPIntentClassification",
+    "ToxicConversationsClassification",
+    "TweetSentimentExtractionClassification",
+]
+
+TASK_LIST_CLUSTERING = [
+    "ArxivClusteringP2P",
+    "ArxivClusteringS2S",
+    "BiorxivClusteringP2P",
+    "BiorxivClusteringS2S",
+    "MedrxivClusteringP2P",
+    "MedrxivClusteringS2S",
+    "RedditClustering",
+    "RedditClusteringP2P",
+    "StackExchangeClustering",
+    "StackExchangeClusteringP2P",
+    "TwentyNewsgroupsClustering",
+]
+
+TASK_LIST_PAIR_CLASSIFICATION = [
+    "SprintDuplicateQuestions",
+    "TwitterSemEval2015",
+    "TwitterURLCorpus",
+]
+
+TASK_LIST_RERANKING = [
+    "AskUbuntuDupQuestions",
+    "MindSmallReranking",
+    "SciDocsRR",
+    "StackOverflowDupQuestions",
+]
 
 TASK_LIST_RETRIEVAL = [
     "HotpotQA",
@@ -60,7 +105,56 @@ TASK_LIST_RETRIEVAL = [
 
 # TASK_LIST_RETRIEVAL = ["QuoraRetrieval"]
 # TASK_LIST_RETRIEVAL = ["NFCorpus"]
-TASK_LIST_RETRIEVAL = ["ArguAna"]
+# TASK_LIST_RETRIEVAL = ["ArguAna"]
+
+TASK_LIST_STS = [
+    "BIOSSES",
+    "SICK-R",
+    "STS12",
+    "STS13",
+    "STS14",
+    "STS15",
+    "STS16",
+    "STS17",
+    "STS22",
+    "STSBenchmark",
+    "SummEval",
+]
+
+task2prefix = {}
+for task in TASK_LIST_CLASSIFICATION:
+    task2prefix[task] = {"query": "classification", "document": "classification"}
+
+for task in TASK_LIST_CLUSTERING:
+    task2prefix[task] = {"query": "clustering", "document": "clustering"}
+
+for task in TASK_LIST_PAIR_CLASSIFICATION:
+    task2prefix[task] = {"query": "classification", "document": "classification"}
+
+for task in TASK_LIST_RERANKING:
+    task2prefix[task] = {"query": "classification", "document": "classification"}
+
+for task in TASK_LIST_RETRIEVAL:
+    task2prefix[task] = {"query": "search_query", "document": "search_document"}
+
+for task in TASK_LIST_STS:
+    task2prefix[task] = {"query": "classification", "document": "classification"}
+
+
+
+TASK_LIST = (
+    TASK_LIST_CLASSIFICATION
+    + TASK_LIST_CLUSTERING
+    + TASK_LIST_PAIR_CLASSIFICATION
+    + TASK_LIST_RERANKING
+    + TASK_LIST_RETRIEVAL
+    + TASK_LIST_STS
+)
+# TASK_LIST = TASK_LIST_RETRIEVAL
+# TASK_LIST = TASK_LIST_STS
+# TASK_LIST = TASK_LIST_CLUSTERING
+# TASK_LIST = TASK_LIST_PAIR_CLASSIFICATION
+TASK_LIST = TASK_LIST_RERANKING
 
 def parse_args() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Process model key")
@@ -82,6 +176,7 @@ def main():
         return_args=True
     )
     trainer.model.eval()
+    
 
     datasets.enable_caching()
     mteb_encoder = DenseEncoder(
@@ -90,56 +185,102 @@ def main():
         max_seq_length=trainer.model.config.max_seq_length,
         query_prefix="search_query: " if data_args.use_prefix else "",
         document_prefix="search_document: " if data_args.use_prefix else "",
+        normalize_embeds=False,
+        default_doc_prefix=True,
     )
 
-    for task_idx, task in enumerate(TASK_LIST_RETRIEVAL):
-        print(f"Beginning {task} ({task_idx+1} / {len(TASK_LIST_RETRIEVAL)})")
+    # TODO: Fix quora...
+    # TODO: Disable norm for classification
+    # TODO: Normalize vectors??
+
+    random.Random(time.time()).shuffle(TASK_LIST)
+    for task_idx, task in enumerate(TASK_LIST):
+        prefixes = task2prefix[task]
+        mteb_encoder.document_prefix = (prefixes["document"] + ": ") if data_args.use_prefix else ""
+        mteb_encoder.query_prefix = (prefixes["query"] + ": ") if data_args.use_prefix else ""
+        print(f"Set prefixes to {mteb_encoder.query_prefix} and {mteb_encoder.document_prefix}")
+
+        print(f"Beginning {task} ({task_idx+1} / {len(TASK_LIST)})")
         evaluation = MTEB(
             tasks=[task], 
             task_langs=["en"],
-            embedder_rerank="sentence-transformers/gtr-t5-base"
+            embedder_rerank="sentence-transformers/gtr-t5-base",
         )
         split = "dev" if task == "MSMARCO" else "test"
         ##################################################
         evaluation.tasks[0].load_data()
-        corpus = evaluation.tasks[0].corpus["test"]
-        dataset_path = evaluation.tasks[0].metadata_dict["dataset"]["path"]
-        hf_repo_qrels = (
-            dataset_path + "-qrels" if "clarin-knext" in dataset_path else None
-        )
-        corpus_ds, _q, _qrels = HFDataLoader(
-            hf_repo=dataset_path,
-            hf_repo_qrels=hf_repo_qrels,
-            streaming=False,
-            keep_in_memory=False,
-        ).load(split=split)
+        try:
+            corpus = evaluation.tasks[0].corpus[split]
+            documents = random.choices(list(corpus.values()), k=trainer.model.config.transductive_corpus_size)
+            corpus_documents = [
+                mteb_encoder.document_prefix + '{} {}'.format(doc.get('title', ''), doc['text']).strip() 
+                for doc in documents
+            ]
+        except:
+            # no corpus
+            if isinstance(evaluation.tasks[0].dataset, datasets.Dataset):
+                dataset = evaluation.tasks[0].dataset
+            else:
+                try:
+                    dataset = evaluation.tasks[0].dataset[split]
+                except:
+                    # nested by language
+                    try:
+                        dataset = next(iter(evaluation.tasks[0].dataset.values()))[split]
+                    except:
+                        try:
+                            dataset = next(iter(evaluation.tasks[0].dataset.values()))
+                        except Exception as e:
+                            print(f"Can't process {task}")
+                            print(e)
+                            breakpoint()
+                            continue
+                column_names = set(dataset.column_names)
+            if {"sentence1", "sentence2"} <= column_names:
+                documents = dataset["sentence1"] + dataset["sentence2"]
+            elif {"sentences"} <= column_names:
+                documents = dataset["sentences"]
+            elif {"text"} <= column_names:
+                documents = dataset["text"]
+            elif {"query", "positive"} <= column_names:
+                # reranking
+                documents = dataset["positive"]
+            else:
+                raise ValueError(f"No corpus or dataset - got {column_names}")  
+            
+            # Clustering and pair-classification have lists of lists.
+            if isinstance(documents[0], list):
+                documents = [sentence for doc in documents for sentence in doc]
 
+            documents = random.choices(documents, k=trainer.model.config.transductive_corpus_size)
+            try:
+                corpus_documents = [
+                    mteb_encoder.document_prefix + doc
+                    for doc in documents
+                ]
+            except:
+                breakpoint()
         ##################################################
-        random.seed(52)
-        corpus_documents = random.choices(list(corpus.values()), k=trainer.model.config.transductive_corpus_size)
-        ##################################################
-        corpus_documents = [
-            mteb_encoder.document_prefix + '{} {}'.format(doc.get('title', ''), doc['text']).strip() 
-            for doc in corpus_documents
-        ]
         print(corpus_documents[2])
         trainer.model.first_stage_model.cuda()
         dataset_inputs = mteb_encoder.tokenizer(
             corpus_documents,
-            return_tensors="pt",s
+            return_tensors="pt",
             max_length=trainer.model.config.max_seq_length,
             padding=True,
             truncation=True,
-        ).to("cuda")
+        ).to(training_args.device)
         with torch.no_grad(), torch.autocast("cuda", dtype=torch.bfloat16):
             dataset_embeddings = trainer.model.first_stage_model(
                 **dataset_inputs
             )
         ##################################################
         mteb_encoder.model_kwargs = {
-            "dataset_embeddings": dataset_embeddings.float().cpu().numpy(),
+            "dataset_embeddings": dataset_embeddings.to(torch.float32).cpu().numpy(),
             "null_dataset_embedding": False,
+            # ""
         }
+        # breakpoint()
         results = evaluation.run(
             mteb_encoder, 
             output_folder=os.path.join("results_mteb", args.model_key),
@@ -151,7 +292,12 @@ def main():
         print(task)
         print("\t", results)
         if len(results):
-            print("NDCG@10 =>", results[0].to_dict()['scores'][split][0]['ndcg_at_10'])
+            results_dict = results[0].to_dict()["scores"][split][0]
+            try:
+                print("main_score =>", results_dict["main_score"])
+            except KeyError:
+                print(results_dict)
+                continue
         print()
     
 
