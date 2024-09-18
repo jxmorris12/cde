@@ -29,12 +29,30 @@ def mean_pool_3d(
 
     return pooled_outputs
 
+# def mean_pool(
+#     hidden_states: torch.Tensor, attention_mask: torch.Tensor
+# ) -> torch.Tensor:
+#     B, _S, D = hidden_states.shape
+#     unmasked_outputs = hidden_states * attention_mask[..., None]
+#     pooled_outputs = unmasked_outputs.sum(dim=1) / (attention_mask.sum(dim=1)[:, None] + 1e-9)
+    
+#     if attention_mask.sum(dim=1).min() == 0:
+#         sequence_means = hidden_states.mean(dim=1, keepdim=True).expand(-1, D)
+#         pooled_outputs = pooled_outputs.where(
+#             (attention_mask.sum(dim=1)[:, None] > 0), 
+#             sequence_means
+#         )
+
+#     assert pooled_outputs.shape == (B, D)
+#     return pooled_outputs
+
 def mean_pool(
     hidden_states: torch.Tensor, attention_mask: torch.Tensor
 ) -> torch.Tensor:
     B, _S, D = hidden_states.shape
     unmasked_outputs = hidden_states * attention_mask[..., None]
-    pooled_outputs = unmasked_outputs.sum(dim=1) / attention_mask.sum(dim=1)[:, None]
+    pooled_outputs = unmasked_outputs.sum(dim=1) / (attention_mask.sum(dim=1)[:, None] + 1e-20)
+    
     assert pooled_outputs.shape == (B, D)
     return pooled_outputs
 

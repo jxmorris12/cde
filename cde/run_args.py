@@ -288,7 +288,11 @@ class TrainingArguments(transformers.TrainingArguments):
     )
     max_batch_size_fits_in_memory: int = field(
         default=64, 
-        metadata={"help": "Max batch size for contrastive learning"}
+        metadata={"help": "Max batch size for contrastive learning in grad cache"}
+    )
+    max_batch_size_fits_in_memory_first_stage: Optional[int] = field(
+        default=None, 
+        metadata={"help": "Max batch size for contrastive learning in grad cache (first-stage onnly)"}
     )
     eval_rerank_topk: int = field(
         default=128,

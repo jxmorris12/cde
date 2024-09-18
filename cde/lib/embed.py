@@ -122,11 +122,6 @@ class DenseEncoder(torch.nn.Module):
             max_length: int,
         ) -> Dict[str, torch.Tensor]:
         texts = examples[col]
-        if not len(prefix):
-            # jxm added (9/11/24):
-            # temporarily disable no-prefix mode to check
-            # for bugs
-            raise ValueError("empty prefix")
         batch_dict = self.tokenizer(
             [prefix + t[:self._max_num_chars] for t in texts],
             max_length=max_length,

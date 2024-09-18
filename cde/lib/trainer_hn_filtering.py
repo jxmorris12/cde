@@ -196,7 +196,7 @@ class TrainerNegativeFilterMixin:
                     trust_remote_code=True, 
                     device="cuda" if torch.cuda.is_available() else "cpu",
                     model_kwargs={
-                        # "torch_dtype": torch.bfloat16,
+                        "torch_dtype": torch.bfloat16,
                         # "attn_implementation": "flash_attention_2",
                     }
                 )
@@ -236,7 +236,13 @@ class TrainerNegativeFilterMixin:
     
     @property
     def _inference_batch_size(self) -> int:
-        return min(self.args.max_batch_size_fits_in_memory, self.args.per_device_train_batch_size)
+        gc_bs_fs = (
+            self.args.max_batch_size_fits_in_memory_first_stage 
+            or 
+            self.args.max_batch_size_fits_in_memory
+        )
+        return min(
+            gc_bs_fs, self.args.per_device_train_batch_size)
         
     def _precompute_hn_index(self):
         batch_size = self._inference_batch_size
@@ -382,13 +388,20 @@ class TrainerNegativeFilterMixin:
     def _get_embeddings_stella(self, query_inputs, document_inputs) -> Tuple[torch.Tensor, torch.Tensor]:
         # https://huggingface.co/dunzhang/stella_en_400M_v5
         self._init_hn_filter_model()
-        query_prompt_name = "s2p_query"
     
-        queries = query_inputs["text"]
-        docs = document_inputs["text"]
+        queries = query_inputs["text__no_prefix"]
+        docs = document_inputs["text__no_prefix"]
+
+        query_prefix = query_inputs["prefix"][0]
+        document_prefix = document_inputs["prefix"][0]
         
+        if query_prefix == document_prefix:
+            query_prompt_name = "s2s_query"
+        else:
+            query_prompt_name = "s2p_query"
+
         model = self._hn_filter_model
-        with torch.no_grad():
+        with torch.no_grad(), torch.autocast("cuda", dtype=torch.bfloat16):
             query_embeddings = model.encode(
                 queries,
                 prompt_name=query_prompt_name, 

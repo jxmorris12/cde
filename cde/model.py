@@ -77,19 +77,23 @@ class ContextualModelMixin(nn.Module):
         dataset_embeddings = dataset_embeddings.to(torch.float32)
     
         batch_size = input_ids.shape[0]
-        if self.transductive_tokens_per_document > 1:
-            # Choose N random documents to fill our context window with.
-            # This logic is a little confusing but allows us to sample a
-            # different batch *per-dataset*
-            assert dataset_embeddings.shape[1] == self.transductive_tokens_per_document
-            R = torch.randint(
-                low=0, 
-                high=len(dataset_embeddings), 
-                size=(batch_size, self.config.transductive_corpus_size), 
-                device=dataset_embeddings.device
-            )
-            # TODO make this deterministic somehow for evaluation?
-            dataset_embeddings = dataset_embeddings[R].reshape((batch_size, self.num_corpus_tokens, self.hidden_size))
+        if (self.transductive_tokens_per_document > 1):
+            if self.training:
+                # Choose N random documents to fill our context window with.
+                # This logic is a little confusing but allows us to sample a
+                # different batch *per-document*
+                assert dataset_embeddings.shape[1] == self.transductive_tokens_per_document
+                R = torch.randint(
+                    low=0, 
+                    high=len(dataset_embeddings), 
+                    size=(batch_size, self.config.transductive_corpus_size), 
+                    device=dataset_embeddings.device
+                )
+                # TODO make this deterministic somehow for evaluation?
+                dataset_embeddings = dataset_embeddings[R].reshape((batch_size, self.num_corpus_tokens, self.hidden_size))
+            else:
+                dataset_embeddings = dataset_embeddings.reshape((1, self.num_corpus_tokens, self.hidden_size))
+                # print("reshaped to dataset_embeddings.shape =", dataset_embeddings.shape)
 
         if dataset_embeddings.shape[1] > self.num_corpus_tokens:
             # If too many dataset embeddings are passed in, just take the first N until
@@ -113,6 +117,8 @@ class ContextualModelMixin(nn.Module):
             null_embeddings = self.sequence_dropout_null_embedding[None, None].expand(batch_size, corpus_size, -1)
             dataset_embeddings = null_embeddings
         
+        # print(f"[ContextualModelMixin] dataset_embeddings.shape = {dataset_embeddings.shape}")
+        
         # backbone_max_seq_length = self.backbone.config.max_trained_positions
         # assert batch_size + (2 * self.n_soft_prompt + corpus_size) <= backbone_max_seq_length, "too many hard negatives for backbone model"
         soft_prompt = torch.ones((1, self.hidden_size), device=dataset_embeddings.device, dtype=torch.float32)
@@ -120,17 +126,19 @@ class ContextualModelMixin(nn.Module):
         soft_prompt = soft_prompt.expand((len(dataset_embeddings), -1, -1)) # -> (b, 4+b, d) # soft_prompt.repeat((len(input_ids), 1, 1))  
         soft_prompt = torch.cat((dataset_embeddings, soft_prompt), dim=1)
 
-        if self.training and self.randomize_dataset_sequence_order:
-            randomized_order = torch.stack(
-                [
-                    torch.cat(
-                        (
-                            torch.randperm(corpus_size, device=soft_prompt.device), 
-                            torch.arange(self.n_soft_prompt, device=soft_prompt.device) + corpus_size
-                        ), dim=0) 
-                        for _ in range(batch_size)])
-            randomized_order = randomized_order.to(soft_prompt.device)
-            soft_prompt = soft_prompt.gather(1, randomized_order[..., None].expand_as(soft_prompt))
+        # print(f"[ContextualModelMixin] soft_prompt.shape = {soft_prompt.shape}")
+
+        # if self.training and self.randomize_dataset_sequence_order:
+        #     randomized_order = torch.stack(
+        #         [
+        #             torch.cat(
+        #                 (
+        #                     torch.randperm(corpus_size, device=soft_prompt.device), 
+        #                     torch.arange(self.n_soft_prompt, device=soft_prompt.device) + corpus_size
+        #                 ), dim=0) 
+        #                 for _ in range(batch_size)])
+        #     randomized_order = randomized_order.to(soft_prompt.device)
+        #     soft_prompt = soft_prompt.gather(1, randomized_order[..., None].expand_as(soft_prompt))
         
         return soft_prompt
 
@@ -200,7 +208,22 @@ class BiEncoder(transformers.PreTrainedModel):
         if self.transductive_tokens_per_document > 1:
             document_embeddings = None
             batch_size, seq_length, output_dim = outputs.shape
-            assert seq_length % self.transductive_tokens_per_document == 0 # TODO: Pad to nearest multiple
+
+            if seq_length % self.transductive_tokens_per_document != 0:
+                # Pad to nearest multiple
+                n_extra_embeds = self.transductive_tokens_per_document - (seq_length % self.transductive_tokens_per_document)
+                outputs = torch.cat(
+                    (outputs, torch.zeros((batch_size, n_extra_embeds, output_dim), device=outputs.device)),
+                    dim=1
+                )
+                attention_mask = torch.cat(
+                    (attention_mask, torch.zeros((batch_size, n_extra_embeds), device=attention_mask.device)),
+                    dim=1
+                )
+                seq_length += n_extra_embeds
+                print(f"Added {n_extra_embeds} padding tokens to input_ids and attention_mask")
+            
+            # print("ftransductive_tokens_per_document {self.transductive_tokens_per_document} outputs.shape =", outputs.shape)
 
             outputs = outputs.reshape(
                 (batch_size,  self.transductive_tokens_per_document, seq_length // self.transductive_tokens_per_document, output_dim)
@@ -366,12 +389,13 @@ class DatasetConditionedBiencoder(transformers.PreTrainedModel, ContextualModelM
             output_hidden_states: bool = False,
             null_dataset_embedding: bool = False,
         ) -> torch.Tensor:
-        # print(f"[0] input_ids.shape => {input_ids.shape} // dataset_embeddings.shape =", dataset_embeddings.shape)
+        # print(f"[DatasetConditionedBiencoder - 0] input_ids.shape => {input_ids.shape} // dataset_embeddings.shape =", dataset_embeddings.shape)
         soft_prompt = self._prepare_dataset_embeddings(
             input_ids=input_ids,
             dataset_embeddings=dataset_embeddings,
             null_dataset_embedding=null_dataset_embedding,
         )
+        # print(f"[DatasetConditionedBiencoder - 1] soft_prompt.shape => {soft_prompt.shape}")
         backbone_attention_mask = torch.ones(
             soft_prompt.shape[0:2],
             dtype=torch.long,
@@ -380,8 +404,9 @@ class DatasetConditionedBiencoder(transformers.PreTrainedModel, ContextualModelM
         inputs_embeds = self.backbone.embeddings(input_ids) # (b, s) -> (b, s, d)
         # print("[2] inputs_embeds.shape =", inputs_embeds.shape)
         inputs_embeds = torch.cat((soft_prompt, inputs_embeds), dim=1) # (v, 4+b+s, d)
-        # print("[3] inputs_embeds.shape =", inputs_embeds.shape)
+        # print("[3.a] inputs_embeds.shape =", inputs_embeds.shape)
         attention_mask = torch.cat((backbone_attention_mask, attention_mask), dim=1)
+        # print("[3.b] attention_mask.shape =", attention_mask.shape)
         output = self.backbone(
             inputs_embeds=inputs_embeds,
             attention_mask=attention_mask,
@@ -391,15 +416,21 @@ class DatasetConditionedBiencoder(transformers.PreTrainedModel, ContextualModelM
 
         # use only these tokens
         n_soft_prompt_tokens = soft_prompt.shape[1]
+        # print("n_soft_prompt_tokens =", n_soft_prompt_tokens)
 
         output_vectors = output.last_hidden_state[:, n_soft_prompt_tokens:, :]
         output_attention_mask = attention_mask[:, n_soft_prompt_tokens:]
+
+        # print("pooling output_vectors.shape =", output_vectors.shape, "and output_attention_mask.shape =", output_attention_mask.shape)
         output_pooled = mean_pool(output_vectors, output_attention_mask)
 
         # average with original vectors
         # TODO: Argparse for pooling strategy.
         # output_vectors = torch.cat((soft_prompt_pooled, output_pooled), dim=1) # (b, d) + (b, d) -> (b, 2d)
+        # print("output_pooled.shape =", output_pooled.shape)
         output = self.output_projection(output_pooled) # (b, 2d) -> (b, d)
+
+        # print("returning output.shape =", output.shape)
 
         if output_hidden_states:
             return {
@@ -478,7 +509,7 @@ class DatasetTransformer(transformers.PreTrainedModel):
         
         biencoder_config = copy.deepcopy(config)
         biencoder_config.embedding_output_dim = None
-        biencoder_config.limit_layers = vars(self.config).get("limit_layers_first_stage", False)
+        biencoder_config.limit_layers = vars(self.config).get("limit_layers_first_stage", None)
         self.first_stage_model = BiEncoder(
             config=biencoder_config,
             embedder=embedder

@@ -46,6 +46,7 @@ class GradCache:
     def __init__(
         self,
         chunk_sizes: Union[int, List[int]],
+        first_stage_chunk_sizes: Union[int, List[int]],
         loss_fn: Callable[..., Tensor],
         split_input_fn: Callable[[Any, int], Any] = None,
         get_rep_fn: Callable[..., Tensor] = None,
@@ -67,6 +68,7 @@ class GradCache:
         """
         self.accelerator = accelerator
         self.chunk_sizes = chunk_sizes
+        self.first_stage_chunk_sizes = first_stage_chunk_sizes
 
         self.split_input_fn = split_input_fn
         self.get_rep_fn = get_rep_fn
@@ -412,7 +414,7 @@ class GradCache:
         # the chunk size.
         first_stage_model_inputs = [
             self.split_inputs(x, chunk_size * first_chunk_size_scale)
-            for x, chunk_size in zip(first_stage_model_inputs, self.chunk_sizes)
+            for x, chunk_size in zip(first_stage_model_inputs, self.first_stage_chunk_sizes)
         ]
         second_stage_model_inputs = [
             { 
@@ -534,7 +536,9 @@ class GradCache:
         
         # TODO: There's a *2 here too; get that from argparsed value once we add argparse
         # support for "max_batch_size_first_stage" or something like that.
-        first_stage_gradients = first_stage_embedding.grad.split(self.chunk_sizes[0] * first_chunk_size_scale)
+        first_stage_gradients = first_stage_embedding.grad.split(
+            self.first_stage_chunk_sizes[0] * first_chunk_size_scale
+        )
         first_stage_input_chunks_tqdm = first_stage_input_chunks
         if len(first_stage_input_chunks) > min_tqdm_inputs:
             first_stage_input_chunks_tqdm = tqdm_if_main_worker(

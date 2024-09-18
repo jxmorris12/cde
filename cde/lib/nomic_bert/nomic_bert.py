@@ -188,6 +188,7 @@ class NomicBertEncoder(nn.Module):
         batch, seqlen = hidden_states.shape[:2]
         hidden_states, indices, cu_seqlens, max_seqlen_in_batch = unpad_input(hidden_states, attention_mask)
         for i, layer in enumerate(self.layers):
+            # print("NomicBertEncoder layer", i)
             if self.gradient_checkpointing and self.training:
 
                 def create_custom_forward(module):

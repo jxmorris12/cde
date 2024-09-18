@@ -136,10 +136,16 @@ class CustomTrainer(transformers.Trainer, TrainerNegativeFilterMixin):
 
         if self.use_gc:
             gc_bs = self.args.max_batch_size_fits_in_memory
+            gc_bs_fs = (
+                self.args.max_batch_size_fits_in_memory_first_stage 
+                or 
+                self.args.max_batch_size_fits_in_memory
+            )
             print0(f"[rank {get_rank()}] initializing GradCache with chunk_size={gc_bs}.")
             self.gc = GradCache(
                 accelerator=self.accelerator,
                 chunk_sizes=[gc_bs, gc_bs],
+                first_stage_chunk_sizes=[gc_bs_fs, gc_bs_fs],
                 loss_fn=functools.partial(self._contrastive_loss, return_scores=False), 
                 bf16=self.args.bf16,
             )
@@ -526,6 +532,10 @@ class CustomTrainer(transformers.Trainer, TrainerNegativeFilterMixin):
             document_inputs["attention_mask"] = torch.cat(
                 (document_inputs["attention_mask"], negative_document_inputs["attention_mask"]), dim=0
             )
+            document_inputs["text"] = document_inputs["text"] + negative_document_inputs["text"]
+            document_inputs["text__no_prefix"] = document_inputs["text__no_prefix"] + negative_document_inputs["text__no_prefix"]
+            #########################################################################################################
+            negative_document_inputs["dataset_input_ids"] = document_inputs["dataset_input_ids"]
             negative_document_inputs["dataset_attention_mask"] = document_inputs["dataset_attention_mask"]
         
         all_document_input_ids = self.consider_gather(document_inputs["input_ids"])
@@ -557,7 +567,7 @@ class CustomTrainer(transformers.Trainer, TrainerNegativeFilterMixin):
         
         # Automatically filter out too-hard negatives.
         hard_negatives_metrics = {}
-        if (self.args.hn_tune_threshold is not None) and (self.args.hn_tune_threshold >= 0.0):
+        if (self.args.hn_tune_threshold is not None) and (self.args.hn_tune_threshold > 0.0):
             qd_scores = self._get_query_doc_scores(query_inputs, document_inputs)
             qd_scores = qd_scores.to(smart_labels.device)
 
@@ -565,6 +575,15 @@ class CustomTrainer(transformers.Trainer, TrainerNegativeFilterMixin):
                 smart_labels_neg = qd_scores >= qd_scores.diag()[:, None]
             else:
                 smart_labels_neg = qd_scores >= self.args.hn_tune_threshold
+            
+            # Don't mask hard negatives for a given sample!
+            if num_hn > 0:
+                neg_doc_idx = torch.cat((torch.zeros_like(inputs["idx"]), negative_document_inputs["idx"]))
+                hn_match_mask = (inputs["idx"][:, None] == neg_doc_idx[None, :]).to(smart_labels_neg.device)
+                if self._is_main_worker:
+                    breakpoint()
+                torch.distributed.barrier()
+                smart_labels_neg = smart_labels_neg & (~hn_match_mask)
             
             assert smart_labels_neg.shape == smart_labels.shape, f"got different shapes {smart_labels_neg.shape} and {smart_labels.shape}"
             
