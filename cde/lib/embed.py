@@ -283,7 +283,7 @@ def embed_with_cache(
         col: str, 
         save_to_disk: bool = True,
         batch_size: int = 4096,
-        max_seq_length: int = 256,
+        max_seq_length: int = 512,
         model: Optional[DenseEncoder] = None,
     ) -> datasets.Dataset:
     embedder_cache_path = model_name.replace('/', '__')

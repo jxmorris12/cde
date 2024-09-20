@@ -139,7 +139,7 @@ class DataArguments:
         default="nomic_supervised", 
         metadata={
             "help": "The name of the dataset to use:",
-            "choices": ["synthetic_words", "nomic_supervised", "nomic_unsupervised", "fineweb-tiny", "finewebedu-tiny", "fineweb", "finewebedu"]
+            "choices": ["synthetic_words", "nomic_supervised", "nomic_unsupervised", "fineweb-tiny", "finewebedu-tiny", "fineweb", "finewebedu", "bge"]
         }
     )
     sampling_strategy: str = field(

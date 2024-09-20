@@ -18,10 +18,15 @@ class Evaluator(ABC):
         np.random.seed(self.seed)
         torch.manual_seed(self.seed)
         torch.cuda.manual_seed_all(self.seed)
+    
+    def encode_first_stage(self, docs: list[str], first_stage_encoder) -> torch.Tensor:
+        encoder = first_stage_encoder
+        embeddings = encoder.encode_corpus(docs, batch_size=self.batch_size)
+        return embeddings
 
     @abstractmethod
     def __call__(self, model):
-        """This is called during training to evaluate the model.
+        """This is called to evaluate the model.
         It returns scores.
 
         Parameters

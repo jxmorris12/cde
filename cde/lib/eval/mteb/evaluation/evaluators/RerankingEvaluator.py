@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 
 import numpy as np
+import random
 import torch
 import tqdm
 from sklearn.metrics import average_precision_score
@@ -83,21 +84,13 @@ class RerankingEvaluator(Evaluator):
         )
 
         logger.info("Encoding queries...")
+
         if isinstance(self.samples[0]["query"], str):
-            all_query_embs = np.asarray(
-                encode_queries_func(
-                    [sample["query"] for sample in self.samples],
-                    batch_size=self.batch_size,
-                )
-            )
+            all_queries = [sample["query"] for sample in self.samples]
         elif isinstance(self.samples[0]["query"], list):
-            # In case the query is a list of strings, we get the most similar embedding to any of the queries
-            all_query_flattened = [
+            all_queries = [
                 q for sample in self.samples for q in sample["query"]
             ]
-            all_query_embs = np.asarray(
-                encode_queries_func(all_query_flattened, batch_size=self.batch_size)
-            )
         else:
             raise ValueError(
                 f"Query must be a string or a list of strings but is {type(self.samples[0]['query'])}"
@@ -109,23 +102,39 @@ class RerankingEvaluator(Evaluator):
             all_docs.extend(sample["positive"])
             all_docs.extend(sample["negative"])
 
-        all_docs_embs = np.asarray(
-            encode_corpus_func(all_docs, batch_size=self.batch_size)
-        )
+        # all_docs_embs = np.asarray(
+        #     encode_corpus_func(all_docs, batch_size=self.batch_size)
+        # )
 
         # Compute scores
         logger.info("Evaluating...")
         query_idx, docs_idx = 0, 0
-        for instance in self.samples:
+        for instance in tqdm.tqdm(self.samples):
             num_subqueries = (
                 len(instance["query"]) if isinstance(instance["query"], list) else 1
             )
-            query_emb = all_query_embs[query_idx : query_idx + num_subqueries]
-            query_idx += num_subqueries
-
             num_pos = len(instance["positive"])
             num_neg = len(instance["negative"])
-            docs_emb = all_docs_embs[docs_idx : docs_idx + num_pos + num_neg]
+            docs = all_docs[docs_idx : docs_idx + num_pos + num_neg]
+            dataset_embeddings = self.encode_first_stage(docs, first_stage_encoder=model.first_stage_encoder).tolist()
+            
+            corpus_size = model.corpus_size
+            if len(docs) < corpus_size:
+                num_extra_docs = corpus_size - len(docs)
+                print(f"Only {len(docs)} docs available, adding {num_extra_docs} extra docs")
+                dataset_embeddings += random.choices(dataset_embeddings, k=num_extra_docs)
+            dataset_embeddings = torch.tensor(dataset_embeddings)
+            
+            model.model_kwargs = {
+                "dataset_embeddings": dataset_embeddings.to(torch.float32).cpu().numpy(),
+                "null_dataset_embedding": False,
+            }
+
+            queries = all_queries[query_idx : query_idx + num_subqueries]
+            query_emb = encode_queries_func(queries, batch_size=self.batch_size)
+            query_idx += num_subqueries
+
+            docs_emb = encode_corpus_func(docs, batch_size=self.batch_size)
             docs_idx += num_pos + num_neg
 
             if num_pos == 0 or num_neg == 0:

@@ -5,4 +5,12 @@ MODEL_FOLDER_DICT = {
    "cde--filter--1024--0.5epoch": "/fsx-checkpoints/jxm/cde/cde--unsupervised--1024--0.4",
    ######################
    "cde--supervised--nomic-0": "/fsx-checkpoints/jxm/cde/cde--supervised-0",
+   "cde--supervised--nomic-1": "/fsx-checkpoints/jxm/cde/2024-09-18-supervised-final--epoch-5",
+   ######################
+   # Ran below supervised exp and found epoch 5 is highest MTEB, so using that going forward.
+   "cde--supervised--nomic-1--epoch-1": "/fsx-checkpoints/jxm/cde/2024-09-18-supervised-final--epoch-1",
+   "cde--supervised--nomic-1--epoch-2": "/fsx-checkpoints/jxm/cde/2024-09-18-supervised-final--epoch-2",
+   "cde--supervised--nomic-1--epoch-3": "/fsx-checkpoints/jxm/cde/2024-09-18-supervised-final--epoch-3",
+   "cde--supervised--nomic-1--epoch-4": "/fsx-checkpoints/jxm/cde/2024-09-18-supervised-final--epoch-4",
+   "cde--supervised--nomic-1--epoch-5": "/fsx-checkpoints/jxm/cde/2024-09-18-supervised-final--epoch-5",
 }

@@ -161,7 +161,7 @@ class BiEncoder(transformers.PreTrainedModel):
         #     self.embedder = torch.compile(self.embedder) 
         self.hidden_size = self.embedder.config.hidden_size
         # Allow pooling to multiple tokens per document
-        self.transductive_tokens_per_document = vars(config).get("transductive_tokens_per_document", 1)
+        self.transductive_tokens_per_document = vars(self.config).get("transductive_tokens_per_document", 1)
         self.mlp = torch.nn.Sequential(
             torch.nn.Linear(self.hidden_size, self.hidden_size),
             torch.nn.GELU(),
@@ -361,9 +361,15 @@ class DatasetConditionedBiencoder(transformers.PreTrainedModel, ContextualModelM
             self.hidden_size, 
             eps=self.backbone.config.layer_norm_epsilon
         )
-              
-        disable_transductive_rotary_embedding = vars(config).get("disable_transductive_rotary_embedding", True)
         self.contextual_init()
+        self._shift_rotary_embedding()
+                
+    @property
+    def num_corpus_tokens(self) -> int:
+        return self.config.transductive_corpus_size * self.transductive_tokens_per_document
+    
+    def _shift_rotary_embedding(self) -> None:
+        disable_transductive_rotary_embedding = vars(self.config).get("disable_transductive_rotary_embedding", True)
         if self.backbone.config.model_type.startswith("nomic") and disable_transductive_rotary_embedding:
             # We only want to apply positional embeddings to the
             # *text* portion of the backbone network.
@@ -376,10 +382,6 @@ class DatasetConditionedBiencoder(transformers.PreTrainedModel, ContextualModelM
                     module.rotary_start_pos = rotary_start_pos
                     rotary_disabled += 1
             print0(f"modified {rotary_disabled} rotary modules – set rotary_start_pos to {rotary_start_pos}")
-                
-    @property
-    def num_corpus_tokens(self) -> int:
-        return self.config.transductive_corpus_size * self.transductive_tokens_per_document
     
     def forward(
             self, 

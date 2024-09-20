@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import random
 
 import numpy as np
 import torch
@@ -176,6 +177,16 @@ class kNNClassificationEvaluatorPytorch(Evaluator):
         max_accuracy = 0
         max_f1 = 0
         max_ap = 0
+
+        docs = random.choices(self.sentences_test, k=model.corpus_size)
+        dataset_embeddings = self.encode_first_stage(
+            docs, first_stage_encoder=model.first_stage_encoder
+        ).tolist()
+        model.model_kwargs = {
+            "dataset_embeddings": dataset_embeddings.to(torch.float32).cpu().numpy(),
+            "null_dataset_embedding": False,
+        }
+    
         X_train = np.asarray(
             model.encode(self.sentences_train, batch_size=self.batch_size)
         )
@@ -313,14 +324,26 @@ class logRegClassificationEvaluator(Evaluator):
             max_iter=self.max_iter,
             verbose=1 if logger.isEnabledFor(logging.DEBUG) else 0,
         )
+
+        docs = random.choices(self.sentences_test, k=model.corpus_size)
+        dataset_embeddings = self.encode_first_stage(
+            docs, 
+            first_stage_encoder=model.first_stage_encoder
+        )
+        model.model_kwargs = {
+            "dataset_embeddings": dataset_embeddings.to(torch.float32).cpu().numpy(),
+            "null_dataset_embedding": False,
+        }
+    
+
         logger.info(f"Encoding {len(self.sentences_train)} training sentences...")
         X_train = np.asarray(
-            model.encode(self.sentences_train, batch_size=self.batch_size)
+            model.encode(self.sentences_train, batch_size=self.batch_size, convert_to_tensor=False)
         )
         logger.info(f"Encoding {len(self.sentences_test)} test sentences...")
         if test_cache is None:
             X_test = np.asarray(
-                model.encode(self.sentences_test, batch_size=self.batch_size)
+                model.encode(self.sentences_test, batch_size=self.batch_size, convert_to_tensor=False)
             )
             test_cache = X_test
         else:

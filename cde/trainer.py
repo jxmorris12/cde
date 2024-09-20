@@ -227,6 +227,11 @@ class CustomTrainer(transformers.Trainer, TrainerNegativeFilterMixin):
             (int(os.environ.get("LOCAL_RANK", 0)) <= 0) and
             get_rank() == 0
         )
+
+    def _main_worker_breakpoint(self) -> None:
+        if self._is_main_worker:
+            breakpoint()
+        torch.distributed.barrier()
     
     def _inner_training_loop(self, *args, **kwargs):
         """Override pre-training loop to do a couple of things. This happens after model is loaded from checkpoint."""
@@ -580,9 +585,6 @@ class CustomTrainer(transformers.Trainer, TrainerNegativeFilterMixin):
             if num_hn > 0:
                 neg_doc_idx = torch.cat((torch.zeros_like(inputs["idx"]), negative_document_inputs["idx"]))
                 hn_match_mask = (inputs["idx"][:, None] == neg_doc_idx[None, :]).to(smart_labels_neg.device)
-                if self._is_main_worker:
-                    breakpoint()
-                torch.distributed.barrier()
                 smart_labels_neg = smart_labels_neg & (~hn_match_mask)
             
             assert smart_labels_neg.shape == smart_labels.shape, f"got different shapes {smart_labels_neg.shape} and {smart_labels.shape}"
