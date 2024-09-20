@@ -153,7 +153,7 @@ class DataArguments:
         default="gtr_base",
         metadata={
             "help": "Model to use for clustering",
-            "choices": ["bm25", "gtr_base", "bert", "stella"],
+            "choices": ["bm25", "gtr_base", "bert", "sbert", "nomic"],
         }
     )
     clustering_query_to_doc: bool = field(

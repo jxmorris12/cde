@@ -15,8 +15,10 @@ import wandb
 
 from cde.collate import DocumentQueryCollatorWithPadding, TokenizedCollator
 from cde.dataset import (
-    load_synthetic_words_dataset, 
-    BeirDataset, NomicSupervisedDataset, NomicUnsupervisedDataset
+    BeirDataset, 
+    BGEDataset,
+    NomicSupervisedDataset, 
+    NomicUnsupervisedDataset
 )
 from cde.lib import (
     get_rank, 
@@ -175,10 +177,7 @@ def main():
         **{f"BeIR/{k}": v for k,v in beir_dict.items()}
     }
 
-    if data_args.dataset == 'synthetic_words':
-        train_dataset, eval_dataset = load_synthetic_words_dataset()
-        collator_cls = DocumentQueryCollatorWithPadding
-    elif data_args.dataset == 'nomic_unsupervised':
+    if data_args.dataset == 'nomic_unsupervised':
         train_dataset = NomicUnsupervisedDataset(
             tokenizer=embedder_tokenizer,
             max_seq_length=model_args.max_seq_length,
@@ -201,7 +200,15 @@ def main():
             use_prefix=data_args.use_prefix,
         )
         eval_dataset = None
-    # Need to tokenize and collate for this dataset
+        collator_cls = TokenizedCollator
+    elif data_args.dataset == 'bge':
+        train_dataset = BGEDataset(
+            tokenizer=embedder_tokenizer,
+            num_hard_negatives=data_args.num_hard_negatives,
+            max_seq_length=model_args.max_seq_length,
+            use_prefix=data_args.use_prefix,
+        )
+        eval_dataset = None
         collator_cls = TokenizedCollator
     else:
         raise ValueError(f'Unsupported dataset {data_args.dataset}')

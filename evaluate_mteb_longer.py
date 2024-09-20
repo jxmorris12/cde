@@ -1,7 +1,5 @@
-import faiss # has to happen first...
-
 import argparse
-import collections
+import gc
 import os
 import random
 import time
@@ -9,7 +7,7 @@ import time
 import datasets
 import torch
 
-from cde.lib import cluster_dataset
+# from cde.lib import cluster_dataset
 from cde.lib.embed import DenseEncoder
 from cde.lib.model_configs import MODEL_FOLDER_DICT
 from cde.lib.utils import analyze_utils
@@ -143,8 +141,6 @@ for task in TASK_LIST_RETRIEVAL:
 for task in TASK_LIST_STS:
     task2prefix[task] = {"query": "classification", "document": "classification"}
 
-
-# Same prefix for Quora
 task2prefix["QuoraRetrieval"] = {"query": "search_query", "document": "search_query"}
 
 
@@ -161,7 +157,8 @@ TASK_LIST = (
 # TASK_LIST = TASK_LIST_CLUSTERING
 # TASK_LIST = TASK_LIST_PAIR_CLASSIFICATION
 # TASK_LIST = TASK_LIST_RERANKING
-# TASK_LIST = ["ArguAna"]
+# TASK_LIST = ["Touche2020"]
+TASK_LIST = ["NFCorpus"]
 
 def parse_args() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Process model key")
@@ -172,23 +169,18 @@ def parse_args() -> argparse.ArgumentParser:
         choices=MODEL_FOLDER_DICT.keys()
     )
     parser.add_argument(
-        "--clustering_model",
-        help="The clustering model to use",
-        type=str,
-        default="gtr_base",
+        "--num_corpus_tokens",
+        help="Number of tokens to use for the corpus",
+        type=int,
+        default=512,
     )
-    parser.add_argument(
-        "--normalize_embeds",
-        action="store_true",
-        default=False,
-        help="Whether to normalize the embeddings",
-    )
+    
     return parser.parse_args()
 
 
+NORMALIZE_EMBEDS = False
 def main():
     args = parse_args()
-    NORMALIZE_EMBEDS = args.normalize_embeds
     model_folder = MODEL_FOLDER_DICT[args.model_key]
     trainer, (model_args, data_args, training_args) = analyze_utils.load_trainer_from_checkpoint_and_args(
         model_folder=model_folder,
@@ -196,15 +188,23 @@ def main():
         return_args=True
     )
     trainer.model.eval()
+    trainer._hn_filter_model = None
+
+    trainer.model.config.transductive_corpus_size = args.num_corpus_tokens
+    print(f"Using {args.num_corpus_tokens} tokens for the corpus")
     
+    gc.collect()
+    torch.cuda.empty_cache()
+
+    # L
 
     datasets.enable_caching()
     mteb_encoder = DenseEncoder(
         model_name_or_path=trainer.model.config.embedder,
         encoder=trainer.model.second_stage_model,
         max_seq_length=trainer.model.config.max_seq_length,
-        query_prefix="search_query: " if data_args.use_prefix else "",
-        document_prefix="search_document: " if data_args.use_prefix else "",
+        query_prefix="",     # Set later
+        document_prefix="",  # Set later
         normalize_embeds=NORMALIZE_EMBEDS,
         default_doc_prefix=True,
     )
@@ -212,7 +212,6 @@ def main():
     # TODO: Fix quora...
     # TODO: Disable norm for classification
     # TODO: Normalize vectors??
-
     random.Random(time.time()).shuffle(TASK_LIST)
     for task_idx, task in enumerate(TASK_LIST):
         prefixes = task2prefix[task]
@@ -231,10 +230,10 @@ def main():
         evaluation.tasks[0].load_data()
         if hasattr(evaluation.tasks[0], 'corpus') and split in evaluation.tasks[0].corpus:
             corpus = evaluation.tasks[0].corpus[split]
-            document_examples = list(corpus.values())
-            documents = [
-                '{} {}'.format(doc.get('title', ''), doc['text']).strip() 
-                for doc in document_examples
+            documents = random.choices(list(corpus.values()), k=trainer.model.config.transductive_corpus_size)
+            corpus_documents = [
+                mteb_encoder.document_prefix + '{} {}'.format(doc.get('title', ''), doc['text']).strip() 
+                for doc in documents
             ]
         elif hasattr(evaluation.tasks[0], 'dataset'):
             if isinstance(evaluation.tasks[0].dataset, datasets.Dataset):
@@ -260,36 +259,16 @@ def main():
                 raise ValueError(f"No corpus or dataset - got {column_names}")
             if isinstance(documents[0], list):
                 documents = [sentence for doc in documents for sentence in doc]
+            documents = random.choices(documents, k=trainer.model.config.transductive_corpus_size)
+            corpus_documents = [
+                mteb_encoder.document_prefix + doc
+                for doc in documents
+            ]
         else:
             raise ValueError("No corpus or dataset available")
         ##################################################
-        doc_dataset = datasets.Dataset.from_dict({ "text": documents })
-        print(doc_dataset[0])
-        corpus_size = trainer.model.config.transductive_corpus_size
-        doc_dataset._fingerprint = f"eval_mteb_cluster_{task}_{split}_{args.clustering_model}_{corpus_size}"
-        cluster_assignments = cluster_dataset(
-            dataset=doc_dataset,
-            query_to_doc=True,
-            model=args.clustering_model,
-            query_key="text",
-            document_key="text",
-            cluster_size=max(1, len(doc_dataset) / corpus_size),
-            downscale_and_normalize=True,
-        )
-        cluster_dict = collections.defaultdict(list)
-        for data_idx, cluster_idx in cluster_assignments.items():
-            if isinstance(cluster_idx, list): cluster_idx = cluster_idx[0]
-            cluster_dict[cluster_idx].append(data_idx)
-        corpus_document_idxs = [random.choice(list(cluster)) for cluster in cluster_dict.values()]
-        corpus_documents = doc_dataset.select(corpus_document_idxs)["text"]
-        if len(corpus_documents) < corpus_size:
-            corpus_documents += random.choices(documents, k=corpus_size - len(corpus_documents))
-        corpus_documents = [
-            mteb_encoder.document_prefix + doc
-            for doc in corpus_documents
-        ]
-        print(f"Sampled {len(corpus_documents)} documents.")
-        ##################################################
+        print(f"Got {len(corpus_documents)} documents...")
+        assert len(corpus_documents) == trainer.model.config.transductive_corpus_size
         print(corpus_documents[2])
         trainer.model.first_stage_model.cuda()
         dataset_inputs = mteb_encoder.tokenizer(
@@ -303,16 +282,22 @@ def main():
             dataset_embeddings = trainer.model.first_stage_model(
                 **dataset_inputs
             )
+        hidden_dim = dataset_embeddings.shape[-1]
+        dataset_embeddings = dataset_embeddings.reshape((1, -1, hidden_dim)) # flatten for multiple contextual tokens
+        dataset_embeddings = dataset_embeddings.to(torch.float32).cpu().numpy()
         ##################################################
         mteb_encoder.model_kwargs = {
-            "dataset_embeddings": dataset_embeddings.to(torch.float32).cpu().numpy(),
+            "dataset_embeddings": dataset_embeddings,
             "null_dataset_embedding": False,
             # ""
         }
+        # breakpoint()
         results = evaluation.run(
             mteb_encoder, 
-            output_folder=os.path.join("results_mteb", "cluster", "norm", args.model_key) if NORMALIZE_EMBEDS else os.path.join("results_mteb", "cluster", args.model_key),
+            output_folder=os.path.join("results_mteb", "longer", str(args.num_corpus_tokens), args.model_key) 
+                if NORMALIZE_EMBEDS else os.path.join("results_mteb", "longer", str(args.num_corpus_tokens), args.model_key),
             batch_size=512, 
+            # batch_size=128, 
             corpus_chunk_size=500_000,
             verbosity=2,
             eval_splits=[split]

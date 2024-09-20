@@ -9,6 +9,7 @@ logs/
 log_submitit
 log_submitit*
 notebooks/
+results*/
 saves
 saves/
 slurm-*.out

@@ -503,7 +503,6 @@ class BGEDataset(torch.utils.data.Dataset, TokenizerMixin):
     def __init__(self, tokenizer: transformers.AutoTokenizer, max_seq_length: int, num_hard_negatives: int = 0, use_prefix: bool = False):
         dataset = datasets.load_dataset("cfli/bge-full-data")
         self.dataset = process_bge_dataset_cached(dataset)
-        breakpoint()
         self.subdomain_idxs = get_subdomain_idxs_cached(dataset=self.dataset)
         self.tokenizer = tokenizer
         self.max_seq_length = max_seq_length
@@ -517,11 +516,9 @@ class BGEDataset(torch.utils.data.Dataset, TokenizerMixin):
         self.use_prefix = use_prefix
 
     def get_query_prefix(self, dataset: str) -> str:
-        dataset = self._remap_dataset_name(dataset)
         return self.config[dataset]["query_prefix"]
     
     def get_document_prefix(self, dataset: str) -> str:
-        dataset = self._remap_dataset_name(dataset)
         return self.config[dataset]["document_prefix"]
 
     def __hash__(self) -> int:
@@ -573,7 +570,6 @@ class BGEDataset(torch.utils.data.Dataset, TokenizerMixin):
     
     def __getitem__(self, query_id: int) -> Dict[str, torch.Tensor]: 
         ex = self.dataset[query_id]
-        breakpoint()
         if self.use_prefix:
             query_prefix = self.get_query_prefix(ex["dataset"])
             document_prefix = self.get_document_prefix(ex["dataset"])
@@ -586,8 +582,8 @@ class BGEDataset(torch.utils.data.Dataset, TokenizerMixin):
         document = document_prefix + ex["document"]
         random_document = document_prefix + document
 
-        num_hard_negatives = min(self.num_hard_negatives, len(ex["negative"]))
-        negative_documents_raw_text = random.sample(ex["negative"], num_hard_negatives)
+        num_hard_negatives = min(self.num_hard_negatives, len(ex["neg"]))
+        negative_documents_raw_text = random.sample(ex["neg"], num_hard_negatives)
         negative_documents = [document_prefix + d for d in negative_documents_raw_text]
         out_ex = self._tokenize({
             "idx": query_id,
@@ -642,7 +638,7 @@ def process_bge_dataset_cached(dataset: datasets.Dataset):
     cache_name = "bge_processed.dataset"
     cache_file_path = os.path.join(cache_folder, cache_name)
     if os.path.exists(cache_file_path):
-        return datasets.load_from_disk(cache_file_path)
+        return datasets_fast_load_from_disk(cache_file_path)
     else:
         splits = []
         for split_name in sorted(dataset.keys()):

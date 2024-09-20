@@ -14,7 +14,7 @@ def paired_kmeans_faiss(
     q: torch.Tensor,
     X: torch.Tensor, 
     k: int,
-    max_iters: int = 40, 
+    max_iters: int = 100, 
     n_redo: int = 3,
     seed: int = 42
 ) -> Tuple[torch.Tensor, torch.Tensor]:

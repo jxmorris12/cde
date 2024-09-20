@@ -170,7 +170,7 @@ def parse_args() -> argparse.ArgumentParser:
     return parser.parse_args()
 
 
-NORMALIZE_EMBEDS = True
+NORMALIZE_EMBEDS = False
 def main():
     args = parse_args()
     model_folder = MODEL_FOLDER_DICT[args.model_key]
@@ -190,8 +190,8 @@ def main():
         model_name_or_path=trainer.model.config.embedder,
         encoder=trainer.model.second_stage_model,
         max_seq_length=trainer.model.config.max_seq_length,
-        query_prefix="search_query: " if data_args.use_prefix else "",
-        document_prefix="search_document: " if data_args.use_prefix else "",
+        query_prefix="",     # Set later
+        document_prefix="",  # Set later
         normalize_embeds=NORMALIZE_EMBEDS,
         default_doc_prefix=True,
     )
@@ -282,8 +282,8 @@ def main():
         results = evaluation.run(
             mteb_encoder, 
             output_folder=os.path.join("results_mteb", "norm", args.model_key) if NORMALIZE_EMBEDS else os.path.join("results_mteb", args.model_key),
-            # batch_size=512, 
-            batch_size=128, 
+            batch_size=512, 
+            # batch_size=128, 
             corpus_chunk_size=500_000,
             verbosity=2,
             eval_splits=[split]
