@@ -58,7 +58,11 @@ class ModelArguments:
     )
     embedder: str = field(
         default="nomic-ai/nomic-embed-text-v1-unsupervised",
-        metadata={"help": "embedder name for the model (encoder-decoder)"}
+        metadata={"help": "embedder name for the model (encoder)"}
+    )
+    dataset_backbone: Optional[str] = field(
+        default=None,
+        metadata={"help": "embedder name for the model (output embedding model)"}
     )
     embedder_rerank: str = field(
         default="sentence-transformers/gtr-t5-base",
@@ -413,6 +417,10 @@ class TrainingArguments(transformers.TrainingArguments):
     num_eval_rerank_samples: int = field(
         default=64,
         metadata={"help": "Number of samples to rerank during eval"}
+    )
+    use_lora: bool = field(
+        default=False,
+        metadata={"help": "Whether to use LoRA for training"}
     )
 
     def __setattr__(self, name, value):

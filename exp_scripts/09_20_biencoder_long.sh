@@ -1,11 +1,11 @@
 #!/bin/bash
-#SBATCH -A memorization
-#SBATCH -q memorization_high
+#SBATCH -A differential
+#SBATCH -q differential_high 
 #SBATCH --job-name=test_multinode
 #SBATCH --output=log_submitit/multinode/pretrain_%j.out
 #SBATCH --error=log_submitit/multinode/pretrain_%j.err
-#SBATCH --nodes=16
-#SBATCH --ntasks=16
+#SBATCH --nodes=12
+#SBATCH --ntasks=12
 #SBATCH --gres=gpu:8
 #SBATCH --cpus-per-task=96
 #SBATCH --time=7-00:00:00
@@ -32,7 +32,7 @@ export HF_HUB_OFFLINE=1
 
 
 srun torchrun \
-    --nnodes 16 \
+    --nnodes 12 \
     --rdzv_id $RANDOM \
     --rdzv_backend c10d \
     --rdzv_endpoint $head_node_ip:29500 \

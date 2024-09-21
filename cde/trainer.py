@@ -76,7 +76,6 @@ class CustomTrainer(transformers.Trainer, TrainerNegativeFilterMixin):
             "negative_document_input_ids", "negative_document_attention_mask",
             "dataset_input_ids", "dataset_attention_mask",
             "batch_dataset_input_ids", "batch_dataset_attention_mask",
-            "batch_dataset_input_ids", "batch_dataset_attention_mask",
             "random_document_input_ids", "random_document_attention_mask",
             "negative_document_input_ids", "negative_document_attention_mask",
             "query_input_ids", "query_attention_mask",
@@ -397,6 +396,10 @@ class CustomTrainer(transformers.Trainer, TrainerNegativeFilterMixin):
             seq_length = negative_document_inputs["input_ids"].shape[2]
             negative_document_inputs["input_ids"] = negative_document_inputs["input_ids"].reshape(-1, seq_length)
             negative_document_inputs["attention_mask"] = negative_document_inputs["attention_mask"].reshape(-1, seq_length)
+            
+            if "input_ids_first_stage" in negative_document_inputs:
+                negative_document_inputs["input_ids_first_stage"] = negative_document_inputs["input_ids_first_stage"].reshape(-1, seq_length)
+                negative_document_inputs["attention_mask_first_stage"] = negative_document_inputs["attention_mask_first_stage"].reshape(-1, seq_length)
 
         batch_size = query_inputs["input_ids"].shape[0]
         if self.args.transductive_input_strategy == "fake":
@@ -411,24 +414,24 @@ class CustomTrainer(transformers.Trainer, TrainerNegativeFilterMixin):
             )
             dataset_inputs["input_ids"] = fake_dataset_input_ids
             dataset_inputs["attention_mask"] = fake_dataset_attention_mask
-        elif self.args.transductive_input_strategy == "topk":
-            dataset_inputs["input_ids"] = document_inputs["input_ids"]
-            dataset_inputs["attention_mask"] = document_inputs["attention_mask"]
-
+        elif self.args.transductive_input_strategy in ["topk", "random_corpus"]:
             if len(negative_document_inputs) and len(negative_document_inputs["input_ids"]):
                 # Also consider negative documents in the transductive selection step
                 dataset_inputs["input_ids"] = torch.cat(
-                    (document_inputs["input_ids"], negative_document_inputs["input_ids"]),
+                    (document_inputs.get("input_ids_first_stage", "input_ids"), negative_document_inputs.get("input_ids_first_stage", "input_ids")),
                     dim=0
                 )
                 dataset_inputs["attention_mask"] = torch.cat(
-                    (document_inputs["attention_mask"], negative_document_inputs["attention_mask"]),
+                    (document_inputs.get("attention_mask_first_stage", "attention_mask"), negative_document_inputs.get("attention_mask_first_stage", "attention_mask")),
                     dim=0
                 )
+            else:
+                dataset_inputs["input_ids"] = document_inputs.get("input_ids_first_stage", "input_ids")
+                dataset_inputs["attention_mask"] = document_inputs.get("attention_mask_first_stage", "attention_mask")
 
         elif self.args.transductive_input_strategy == "random_corpus":
-            dataset_inputs["input_ids"] = random_document_inputs["input_ids"]
-            dataset_inputs["attention_mask"] = random_document_inputs["attention_mask"]
+            dataset_inputs["input_ids"] = random_document_inputs.get("input_ids_first_stage", "input_ids")
+            dataset_inputs["attention_mask"] = random_document_inputs.get("attention_mask_first_stage", "attention_mask")
         else:
             pass
         

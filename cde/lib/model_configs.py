@@ -20,4 +20,11 @@ MODEL_FOLDER_DICT = {
    "cde--supervised--nomic-2--epoch-3": "/fsx-checkpoints/jxm/cde/2024-09-18-supervised-final-bge--epoch-3",
    "cde--supervised--nomic-2--epoch-4": "/fsx-checkpoints/jxm/cde/2024-09-18-supervised-final-bge--epoch-4",
    "cde--supervised--nomic-2--epoch-5": "/fsx-checkpoints/jxm/cde/2024-09-18-supervised-final-bge--epoch-5",
+   #####################
+   # Slightly different setting for BGE.
+   "cde--supervised--nomic-3--epoch-1": "/fsx-checkpoints/jxm/cde/2024-09-18-supervised-final-bge-big-batch-2--epoch-1",
+   "cde--supervised--nomic-3--epoch-2": "/fsx-checkpoints/jxm/cde/2024-09-18-supervised-final-bge-big-batch-2--epoch-2",
+   "cde--supervised--nomic-3--epoch-3": "/fsx-checkpoints/jxm/cde/2024-09-18-supervised-final-bge-big-batch-2--epoch-3",
+   "cde--supervised--nomic-3--epoch-4": "/fsx-checkpoints/jxm/cde/2024-09-18-supervised-final-bge-big-batch-2--epoch-4",
+   "cde--supervised--nomic-3--epoch-5": "/fsx-checkpoints/jxm/cde/2024-09-18-supervised-final-bge-big-batch-2--epoch-5",
 }

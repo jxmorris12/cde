@@ -135,6 +135,39 @@ def main():
         model_args.embedder,
     )
 
+    model_args.transductive_corpus_size = training_args.transductive_corpus_size
+    model_config = ModelConfig(**vars(model_args))
+    model_cls = get_model_class(model_args.architecture)
+    if model_args.architecture in ['biencoder', 'dataset_prefix_biencoder', 'contextual_cross_attention']:
+        model = model_cls(
+            config=model_config,
+            embedder=embedder,
+        )
+        dataset_backbone_tokenizer = embedder_tokenizer
+    else:
+        dataset_backbone, dataset_backbone_tokenizer = load_embedder_and_tokenizer(
+            model_args.dataset_backbone or model_args.embedder,
+        )
+        if training_args.use_lora:
+            from peft import LoraConfig, get_peft_model
+            lora_config = LoraConfig(
+                r=32,
+                lora_alpha=64,
+                # target_modules="q_proj,k_proj,v_proj,o_proj,down_proj,up_proj,gate_proj",
+                target_modules=["q_proj", "k_proj", "v_proj", "o_proj", "down_proj", "up_proj", "gate_proj"],
+                # target_modules="q_proj,k_proj,v_proj,o_proj,down_proj,up_proj,gate_proj",
+                lora_dropout=0.1,
+                init_lora_weights="gaussian",
+                use_dora=True,
+                inference_mode=False
+            )
+            dataset_backbone = get_peft_model(dataset_backbone, lora_config)
+        model = model_cls(
+            config=model_config,
+            embedder=embedder,
+            dataset_backbone=dataset_backbone,
+        )
+
     if training_args.tiny_debug: 
         datasets.logging.set_verbosity_info()
         beir_dataset_names = [ 'arguana' ]
@@ -180,12 +213,14 @@ def main():
     if data_args.dataset == 'nomic_unsupervised':
         train_dataset = NomicUnsupervisedDataset(
             tokenizer=embedder_tokenizer,
+            dataset_backbone_tokenizer=dataset_backbone_tokenizer,
             max_seq_length=model_args.max_seq_length,
             use_prefix=data_args.use_prefix,
             train_subdomain_key=data_args.train_subdomain_key,
         )
         eval_dataset = NomicSupervisedDataset(
             tokenizer=embedder_tokenizer,
+            dataset_backbone_tokenizer=dataset_backbone_tokenizer,
             num_hard_negatives=0,
             max_seq_length=model_args.max_seq_length,
             use_prefix=data_args.use_prefix,
@@ -195,6 +230,7 @@ def main():
     elif data_args.dataset == 'nomic_supervised':
         train_dataset = NomicSupervisedDataset(
             tokenizer=embedder_tokenizer,
+            dataset_backbone_tokenizer=dataset_backbone_tokenizer,
             num_hard_negatives=data_args.num_hard_negatives,
             max_seq_length=model_args.max_seq_length,
             use_prefix=data_args.use_prefix,
@@ -203,7 +239,8 @@ def main():
         collator_cls = TokenizedCollator
     elif data_args.dataset == 'bge':
         train_dataset = BGEDataset(
-            tokenizer=embedder_tokenizer,
+            tokenizer=dataset_backbone_tokenizer,
+            first_stage_tokenizer=embedder_tokenizer,
             num_hard_negatives=data_args.num_hard_negatives,
             max_seq_length=model_args.max_seq_length,
             use_prefix=data_args.use_prefix,
@@ -254,23 +291,6 @@ def main():
         "domain": functools.partial(eval_sampler_fn, sampling_strategy="domain"),
         "random": functools.partial(eval_sampler_fn, sampling_strategy="random"),
     }
-    model_args.transductive_corpus_size = training_args.transductive_corpus_size
-    model_config = ModelConfig(**vars(model_args))
-    model_cls = get_model_class(model_args.architecture)
-    if model_args.architecture in ['biencoder', 'dataset_prefix_biencoder', 'contextual_cross_attention']:
-        model = model_cls(
-            config=model_config,
-            embedder=embedder,
-        )
-    else:
-        dataset_backbone, dataset_tokenizer = load_embedder_and_tokenizer(
-            model_args.embedder,
-        )
-        model = model_cls(
-            config=model_config,
-            embedder=embedder,
-            dataset_backbone=dataset_backbone,
-        )
     
     if training_args.model_state_dict_from_path:
         print0("[load_model] loading from path", training_args.model_state_dict_from_path)
@@ -315,6 +335,7 @@ def main():
     if get_rank() == 0:
         # Print info stats for training on main worker
         transformers.logging.set_verbosity_info()
+
 
     trainer = CustomTrainer(
         data_collator=collator,

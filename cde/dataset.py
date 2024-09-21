@@ -1,7 +1,6 @@
 from typing import Any, Dict, List, Optional, Tuple
 
 import collections
-import dataclasses
 import functools
 import gzip
 import json
@@ -12,12 +11,10 @@ import random
 import yaml
 
 import datasets
-import numpy as np
 import pickle
 import random
 import torch
 import transformers
-import torch.multiprocessing as mp
 import tqdm
 
 from cde.lib import (
@@ -213,6 +210,14 @@ class TokenizerMixin:
             truncation=True,
             max_length=self.max_seq_length
         )
+        if self.first_stage_tokenizer:
+            dataset_tokenize_fn = functools.partial(
+                self.first_stage_tokenizer, 
+                return_tensors="pt", 
+                padding="max_length",
+                truncation=True,
+                max_length=self.max_seq_length
+            )
         for col in ["query", "document", "negative_document", "text"]:
             if not len(ex.get(col, [])): continue 
             ex_col = ex[col]
@@ -221,33 +226,22 @@ class TokenizerMixin:
                 tokenized_col = tokenize_fn([s[:max_num_chars] for s in ex_col])
                 ex[f'{col}_input_ids'] = tokenized_col.input_ids
                 ex[f'{col}_attention_mask'] = tokenized_col.attention_mask
+
+                if self.first_stage_tokenizer:
+                    tokenized_col = dataset_tokenize_fn([s[:max_num_chars] for s in ex_col])
+                    ex[f'{col}_input_ids_first_stage'] = tokenized_col.input_ids
+                    ex[f'{col}_attention_mask_first_stage'] = tokenized_col.attention_mask
             else:
                 ex_col = ex_col[:max_num_chars]
                 tokenized_col = tokenize_fn(ex_col)
                 ex[f'{col}_input_ids'] = tokenized_col.input_ids[0]
                 ex[f'{col}_attention_mask'] = tokenized_col.attention_mask[0]
+
+                if self.first_stage_tokenizer:
+                    tokenized_col = dataset_tokenize_fn(ex_col)
+                    ex[f'{col}_input_ids_first_stage'] = tokenized_col.input_ids[0]
+                    ex[f'{col}_attention_mask_first_stage'] = tokenized_col.attention_mask[0]
         return ex
-
-
-@dataclasses.dataclass
-class GenericTokenizedDataset(TokenizerMixin):
-    max_seq_length: int
-    tokenizer: transformers.PreTrainedTokenizer
-    dataset: datasets.Dataset
-    col: str
-
-    def __len__(self) -> int:
-        return len(self.dataset)
-
-    def __getitem__(self, idx: int) -> Dict[str, Any]:
-        ex = self.dataset[idx]
-        tokenized_output = self._tokenize({
-            "document": ex[self.col],
-        })
-        return {
-            "input_ids": tokenized_output["document_input_ids"],
-            "attention_mask": tokenized_output["document_attention_mask"],
-        }
 
 
 class FineWeb(torch.utils.data.Dataset, TokenizerMixin):
@@ -358,7 +352,12 @@ class NomicSupervisedDataset(torch.utils.data.Dataset, TokenizerMixin):
     max_seq_length: int
     num_hard_negatives: int
     use_prefix: bool
-    def __init__(self, tokenizer: transformers.AutoTokenizer, max_seq_length: int, num_hard_negatives: int = 0, use_prefix: bool = False):
+    def __init__(
+            self, 
+            tokenizer: transformers.AutoTokenizer, 
+            backbone_tokenizer: Optional[transformers.AutoTokenizer],
+            max_seq_length: int, num_hard_negatives: int = 0, use_prefix: bool = False
+        ):
         self.dataset = datasets.load_dataset(
             "nomic-ai/nomic_embed_supervised",
             keep_in_memory=False,
@@ -367,6 +366,7 @@ class NomicSupervisedDataset(torch.utils.data.Dataset, TokenizerMixin):
         # self.dataset = self.dataset.select(range(999))
         self.subdomain_idxs = get_subdomain_idxs_cached(self.dataset)
         self.tokenizer = tokenizer
+        self.backbone_tokenizer = backbone_tokenizer
         self.max_seq_length = max_seq_length
         self.num_hard_negatives = num_hard_negatives
 
@@ -500,11 +500,17 @@ class NomicSupervisedDataset(torch.utils.data.Dataset, TokenizerMixin):
     
 
 class BGEDataset(torch.utils.data.Dataset, TokenizerMixin):
-    def __init__(self, tokenizer: transformers.AutoTokenizer, max_seq_length: int, num_hard_negatives: int = 0, use_prefix: bool = False):
+    def __init__(
+            self, 
+            tokenizer: transformers.AutoTokenizer, 
+            first_stage_tokenizer: Optional[transformers.AutoTokenizer], 
+            max_seq_length: int, num_hard_negatives: int = 0, use_prefix: bool = False
+        ):
         dataset = datasets.load_dataset("cfli/bge-full-data")
         self.dataset = process_bge_dataset_cached(dataset)
         self.subdomain_idxs = get_subdomain_idxs_cached(dataset=self.dataset)
         self.tokenizer = tokenizer
+        self.first_stage_tokenizer = first_stage_tokenizer
         self.max_seq_length = max_seq_length
         self.num_hard_negatives = num_hard_negatives
         self.use_prefix = use_prefix
@@ -658,7 +664,11 @@ class NomicUnsupervisedDataset(torch.utils.data.Dataset, TokenizerMixin):
     max_seq_length: int
     use_prefix: bool
     train_subdomain_key: Optional[str]
-    def __init__(self, tokenizer: transformers.AutoTokenizer, max_seq_length: int, use_prefix: bool = False, train_subdomain_key: Optional[str] = None):
+    def __init__(self, 
+            tokenizer: transformers.AutoTokenizer, 
+            first_stage_tokenizer: Optional[transformers.AutoTokenizer],
+            max_seq_length: int, use_prefix: bool = False, train_subdomain_key: Optional[str] = None
+        ):
         print0("[NomicUnsupervisedDataset] loading dataset")
         self.dataset = (
             datasets.load_dataset(
@@ -672,6 +682,7 @@ class NomicUnsupervisedDataset(torch.utils.data.Dataset, TokenizerMixin):
         self.subdomain_idxs = get_subdomain_idxs_cached(dataset=self.dataset)
         assert len(self.dataset) == 238_998_494
         self.tokenizer = tokenizer
+        self.first_stage_tokenizer = first_stage_tokenizer
         self.max_seq_length = max_seq_length
 
         current_file_directory = os.path.dirname(os.path.abspath(__file__))

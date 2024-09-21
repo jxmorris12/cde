@@ -69,16 +69,12 @@ class ContextualModelMixin(nn.Module):
             null_dataset_embedding: bool = False,
         ) -> torch.Tensor:
         if not isinstance(dataset_embeddings, torch.Tensor):
-            dataset_embeddings = torch.tensor(
-                dataset_embeddings, 
-                dtype=torch.float32
-            )
+            dataset_embeddings = torch.tensor(dataset_embeddings)
 
         if len(dataset_embeddings.shape) == 2:
             # Auto-expand for a batch.
             dataset_embeddings = dataset_embeddings[None, :, :] # (b, d) -> (1, b, d)
         dataset_embeddings = dataset_embeddings.to(input_ids.device)
-        dataset_embeddings = dataset_embeddings.to(torch.float32)
     
         batch_size = input_ids.shape[0]
         if (self.transductive_tokens_per_document > 1):
@@ -125,7 +121,7 @@ class ContextualModelMixin(nn.Module):
         
         # backbone_max_seq_length = self.backbone.config.max_trained_positions
         # assert batch_size + (2 * self.n_soft_prompt + corpus_size) <= backbone_max_seq_length, "too many hard negatives for backbone model"
-        soft_prompt = torch.ones((1, self.hidden_size), device=dataset_embeddings.device, dtype=torch.float32)
+        soft_prompt = torch.ones((1, self.hidden_size), device=dataset_embeddings.device, dtype=dataset_embeddings.dtype)
         soft_prompt = self.prompt_projection(soft_prompt).reshape((1, self.n_soft_prompt, self.hidden_size))
         soft_prompt = soft_prompt.expand((len(dataset_embeddings), -1, -1)) # -> (b, 4+b, d) # soft_prompt.repeat((len(input_ids), 1, 1))  
         soft_prompt = torch.cat((dataset_embeddings, soft_prompt), dim=1)
@@ -364,6 +360,11 @@ class DatasetConditionedAutoregressive(transformers.PreTrainedModel, ContextualM
         self.hidden_size = first_stage_hidden_size # Input token size
         self.contextual_init()
         
+        self.input_ln = torch.nn.LayerNorm(
+            self.backbone_hidden_size, 
+            eps=1e-5
+        )
+        
         # Override contextual init
         self.output_projection = torch.nn.Sequential(
             torch.nn.Linear(self.backbone_hidden_size, self.backbone_hidden_size),
@@ -404,18 +405,16 @@ class DatasetConditionedAutoregressive(transformers.PreTrainedModel, ContextualM
         )
         
         # Reshape for this model.
-        print("[DatasetConditionedAutoregressive] 1 -> soft_prompt.shape =", soft_prompt.shape)
+        # print("[DatasetConditionedAutoregressive] 1 -> soft_prompt.shape =", soft_prompt.shape)
+        num_soft_elements = torch.prod(torch.tensor(soft_prompt.shape[1:])).item()
+        soft_prompt = soft_prompt.reshape((soft_prompt.shape[0], num_soft_elements))
+        num_padding_elements = self.backbone_hidden_size - (num_soft_elements % self.backbone_hidden_size)
+        padding = torch.ones((soft_prompt.shape[0], num_padding_elements), device=soft_prompt.device)
+        soft_prompt = torch.cat((soft_prompt, padding), dim=1)
         soft_prompt = soft_prompt.reshape(
-            (soft_prompt.shape[0], -1, int(self.corpus_token_ratio), self.hidden_size)
+            (soft_prompt.shape[0], -1, self.backbone_hidden_size)
         )
-        soft_prompt = soft_prompt.reshape(
-            (soft_prompt.shape[0], soft_prompt.shape[1], -1)
-        )
-        if soft_prompt.shape[2] < self.backbone_hidden_size:
-            soft_prompt_zeros = torch.zeros((self.backbone_hidden_size - soft_prompt.shape[2]), device=soft_prompt.device)
-            soft_prompt_zeros = soft_prompt_zeros[None, None].expand(soft_prompt.shape[0], soft_prompt.shape[1], -1)
-            soft_prompt = torch.cat((soft_prompt, soft_prompt_zeros), dim=2)
-        print("[DatasetConditionedAutoregressive] 2 -> soft_prompt.shape =", soft_prompt.shape)
+        # print("[DatasetConditionedAutoregressive] 2 -> soft_prompt.shape =", soft_prompt.shape)
 
         backbone_attention_mask = torch.ones(
             soft_prompt.shape[0:2],
@@ -426,6 +425,7 @@ class DatasetConditionedAutoregressive(transformers.PreTrainedModel, ContextualM
         inputs_embeds = token_embeddings(input_ids) # (b, s) -> (b, s, d)
         # print("[2] inputs_embeds.shape =", inputs_embeds.shape)
         inputs_embeds = torch.cat((soft_prompt, inputs_embeds), dim=1) # (v, 4+b+s, d)
+        inputs_embeds = self.input_ln(inputs_embeds)
         # print("[3.a] inputs_embeds.shape =", inputs_embeds.shape)
         attention_mask = torch.cat((backbone_attention_mask, attention_mask), dim=1)
         # print("[3.b] attention_mask.shape =", attention_mask.shape)
@@ -527,6 +527,7 @@ class DatasetConditionedBiencoder(transformers.PreTrainedModel, ContextualModelM
             attention_mask=attention_mask,
         ) # (1, 4 + b + s, d)
         # trim soft prompt
+        output_vectors = output.last_hidden_state
 
         # use only these tokens
         n_soft_prompt_tokens = soft_prompt.shape[1]
@@ -536,14 +537,13 @@ class DatasetConditionedBiencoder(transformers.PreTrainedModel, ContextualModelM
         output_attention_mask = attention_mask[:, n_soft_prompt_tokens:]
 
         # print("pooling output_vectors.shape =", output_vectors.shape, "and output_attention_mask.shape =", output_attention_mask.shape)
-        # output_pooled = mean_pool(output_vectors, output_attention_mask)
-        output_last_token = output_vectors[:, -1, :]
+        output_pooled = mean_pool(output_vectors, output_attention_mask)
 
         # average with original vectors
         # TODO: Argparse for pooling strategy.
         # output_vectors = torch.cat((soft_prompt_pooled, output_pooled), dim=1) # (b, d) + (b, d) -> (b, 2d)
         # print("output_pooled.shape =", output_pooled.shape)
-        output = self.output_projection(output_last_token) # (b, 2d) -> (b, d)
+        output = self.output_projection(output_pooled) # (b, 2d) -> (b, d)
 
         # print("returning output.shape =", output.shape)
 
@@ -641,6 +641,7 @@ class DatasetTransformer(transformers.PreTrainedModel):
                 config=config,
                 dataset_backbone=dataset_backbone
             )
+        
         self.temp = config.logit_scale
         if config.disable_dropout:
             disable_dropout(self)

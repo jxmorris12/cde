@@ -161,7 +161,7 @@ TASK_LIST = (
 # TASK_LIST = TASK_LIST_CLUSTERING
 # TASK_LIST = TASK_LIST_PAIR_CLASSIFICATION
 # TASK_LIST = TASK_LIST_RERANKING
-# TASK_LIST = ["ArguAna"]
+TASK_LIST = ["ArguAna"]
 
 def parse_args() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Process model key")
@@ -192,7 +192,9 @@ def main():
 
     if args.normalize_embeds:
         # We only care about clustering for this
-        TASK_LIST = TASK_LIST_CLUSTERING
+        task_list = TASK_LIST_CLUSTERING
+    else:
+        task_list = TASK_LIST
     
     model_folder = MODEL_FOLDER_DICT[args.model_key]
     trainer, (_, data_args, training_args) = analyze_utils.load_trainer_from_checkpoint_and_args(
@@ -218,14 +220,14 @@ def main():
     # TODO: Disable norm for classification
     # TODO: Normalize vectors??
 
-    random.Random(time.time()).shuffle(TASK_LIST)
-    for task_idx, task in enumerate(TASK_LIST):
+    random.Random(time.time()).shuffle(task_list)
+    for task_idx, task in enumerate(task_list):
         prefixes = task2prefix[task]
         mteb_encoder.document_prefix = (prefixes["document"] + ": ") if data_args.use_prefix else ""
         mteb_encoder.query_prefix = (prefixes["query"] + ": ") if data_args.use_prefix else ""
         print(f"Set prefixes to {mteb_encoder.query_prefix} and {mteb_encoder.document_prefix}")
 
-        print(f"Beginning {task} ({task_idx+1} / {len(TASK_LIST)})")
+        print(f"Beginning {task} ({task_idx+1} / {len(task_list)})")
         evaluation = MTEB(
             tasks=[task], 
             task_langs=["en"],
