@@ -82,6 +82,12 @@ class ModelArguments:
             "help": "If set, will load backbone and embedders with limited number of layers"
         }
     )
+    autoregressive_backbone: bool = field(
+        default=False,
+        metadata={
+            "help": "Whether to use autoregressive backbone"
+        }
+    )
     logit_scale: float = field(
         default=50,
         metadata={

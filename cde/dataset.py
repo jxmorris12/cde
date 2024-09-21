@@ -680,11 +680,9 @@ class NomicUnsupervisedDataset(torch.utils.data.Dataset, TokenizerMixin):
         self.config = { row["name"]: row for row in config_yaml["datasets"] }
         self.use_prefix = use_prefix
         self.train_subdomain_key = train_subdomain_key
-
         if self.train_subdomain_key:
             assert self.train_subdomain_key in self.subdomain_idxs, f"can't find key {self.train_subdomain_key} in {self.subdomain_idxs.keys()}"
             self.subdomain_idxs = { self.train_subdomain_key: self.subdomain_idxs[self.train_subdomain_key] }
-
         
     
     def get_query_prefix(self, dataset: str) -> str:

@@ -189,8 +189,13 @@ def parse_args() -> argparse.ArgumentParser:
 def main():
     args = parse_args()
     NORMALIZE_EMBEDS = args.normalize_embeds
+
+    if args.normalize_embeds:
+        # We only care about clustering for this
+        TASK_LIST = TASK_LIST_CLUSTERING
+    
     model_folder = MODEL_FOLDER_DICT[args.model_key]
-    trainer, (model_args, data_args, training_args) = analyze_utils.load_trainer_from_checkpoint_and_args(
+    trainer, (_, data_args, training_args) = analyze_utils.load_trainer_from_checkpoint_and_args(
         model_folder=model_folder,
         load_from_checkpoint=True,
         return_args=True

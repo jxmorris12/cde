@@ -383,7 +383,10 @@ class TensorRunningAverages:
             self.clear(key)
         return metrics
 
-def load_embedder_and_tokenizer(name: str) -> Tuple:
+def load_embedder_and_tokenizer(name: str) -> Tuple[
+        transformers.PreTrainedModel, 
+        transformers.PreTrainedTokenizer
+]:
     if name.startswith("nomic") or (name == "bert-base-uncased"):
         from cde.lib.nomic_bert import NomicBertModel
         if name.endswith("--from-scratch"):
@@ -417,6 +420,14 @@ def load_embedder_and_tokenizer(name: str) -> Tuple:
         tokenizer = transformers.AutoTokenizer.from_pretrained(
             "EleutherAI/pile-t5-base"
         )
+        tokenizer.pad_token = tokenizer.eos_token
+    elif name.startswith("gpt2") or name.startswith("meta-llama") or ("Llama" in name):
+        model = transformers.AutoModelForCausalLM.from_pretrained(
+            name, 
+            torch_dtype=torch.bfloat16,
+            low_cpu_mem_usage=True,
+        )
+        tokenizer = transformers.AutoTokenizer.from_pretrained(name)
         tokenizer.pad_token = tokenizer.eos_token
     else:
         model = transformers.AutoModel.from_pretrained(name, trust_remote_code=True)

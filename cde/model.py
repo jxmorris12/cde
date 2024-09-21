@@ -14,7 +14,11 @@ from cde.lib.contextual_bert.configuration import ContextualBertConfig
 
 def limit_layers(model: transformers.PreTrainedModel, n_layers: int) -> None:
     if hasattr(model, 'transformer'):
-        model.transformer.layer = model.transformer.layer[:n_layers]
+        if hasattr(model.transformer, 'h'):
+            # gpt2
+            model.transformer.h = model.transformer.h[:n_layers]
+        else:
+            model.transformer.layer = model.transformer.layer[:n_layers]
     elif hasattr(model, 'encoder'):
         if hasattr(model.encoder, 'layers'):
             model.encoder.layers = model.encoder.layers[:n_layers]
@@ -347,6 +351,115 @@ class TwoEmbeddersWithMLP(transformers.PreTrainedModel):
         return outputs
 
 
+class DatasetConditionedAutoregressive(transformers.PreTrainedModel, ContextualModelMixin):
+    def __init__(
+            self, 
+            config,
+            dataset_backbone: transformers.PreTrainedModel,
+            first_stage_hidden_size: int,
+        ):
+        super().__init__(config=config)
+        self.backbone = dataset_backbone
+        self.backbone_hidden_size = self.backbone.config.hidden_size
+        self.hidden_size = first_stage_hidden_size # Input token size
+        self.contextual_init()
+        
+        # Override contextual init
+        self.output_projection = torch.nn.Sequential(
+            torch.nn.Linear(self.backbone_hidden_size, self.backbone_hidden_size),
+            torch.nn.ReLU(),
+            torch.nn.Linear(self.backbone_hidden_size, self.backbone_hidden_size)
+        )
+        self._shift_rotary_embedding()
+                
+    @property
+    def num_corpus_tokens(self) -> int:
+        return self.config.transductive_corpus_size * self.transductive_tokens_per_document
+
+    @property
+    def corpus_token_ratio(self) -> float:
+        # How many tokens from the first stage make one token in the second
+        # stage?
+        return self.backbone_hidden_size / self.hidden_size
+    
+    def corpus_token_pad_size(self, n_tokens: int) -> int:
+        return self.hidden_size % self.backbone_hidden_size
+    
+    def _shift_rotary_embedding(self) -> None:
+        disable_transductive_rotary_embedding = vars(self.config).get("disable_transductive_rotary_embedding", True)
+        # TODO: Can we do this for LLAMA?
+    
+    def forward(
+            self, 
+            input_ids: torch.Tensor,
+            attention_mask: torch.Tensor,
+            dataset_embeddings: torch.Tensor,
+            output_hidden_states: bool = False,
+            null_dataset_embedding: bool = False,
+        ) -> torch.Tensor:
+        soft_prompt = self._prepare_dataset_embeddings(
+            input_ids=input_ids,
+            dataset_embeddings=dataset_embeddings,
+            null_dataset_embedding=null_dataset_embedding,
+        )
+        
+        # Reshape for this model.
+        print("[DatasetConditionedAutoregressive] 1 -> soft_prompt.shape =", soft_prompt.shape)
+        soft_prompt = soft_prompt.reshape(
+            (soft_prompt.shape[0], -1, int(self.corpus_token_ratio), self.hidden_size)
+        )
+        soft_prompt = soft_prompt.reshape(
+            (soft_prompt.shape[0], soft_prompt.shape[1], -1)
+        )
+        if soft_prompt.shape[2] < self.backbone_hidden_size:
+            soft_prompt_zeros = torch.zeros((self.backbone_hidden_size - soft_prompt.shape[2]), device=soft_prompt.device)
+            soft_prompt_zeros = soft_prompt_zeros[None, None].expand(soft_prompt.shape[0], soft_prompt.shape[1], -1)
+            soft_prompt = torch.cat((soft_prompt, soft_prompt_zeros), dim=2)
+        print("[DatasetConditionedAutoregressive] 2 -> soft_prompt.shape =", soft_prompt.shape)
+
+        backbone_attention_mask = torch.ones(
+            soft_prompt.shape[0:2],
+            dtype=torch.long,
+            device=soft_prompt.device,
+        )
+        token_embeddings = self.backbone.get_input_embeddings()
+        inputs_embeds = token_embeddings(input_ids) # (b, s) -> (b, s, d)
+        # print("[2] inputs_embeds.shape =", inputs_embeds.shape)
+        inputs_embeds = torch.cat((soft_prompt, inputs_embeds), dim=1) # (v, 4+b+s, d)
+        # print("[3.a] inputs_embeds.shape =", inputs_embeds.shape)
+        attention_mask = torch.cat((backbone_attention_mask, attention_mask), dim=1)
+        # print("[3.b] attention_mask.shape =", attention_mask.shape)
+        output = self.backbone(
+            inputs_embeds=inputs_embeds,
+            attention_mask=attention_mask,
+            output_hidden_states=True,
+        ) # (1, 4 + b + s, d)
+        # trim soft prompt
+        last_hidden_state = output.hidden_states[-1]
+
+        # use only these tokens
+        n_soft_prompt_tokens = soft_prompt.shape[1]
+        # print("n_soft_prompt_tokens =", n_soft_prompt_tokens)
+
+        output_vectors = last_hidden_state[:, n_soft_prompt_tokens:, :]
+        output_attention_mask = attention_mask[:, n_soft_prompt_tokens:]
+
+        # print("pooling output_vectors.shape =", output_vectors.shape, "and output_attention_mask.shape =", output_attention_mask.shape)
+        output_pooled = mean_pool(output_vectors, output_attention_mask)
+
+        # average with original vectors
+        # TODO: Argparse for pooling strategy.
+        output = self.output_projection(output_pooled) # (b, 2d) -> (b, d)
+
+        if output_hidden_states:
+            return {
+                "hidden_states": output_vectors,
+                "pooled": output,
+            }
+        else:
+            return output
+
+
 class DatasetConditionedBiencoder(transformers.PreTrainedModel, ContextualModelMixin):
     def __init__(
             self, 
@@ -414,7 +527,6 @@ class DatasetConditionedBiencoder(transformers.PreTrainedModel, ContextualModelM
             attention_mask=attention_mask,
         ) # (1, 4 + b + s, d)
         # trim soft prompt
-        output_vectors = output.last_hidden_state
 
         # use only these tokens
         n_soft_prompt_tokens = soft_prompt.shape[1]
@@ -424,13 +536,14 @@ class DatasetConditionedBiencoder(transformers.PreTrainedModel, ContextualModelM
         output_attention_mask = attention_mask[:, n_soft_prompt_tokens:]
 
         # print("pooling output_vectors.shape =", output_vectors.shape, "and output_attention_mask.shape =", output_attention_mask.shape)
-        output_pooled = mean_pool(output_vectors, output_attention_mask)
+        # output_pooled = mean_pool(output_vectors, output_attention_mask)
+        output_last_token = output_vectors[:, -1, :]
 
         # average with original vectors
         # TODO: Argparse for pooling strategy.
         # output_vectors = torch.cat((soft_prompt_pooled, output_pooled), dim=1) # (b, d) + (b, d) -> (b, 2d)
         # print("output_pooled.shape =", output_pooled.shape)
-        output = self.output_projection(output_pooled) # (b, 2d) -> (b, d)
+        output = self.output_projection(output_last_token) # (b, 2d) -> (b, d)
 
         # print("returning output.shape =", output.shape)
 
@@ -516,10 +629,18 @@ class DatasetTransformer(transformers.PreTrainedModel):
             config=biencoder_config,
             embedder=embedder
         )
-        self.second_stage_model = DatasetConditionedBiencoder(
-            config=config,
-            dataset_backbone=dataset_backbone
-        )
+
+        if vars(config).get("autoregressive_backbone", False):
+            self.second_stage_model = DatasetConditionedAutoregressive(
+                config=config,
+                dataset_backbone=dataset_backbone,
+                first_stage_hidden_size=self.first_stage_model.hidden_size,
+            )
+        else:
+            self.second_stage_model = DatasetConditionedBiencoder(
+                config=config,
+                dataset_backbone=dataset_backbone
+            )
         self.temp = config.logit_scale
         if config.disable_dropout:
             disable_dropout(self)
