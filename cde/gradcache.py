@@ -11,6 +11,7 @@ import accelerate
 import torch
 from torch import Tensor, nn
 from torch.utils.checkpoint import get_device_states, set_device_states
+from torch.distributed.fsdp import FullyShardedDataParallel
 
 from cde.lib.dist import get_rank, get_world_size
 from cde.lib.misc import tqdm_if_main_worker
@@ -82,10 +83,11 @@ class GradCache:
         :return: Current step loss.
         """
         model = kwargs["model"]
-        # model_is_ddp = isinstance(model, nn.parallel.DistributedDataParallel)
-        # problem: it could also be this –
-        #       torch._dynamo.eval_frame.OptimizedModule
-        model_is_ddp = hasattr(model, "module")
+        model_is_ddp = (
+            isinstance(model, nn.parallel.DistributedDataParallel)
+            or
+            isinstance(model, FullyShardedDataParallel)
+        )
         if model_is_ddp:
             model_has_two_stages = hasattr(model.module, "second_stage_model")
         else:
@@ -268,10 +270,10 @@ class GradCache:
         
         # https://huggingface.co/docs/accelerate/en/concept_guides/gradient_synchronization
         if (get_world_size() > 0) and no_sync_except_last:
+            no_sync_func = model.no_sync if hasattr(model, "no_sync") else self.accelerator.no_sync
             sync_contexts = [
-                functools.partial(self.accelerator.no_sync, model) for _ in range(len(model_inputs) - 1)
+                no_sync_func for _ in range(len(model_inputs) - 1)
             ] + [nullcontext]
-            # ] + [functools.partial(self.accelerator.trigger_sync_in_backward, model)]
         else:
             sync_contexts = [nullcontext for _ in range(len(model_inputs))]
 
@@ -354,10 +356,12 @@ class GradCache:
         for the last sub-batch's forward-backward pass.
         """
         if (get_world_size() > 0) and no_sync_except_last:
+            no_sync_func = model.no_sync if hasattr(model, "no_sync") else self.accelerator.no_sync
             sync_contexts = [
-                functools.partial(self.accelerator.no_sync, model) for _ in range(len(model_inputs) - 1)
+                no_sync_func for _ in range(len(model_inputs) - 1)
             ] + [nullcontext]
         else:
+            print("not no_sync")
             sync_contexts = [nullcontext for _ in range(len(model_inputs))]
         if len(model_inputs) > min_tqdm_inputs:
             model_inputs_tqdm = tqdm_if_main_worker(
@@ -431,7 +435,11 @@ class GradCache:
         ##
         ## First stage no grad
         ##
-        model_is_ddp = isinstance(model, nn.parallel.DistributedDataParallel)
+        model_is_ddp = (
+            isinstance(model, nn.parallel.DistributedDataParallel)
+            or
+            isinstance(model, FullyShardedDataParallel)
+        )
         assert model_stages is not None
         first_stage_model, second_stage_model = model_stages
 
@@ -451,6 +459,7 @@ class GradCache:
         with torch.no_grad():
             for x in first_stage_input_chunks_tqdm:
                 first_stage_rnd_states.append(RandContext(*self.get_input_tensors(x)))
+                # print(f"calling first_stage_model of type {type(first_stage_model)}")
                 with torch.autocast(device_type="cuda") if self.bf16 else nullcontext():
                     y = first_stage_model(
                         input_ids=x['dataset_input_ids'],
@@ -528,10 +537,12 @@ class GradCache:
         ### Compute gradients wrt first stage
         ### 
         if no_sync_except_last and model_is_ddp:
+            no_sync_func = model.no_sync if hasattr(model, "no_sync") else self.accelerator.no_sync
             sync_contexts = [
-                functools.partial(self.accelerator.no_sync, model) for _ in range(len(model_inputs) - 1)
+                no_sync_func for _ in range(len(model_inputs) - 1)
             ] + [nullcontext]
         else:
+            print("not no_sync")
             sync_contexts = [nullcontext for _ in range(len(first_stage_input_chunks))]
         
         # TODO: There's a *2 here too; get that from argparsed value once we add argparse

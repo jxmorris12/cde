@@ -424,7 +424,7 @@ def load_embedder_and_tokenizer(name: str) -> Tuple[
     elif name.startswith("gpt2") or name.startswith("meta-llama") or ("Llama" in name):
         model = transformers.AutoModelForCausalLM.from_pretrained(
             name, 
-            torch_dtype=torch.bfloat16,
+            # torch_dtype=torch.bfloat16,
             attn_implementation="flash_attention_2",
             low_cpu_mem_usage=True,
         )

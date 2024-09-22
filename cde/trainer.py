@@ -87,14 +87,16 @@ class CustomTrainer(transformers.Trainer, TrainerNegativeFilterMixin):
         self._extra_logs = TensorRunningAverages()
         self.model_has_two_stages = hasattr(self.model, "second_stage_model")
         self._model_stages = None
-        self._run_ddp_verify = True
+        # Wrap first-stage and second-stage models in DDP/FSDP wrappers before all the HF trainer
+        # boilerplate code is called.
+        self.get_model_stages(model=self.model)
+        self._run_ddp_verify = False
 
         effective_batch_size = get_world_size() * self.args.per_device_train_batch_size
         self._memory_reset_step_frequency = int(2000 * effective_batch_size / 256)
         if (self.args.hn_tune_threshold is not None) and (self.args.hn_tune_threshold >= 0.0):
             self._init_hn_filter_model()
          
-
     
     def _save(self, output_dir: Optional[str] = None, state_dict=None):
         super()._save(output_dir=output_dir, state_dict=state_dict)
@@ -475,9 +477,13 @@ class CustomTrainer(transformers.Trainer, TrainerNegativeFilterMixin):
         if not self.model_has_two_stages:
             return None
         elif self._model_stages is None:
+            # if self._is_main_worker:
+            #     breakpoint()
+            # torch.distributed.barrier()
             # We have to create separate DDP instances so that we can call the forward() functions individually
             # from the two halves of our model and have gradients sync properly.
             # if isinstance(model, torch.nn.parallel.DistributedDataParallel):
+            model = self.accelerator.unwrap_model(model)
             if hasattr(model, "module"):
                 if self.use_gc:
                     self._model_stages = self.accelerator.prepare(
@@ -490,12 +496,11 @@ class CustomTrainer(transformers.Trainer, TrainerNegativeFilterMixin):
                         model.module.second_stage_model,
                     ]
             else:
-                model.first_stage_model = self._wrap_model(model.first_stage_model)
-                model.second_stage_model = self._wrap_model(model.second_stage_model)
+                # model.first_stage_model = self._wrap_model(model.first_stage_model)
+                # model.second_stage_model = self._wrap_model(model.second_stage_model)
                 if self.use_gc:
                     self._model_stages = self.accelerator.prepare(
-                        model.first_stage_model,
-                        model.second_stage_model,
+                        model.first_stage_model, model.second_stage_model,
                     )
                 else:
                     self._model_stages = [
@@ -660,7 +665,7 @@ class CustomTrainer(transformers.Trainer, TrainerNegativeFilterMixin):
             loss = self.gc(
                 query_inputs, 
                 document_inputs, 
-                model=model,
+                model=self._wrap_model(model),
                 model_stages=self.get_model_stages(model=model),
                 no_sync_except_last=(get_world_size() > 1),
                 backward_fn=backward_fn,

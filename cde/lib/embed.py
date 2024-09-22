@@ -44,7 +44,7 @@ def embed_dataloader(
                 kwargs.pop(unwanted_key)
         with torch.autocast(embed_device, dtype=torch.bfloat16), torch.no_grad():
             outputs = encoder(**batch_dict, **kwargs)
-        if hasattr(outputs, 'pooler_output'):
+        if hasattr(outputs, 'pooler_output') and not (outputs.pooler_output is None):
             embeds = outputs.pooler_output
         elif hasattr(outputs, 'last_hidden_state'):
             embeds = mean_pool(
@@ -54,6 +54,7 @@ def embed_dataloader(
         else:
             # already pooled
             embeds = outputs
+        
         encoded_embeds.append(embeds.cpu())
         
     if convert_to_tensor:
@@ -138,7 +139,8 @@ class DenseEncoder(torch.nn.Module):
             print("[DenseEncoder] initializing from", self.model_name_or_path)
             self.encoder = transformers.AutoModel.from_pretrained(
                 self.model_name_or_path, 
-                torch_dtype=torch.float16
+                torch_dtype=torch.float16,
+                trust_remote_code=True,
             )
             self.encoder.eval()
         if hasattr(self.encoder, "decoder") and hasattr(self.encoder, "encoder"):
@@ -198,7 +200,7 @@ class DenseEncoder(torch.nn.Module):
 
         try:
             len_dataset = len(dataset)
-            effective_batch_size = min(effective_batch_size, max(1, len(dataset) // num_workers))
+            effective_batch_size = min(effective_batch_size, len(dataset) // max(1, num_workers))
         except TypeError:
             # iterable dataset has no len
             len_dataset = "unknown"
