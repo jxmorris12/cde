@@ -355,7 +355,7 @@ class NomicSupervisedDataset(torch.utils.data.Dataset, TokenizerMixin):
     def __init__(
             self, 
             tokenizer: transformers.AutoTokenizer, 
-            backbone_tokenizer: Optional[transformers.AutoTokenizer],
+            first_stage_tokenizer: Optional[transformers.AutoTokenizer],
             max_seq_length: int, num_hard_negatives: int = 0, use_prefix: bool = False
         ):
         self.dataset = datasets.load_dataset(
@@ -366,7 +366,7 @@ class NomicSupervisedDataset(torch.utils.data.Dataset, TokenizerMixin):
         # self.dataset = self.dataset.select(range(999))
         self.subdomain_idxs = get_subdomain_idxs_cached(self.dataset)
         self.tokenizer = tokenizer
-        self.backbone_tokenizer = backbone_tokenizer
+        self.first_stage_tokenizer = first_stage_tokenizer
         self.max_seq_length = max_seq_length
         self.num_hard_negatives = num_hard_negatives
 
@@ -506,7 +506,10 @@ class BGEDataset(torch.utils.data.Dataset, TokenizerMixin):
             first_stage_tokenizer: Optional[transformers.AutoTokenizer], 
             max_seq_length: int, num_hard_negatives: int = 0, use_prefix: bool = False
         ):
-        dataset = datasets.load_dataset("cfli/bge-full-data")
+        dataset = datasets.load_dataset(
+            "cfli/bge-full-data",
+            num_proc=32,
+        )
         self.dataset = process_bge_dataset_cached(dataset)
         self.subdomain_idxs = get_subdomain_idxs_cached(dataset=self.dataset)
         self.tokenizer = tokenizer

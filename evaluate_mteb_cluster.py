@@ -17,7 +17,8 @@ from cde.lib.utils import analyze_utils
 from mteb import MTEB
 
 
-os.environ['OPENBLAS_NUM_THREADS'] = '16'
+os.environ["OMP_NUM_THREADS"] = "16"
+os.environ["OPENBLAS_NUM_THREADS"] = "16"
 
 TASK_LIST_CLASSIFICATION = [
     "AmazonCounterfactualClassification",
@@ -161,7 +162,7 @@ TASK_LIST = (
 # TASK_LIST = TASK_LIST_CLUSTERING
 # TASK_LIST = TASK_LIST_PAIR_CLASSIFICATION
 # TASK_LIST = TASK_LIST_RERANKING
-TASK_LIST = ["ArguAna"]
+# TASK_LIST = ["ArguAna"]
 
 def parse_args() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Process model key")

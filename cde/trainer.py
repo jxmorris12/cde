@@ -140,7 +140,7 @@ class CustomTrainer(transformers.Trainer, TrainerNegativeFilterMixin):
                 or 
                 self.args.max_batch_size_fits_in_memory
             )
-            print0(f"[rank {get_rank()}] initializing GradCache with chunk_size={gc_bs}.")
+            print0(f"[rank {get_rank()}] initializing GradCache with chunk_sizes={gc_bs} and {gc_bs_fs}.")
             self.gc = GradCache(
                 accelerator=self.accelerator,
                 chunk_sizes=[gc_bs, gc_bs],
@@ -470,6 +470,8 @@ class CustomTrainer(transformers.Trainer, TrainerNegativeFilterMixin):
         #           https://github.com/huggingface/transformers/blame/main/src/transformers/trainer.py
         # TODO: properly set kwargs such as DDP broadcast buffers in the wrapped
         #           modules
+        # print("rank", get_rank(), "wrapping model...")
+        # model = self._wrap_model(model)
         if not self.model_has_two_stages:
             return None
         elif self._model_stages is None:
@@ -488,6 +490,8 @@ class CustomTrainer(transformers.Trainer, TrainerNegativeFilterMixin):
                         model.module.second_stage_model,
                     ]
             else:
+                model.first_stage_model = self._wrap_model(model.first_stage_model)
+                model.second_stage_model = self._wrap_model(model.second_stage_model)
                 if self.use_gc:
                     self._model_stages = self.accelerator.prepare(
                         model.first_stage_model,

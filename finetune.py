@@ -212,25 +212,19 @@ def main():
 
     if data_args.dataset == 'nomic_unsupervised':
         train_dataset = NomicUnsupervisedDataset(
-            tokenizer=embedder_tokenizer,
-            dataset_backbone_tokenizer=dataset_backbone_tokenizer,
+            tokenizer=dataset_backbone_tokenizer,
+            first_stage_tokenizer=embedder_tokenizer,
             max_seq_length=model_args.max_seq_length,
             use_prefix=data_args.use_prefix,
             train_subdomain_key=data_args.train_subdomain_key,
         )
-        eval_dataset = NomicSupervisedDataset(
-            tokenizer=embedder_tokenizer,
-            dataset_backbone_tokenizer=dataset_backbone_tokenizer,
-            num_hard_negatives=0,
-            max_seq_length=model_args.max_seq_length,
-            use_prefix=data_args.use_prefix,
-        )
+        eval_dataset = None
         # Need to tokenize and collate for this dataset
         collator_cls = TokenizedCollator
     elif data_args.dataset == 'nomic_supervised':
         train_dataset = NomicSupervisedDataset(
-            tokenizer=embedder_tokenizer,
-            dataset_backbone_tokenizer=dataset_backbone_tokenizer,
+           tokenizer=dataset_backbone_tokenizer,
+            first_stage_tokenizer=embedder_tokenizer,
             num_hard_negatives=data_args.num_hard_negatives,
             max_seq_length=model_args.max_seq_length,
             use_prefix=data_args.use_prefix,
