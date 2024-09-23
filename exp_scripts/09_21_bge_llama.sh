@@ -2,14 +2,14 @@
 #SBATCH -A memorization
 #SBATCH -q memorization_high
 #SBATCH --job-name=test_multinode
-#SBATCH --output=log_submitit/multinode_llama/pretrain_%j.out
-#SBATCH --error=log_submitit/multinode_llama/pretrain_%j.err
-#SBATCH --nodes=3
-#SBATCH --ntasks=3
+#SBATCH --output=log_submitit/multinode/llama/pretrain_%j.out
+#SBATCH --error=log_submitit/multinode/llama/pretrain_%j.err
+#SBATCH --nodes=16
+#SBATCH --ntasks=16
 #SBATCH --gres=gpu:8
-#SBATCH --cpus-per-task=96
+#SBATCH --cpus-per-task=64
 #SBATCH --time=7-00:00:00
-#SBATCH --mem=800G
+#SBATCH --mem=600G
 #SBATCH --requeue
 
 # Training setup
@@ -24,12 +24,12 @@ WORLD_SIZE=$(($GPUS_PER_NODE*$NNODES))
 CMD=" \
     finetune.py --per_device_train_batch_size 512 --per_device_eval_batch_size 256 \
                 --dataset nomic_supervised --sampling_strategy cluster_within_domain \
-                 --num_train_epochs 5 --learning_rate 2e-05 \
+                 --num_train_epochs 5 --learning_rate 1e-04 \
                  --embedder nomic-ai/nomic-bert-2048 --clustering_model gtr_base \
-                 --clustering_query_to_doc 1 --ddp_find_unused_parameters 0 \
+                 --clustering_query_to_doc 1 \
                   --eval_rerank_topk 512 --lr_scheduler_type constant_with_warmup \
-                --warmup_steps 200 --disable_dropout 1 --max_seq_length 512 \
-                 --logging_steps 50 --train_cluster_size 512 --eval_cluster_size 256 \
+                 --warmup_steps 10 --max_seq_length 512 \
+                 --logging_steps 5 --train_cluster_size 512 --eval_cluster_size 256 \
                  --use_prefix 1 --transductive_corpus_size 512 --logit_scale 50 \
                  --max_eval_batches 16 --torch_compile 0 --use_gc 1 --fp16 0 --bf16 1 \
                  --eval_steps 5000 --disable_dropout 1 --arch transductive \
@@ -37,24 +37,20 @@ CMD=" \
                  --exp_group 2024-09-21-supervised-filter-filtered-llama \
                  --hn_filter_model stella --hn_tune_threshold 1 \
                  --hn_filter_precompute_vector 0 \
-                 --sampling_strategy cluster_within_domain \
                  --ddp_share_negatives_between_gpus 0 --num_hard_negatives 1 \
-                 --num_eval_rerank_samples 1024 --save_strategy epoch --save_total_limit 5 \
-                 --max_batch_size_fits_in_memory 128 \
-                 --max_batch_size_fits_in_memory_first_stage 4 \
+                 --num_eval_rerank_samples 1024 --save_strategy steps --save_steps 32 --save_total_limit 5 \
+                 --max_batch_size_fits_in_memory 1 \
+                 --max_batch_size_fits_in_memory_first_stage 64 \
                  --use_wandb 1 --ddp_find_unused_parameters 1 --dataset bge \
                  --clustering_batch_packing_strategy tsp_greedy \
-                 --dataset_backbone "meta-llama/Meta-Llama-3-8B" --use_wandb 0 \
-                --autoregressive_backbone=1
+                 --dataset_backbone "meta-llama/Meta-Llama-3-8B" \
+                 --autoregressive_backbone 1 --transductive_sequence_dropout_prob 0.005
     "
 
 LAUNCHER="accelerate launch \
-    --multi_gpu \
-    --num_machines $NNODES \
-    --num_processes $WORLD_SIZE \
+    --config_file fsdp_config_16.yaml \
     --main_process_ip "$MASTER_ADDR" \
     --main_process_port $MASTER_PORT \
-    --num_processes $WORLD_SIZE \
     --machine_rank \$SLURM_PROCID \
     --role $SLURMD_NODENAME: \
     --rdzv_conf rdzv_backend=c10d \
@@ -65,8 +61,7 @@ LAUNCHER="accelerate launch \
 SRUN_ARGS=" \
     --wait=60 \
     --kill-on-bad-exit=1 \
-    "
-
-clear; srun $SRUN_ARGS --jobid $SLURM_JOB_ID bash -c "$LAUNCHER $CMD" 2>&1 | tee ~/logs/%x-%j.txt
+"
+srun $SRUN_ARGS --jobid $SLURM_JOB_ID bash -c "$LAUNCHER $CMD"
 
 echo "END TIME: $(date)"

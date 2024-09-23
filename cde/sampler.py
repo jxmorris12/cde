@@ -143,6 +143,7 @@ class FixedSubdomainSampler(RandomSampler):
             num_samples=num_samples,
             seed=seed,
         )
+        self.batch_assignments = self.dataset.subdomain_idxs
         assert hasattr(self.dataset, 'subdomain_idxs')
         self.share_negatives_between_gpus = share_negatives_between_gpus
         g = torch.Generator()

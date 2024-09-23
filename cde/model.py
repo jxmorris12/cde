@@ -470,10 +470,10 @@ class DatasetConditionedBiencoder(transformers.PreTrainedModel, ContextualModelM
         self.backbone = dataset_backbone
         self.hidden_size = self.backbone.config.hidden_size
         self.hidden_size = dataset_backbone.config.hidden_size
-        self.input_ln = torch.nn.LayerNorm(
-            self.hidden_size, 
-            eps=self.backbone.config.layer_norm_epsilon
-        )
+        # self.input_ln = torch.nn.LayerNorm(
+        #     self.hidden_size, 
+        #     eps=self.backbone.config.layer_norm_epsilon
+        # )
         self.contextual_init()
         self._shift_rotary_embedding()
                 
