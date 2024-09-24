@@ -361,7 +361,6 @@ class GradCache:
                 no_sync_func for _ in range(len(model_inputs) - 1)
             ] + [nullcontext]
         else:
-            print("not no_sync")
             sync_contexts = [nullcontext for _ in range(len(model_inputs))]
         if len(model_inputs) > min_tqdm_inputs:
             model_inputs_tqdm = tqdm_if_main_worker(

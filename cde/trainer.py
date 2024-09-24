@@ -197,7 +197,7 @@ class CustomTrainer(transformers.Trainer, TrainerNegativeFilterMixin):
         
         return map(advance_and_return, eval_dataloader)
 
-    def _get_examples_table(self, dataloader, n: int = 64) -> wandb.Table:
+    def _get_examples_table(self, dataloader, n: int = 100) -> wandb.Table:
         """Decodes column tensors back to strings and displays them
         in Weights & Biases.
         """
@@ -340,9 +340,13 @@ class CustomTrainer(transformers.Trainer, TrainerNegativeFilterMixin):
         pred_labels = one_hot_labels[torch.arange(len(one_hot_labels)), logits.argmax(dim=1)]
         acc = pred_labels.float().mean()
 
+        # TODO: Gather loss and acc for logging.
+        acc = self.consider_gather(acc.detach())
+        loss_unscaled = self.consider_gather(loss_unscaled.detach())
+
         metrics = {
-            "acc": acc.detach(),
-            "loss_unscaled": loss_unscaled.detach(),
+            "acc": acc,
+            "loss_unscaled": loss_unscaled,
             "stats_emb_dim": e1.shape[-1],
             "stats_total_queries": len(e1),
             "stats_total_documents": len(e2),
@@ -876,7 +880,11 @@ class CustomTrainer(transformers.Trainer, TrainerNegativeFilterMixin):
         should_evaluate = self.control.should_evaluate
         
         # do all the other stuff
-        super()._maybe_log_save_evaluate(tr_loss, grad_norm, model, *args, **kwargs)
+        try:
+            super()._maybe_log_save_evaluate(tr_loss, grad_norm, model, *args, **kwargs)
+        except Exception as e:
+            print("Error in super()._maybe_log_save_evaluate:", e)
+            print("Continuing...")
 
         # do my custom eval
         if should_evaluate:

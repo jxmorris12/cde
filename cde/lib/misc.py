@@ -427,6 +427,7 @@ def load_embedder_and_tokenizer(name: str) -> Tuple[
             # torch_dtype=torch.bfloat16,
             attn_implementation="flash_attention_2",
             low_cpu_mem_usage=True,
+            # device_map="auto",
         )
         model.padding_side = "right"
         tokenizer = transformers.AutoTokenizer.from_pretrained(name)

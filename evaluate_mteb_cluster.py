@@ -150,7 +150,7 @@ task2prefix["QuoraRetrieval"] = {"query": "search_query", "document": "search_qu
 
 
 TASK_LIST = (
-    TASK_LIST_CLASSIFICATION
+      TASK_LIST_CLASSIFICATION
     + TASK_LIST_CLUSTERING
     + TASK_LIST_PAIR_CLASSIFICATION
     + TASK_LIST_RERANKING
@@ -163,6 +163,7 @@ TASK_LIST = (
 # TASK_LIST = TASK_LIST_PAIR_CLASSIFICATION
 # TASK_LIST = TASK_LIST_RERANKING
 # TASK_LIST = ["ArguAna"]
+# TASK_LIST = ["ImdbClassification"]
 
 def parse_args() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Process model key")
@@ -320,7 +321,7 @@ def main():
         results = evaluation.run(
             mteb_encoder, 
             output_folder=os.path.join("results_mteb", "cluster", "norm", args.model_key) if NORMALIZE_EMBEDS else os.path.join("results_mteb", "cluster", args.model_key),
-            batch_size=512, 
+            batch_size=256, 
             corpus_chunk_size=500_000,
             verbosity=2,
             eval_splits=[split]

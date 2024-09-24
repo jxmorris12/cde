@@ -205,6 +205,7 @@ class DenseEncoder(torch.nn.Module):
             # iterable dataset has no len
             len_dataset = "unknown"
             effective_batch_size = batch_size
+        effective_batch_size = max(1, effective_batch_size)
 
         print(f"[DenseEncoder] created dataloader with {num_workers} workers, effective_batch_size={effective_batch_size}, len(dataset)={len_dataset}")
         return torch.utils.data.DataLoader(

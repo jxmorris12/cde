@@ -311,7 +311,9 @@ class TrainingArguments(transformers.TrainingArguments):
     save_strategy: str = field(
         default="steps",
     )
-    save_steps: int = 4_000
+    save_steps: int = field(
+        default=4000,
+    )
     save_total_limit: int = field(
         default=1,
         metadata={"help": "Max number of checkpoints to save"}

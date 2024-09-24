@@ -22,27 +22,28 @@ NODE_RANK=$SLURM_PROCID
 WORLD_SIZE=$(($GPUS_PER_NODE*$NNODES))
 
 CMD=" \
-    finetune.py --per_device_train_batch_size 512 --per_device_eval_batch_size 256 \
+    finetune.py --per_device_train_batch_size 64 --per_device_eval_batch_size 256 \
                 --dataset nomic_supervised --sampling_strategy cluster_within_domain \
-                 --num_train_epochs 5 --learning_rate 1e-04 \
+                 --num_train_epochs 5 --learning_rate 5e-4 \
                  --embedder nomic-ai/nomic-bert-2048 --clustering_model gtr_base \
                  --clustering_query_to_doc 1 \
                   --eval_rerank_topk 512 --lr_scheduler_type constant_with_warmup \
-                 --warmup_steps 10 --max_seq_length 512 \
-                 --logging_steps 5 --train_cluster_size 512 --eval_cluster_size 256 \
-                 --use_prefix 1 --transductive_corpus_size 512 --logit_scale 50 \
+                 --warmup_steps 160 --max_seq_length 512 \
+                 --logging_steps 1 --train_cluster_size 512 --eval_cluster_size 256 \
+                 --use_prefix 1 --transductive_corpus_size 128 --transductive_tokens_per_document 4 \
+                 --logit_scale 50 \
                  --max_eval_batches 16 --torch_compile 0 --use_gc 1 --fp16 0 --bf16 1 \
                  --eval_steps 5000 --disable_dropout 1 --arch transductive \
-                 --exp_name 2024-09-21-supervised-final-bge-llama \
-                 --exp_group 2024-09-21-supervised-filter-filtered-llama \
+                 --exp_name 2024-09-23-supervised-final-bge-llama-5-fsdp-test \
+                 --exp_group 2024-09-23-supervised-filter-filtered-llama-4-fsdp \
                  --hn_filter_model stella --hn_tune_threshold 1 \
                  --hn_filter_precompute_vector 0 \
                  --ddp_share_negatives_between_gpus 0 --num_hard_negatives 1 \
-                 --num_eval_rerank_samples 1024 --save_strategy steps --save_steps 32 --save_total_limit 5 \
-                 --max_batch_size_fits_in_memory 1 \
-                 --max_batch_size_fits_in_memory_first_stage 64 \
+                 --num_eval_rerank_samples 1024 --save_strategy steps --save_steps 16 --save_total_limit 5 \
+                 --max_batch_size_fits_in_memory 2 \
+                 --max_batch_size_fits_in_memory_first_stage 32 \
                  --use_wandb 1 --ddp_find_unused_parameters 1 --dataset bge \
-                 --clustering_batch_packing_strategy tsp_greedy \
+                 --clustering_batch_packing_strategy random \
                  --dataset_backbone "meta-llama/Meta-Llama-3-8B" \
                  --autoregressive_backbone 1 --transductive_sequence_dropout_prob 0.005
     "

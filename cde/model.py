@@ -50,7 +50,7 @@ class ContextualModelMixin(nn.Module):
         )
         self.transductive_corpus_size = vars(self.config).get("transductive_corpus_size", 1)
         self.transductive_tokens_per_document = vars(self.config).get("transductive_tokens_per_document", 1)
-        self.randomize_dataset_sequence_order = False
+        self.randomize_dataset_sequence_order = True
         self.sequence_dropout_prob = vars(self.config).get("transductive_sequence_dropout_prob", 0.0)
         if self.sequence_dropout_prob > 0.0:
             self.sequence_dropout_null_embedding = torch.nn.Parameter(
@@ -128,17 +128,17 @@ class ContextualModelMixin(nn.Module):
 
         # print(f"[ContextualModelMixin] soft_prompt.shape = {soft_prompt.shape}")
 
-        # if self.training and self.randomize_dataset_sequence_order:
-        #     randomized_order = torch.stack(
-        #         [
-        #             torch.cat(
-        #                 (
-        #                     torch.randperm(corpus_size, device=soft_prompt.device), 
-        #                     torch.arange(self.n_soft_prompt, device=soft_prompt.device) + corpus_size
-        #                 ), dim=0) 
-        #                 for _ in range(batch_size)])
-        #     randomized_order = randomized_order.to(soft_prompt.device)
-        #     soft_prompt = soft_prompt.gather(1, randomized_order[..., None].expand_as(soft_prompt))
+        if self.training and self.randomize_dataset_sequence_order:
+            randomized_order = torch.stack(
+                [
+                    torch.cat(
+                        (
+                            torch.randperm(corpus_size, device=soft_prompt.device), 
+                            torch.arange(self.n_soft_prompt, device=soft_prompt.device) + corpus_size
+                        ), dim=0) 
+                        for _ in range(batch_size)])
+            randomized_order = randomized_order.to(soft_prompt.device)
+            soft_prompt = soft_prompt.gather(1, randomized_order[..., None].expand_as(soft_prompt))
         
         return soft_prompt
 
@@ -389,6 +389,7 @@ class DatasetConditionedAutoregressive(transformers.PreTrainedModel, ContextualM
     def _shift_rotary_embedding(self) -> None:
         disable_transductive_rotary_embedding = vars(self.config).get("disable_transductive_rotary_embedding", True)
         # TODO: Can we do this for LLAMA?
+        print("Warning: Positional embedding disabling not implemented for LLAMA.")
     
     def forward(
             self, 
@@ -444,8 +445,9 @@ class DatasetConditionedAutoregressive(transformers.PreTrainedModel, ContextualM
         output_vectors = last_hidden_state[:, n_soft_prompt_tokens:, :]
         output_attention_mask = attention_mask[:, n_soft_prompt_tokens:]
 
-        # print("pooling output_vectors.shape =", output_vectors.shape, "and output_attention_mask.shape =", output_attention_mask.shape)
-        output_pooled = mean_pool(output_vectors, output_attention_mask)
+        # Take last token position
+        token_output_positions = attention_mask.sum(axis=1) - 1
+        output_pooled = last_hidden_state[torch.arange(output_vectors.shape[0]), token_output_positions, :]
 
         # average with original vectors
         # TODO: Argparse for pooling strategy.

@@ -11,6 +11,7 @@ import wandb
 from cde.collate import TokenizedCollator
 from cde.dataset import BeirDataset
 from cde.lib import load_embedder_and_tokenizer, ModelConfig
+from cde.lib.model_configs import MODEL_FOLDER_DICT
 from cde.model import get_model_class
 # from cde.run_args import ModelArguments, DataArguments, TrainingArguments
 from cde.trainer import CustomTrainer
@@ -21,8 +22,10 @@ class CustomUnpickler(pickle.Unpickler):
         module = module.replace("spider", "cde")
         return super().find_class(module, name)
 
+
 class CustomPickle:
     Unpickler = CustomUnpickler
+
 
 
 def load_trainer_from_checkpoint_and_args(
@@ -53,6 +56,21 @@ def load_trainer_from_checkpoint_and_args(
         training_args.distributed_state = PartialState()
     else:
         raise RuntimeError("must have data_args.bin and model_args.bin available to load from disk")
+
+    # Reset cached properties
+    cached_keys = [k for k in training_args.__dict__.keys() if k.startswith("__cached")]
+    for k in cached_keys:
+        del training_args.__dict__[k]
+
+    if not torch.cuda.is_available():
+        print("[analyze_utils] No GPU available, loading model on CPU")
+        training_args.use_cpu = True
+        training_args._n_gpu = 0
+        training_args.local_rank = -1  # Don't load in DDP
+        training_args.distributed_state = PartialState(cpu=True)
+        training_args.deepspeed_plugin = None  # For backwards compatibility
+        training_args.bf16 = 0  # no bf16 in case no support from GPU
+
     transformers.set_seed(training_args.seed)
     logging.basicConfig(
         format='%(asctime)s - %(message)s',
@@ -131,3 +149,14 @@ def load_trainer_from_checkpoint_and_args(
     else:
         return trainer
     
+
+def load_model_from_alias(model_key: str) -> transformers.PreTrainedModel:
+    model_folder = MODEL_FOLDER_DICT[model_key]
+    print(f"Got key {model_key} - loading model from folder {model_folder}")
+    trainer, (_, data_args, training_args) = load_trainer_from_checkpoint_and_args(
+        model_folder=model_folder,
+        load_from_checkpoint=True,
+        return_args=True
+    )
+    trainer.model.eval()
+    return trainer.model
