@@ -432,6 +432,7 @@ def load_embedder_and_tokenizer(name: str) -> Tuple[
         model.padding_side = "right"
         tokenizer = transformers.AutoTokenizer.from_pretrained(name)
         tokenizer.pad_token = tokenizer.eos_token
+        tokenizer.add_eos_token = True
     else:
         model = transformers.AutoModel.from_pretrained(name, trust_remote_code=True)
         tokenizer = transformers.AutoTokenizer.from_pretrained(name)

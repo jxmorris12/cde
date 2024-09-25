@@ -4,8 +4,8 @@
 #SBATCH --job-name=test_multinode
 #SBATCH --output=log_submitit/multinode/llama/pretrain_%j.out
 #SBATCH --error=log_submitit/multinode/llama/pretrain_%j.err
-#SBATCH --nodes=16
-#SBATCH --ntasks=16
+#SBATCH --nodes=3
+#SBATCH --ntasks=3
 #SBATCH --gres=gpu:8
 #SBATCH --cpus-per-task=64
 #SBATCH --time=7-00:00:00
@@ -24,7 +24,7 @@ WORLD_SIZE=$(($GPUS_PER_NODE*$NNODES))
 CMD=" \
     finetune.py --per_device_train_batch_size 64 --per_device_eval_batch_size 256 \
                 --dataset nomic_supervised --sampling_strategy cluster_within_domain \
-                 --num_train_epochs 5 --learning_rate 5e-4 \
+                 --num_train_epochs 5 --learning_rate 1e-4 \
                  --embedder nomic-ai/nomic-bert-2048 --clustering_model gtr_base \
                  --clustering_query_to_doc 1 \
                   --eval_rerank_topk 512 --lr_scheduler_type constant_with_warmup \
@@ -34,29 +34,28 @@ CMD=" \
                  --logit_scale 50 \
                  --max_eval_batches 16 --torch_compile 0 --use_gc 1 --fp16 0 --bf16 1 \
                  --eval_steps 5000 --disable_dropout 1 --arch transductive \
-                 --exp_name 2024-09-23-supervised-final-bge-llama-5-fsdp-test \
-                 --exp_group 2024-09-23-supervised-filter-filtered-llama-4-fsdp \
+                 --exp_name 2024-09-23-supervised-final-bge-llama-11-fsdp-full-test \
+                 --exp_group 2024-09-23-supervised-filter-filtered-llama-10-fsdp \
                  --hn_filter_model stella --hn_tune_threshold 1 \
                  --hn_filter_precompute_vector 0 \
                  --ddp_share_negatives_between_gpus 0 --num_hard_negatives 1 \
-                 --num_eval_rerank_samples 1024 --save_strategy steps --save_steps 16 --save_total_limit 5 \
+                 --num_eval_rerank_samples 1024 --save_strategy epoch --save_total_limit 5 \
                  --max_batch_size_fits_in_memory 2 \
                  --max_batch_size_fits_in_memory_first_stage 32 \
                  --use_wandb 1 --ddp_find_unused_parameters 1 --dataset bge \
                  --clustering_batch_packing_strategy random \
-                 --dataset_backbone "meta-llama/Meta-Llama-3-8B" \
-                 --autoregressive_backbone 1 --transductive_sequence_dropout_prob 0.005
+                 --dataset_backbone "gpt2" \
+                 --autoregressive_backbone 1 --transductive_sequence_dropout_prob 0.005 --save_steps 2 --save_strategy steps --use_wandb 1 --max_seq_length 32 --transductive_corpus_size 8 --use_wandb 0
     "
 
 LAUNCHER="accelerate launch \
-    --config_file fsdp_config_16.yaml \
+    --config_file fsdp_config_3.yaml \
     --main_process_ip "$MASTER_ADDR" \
     --main_process_port $MASTER_PORT \
     --machine_rank \$SLURM_PROCID \
     --role $SLURMD_NODENAME: \
     --rdzv_conf rdzv_backend=c10d \
     --max_restarts 0 \
-    --tee 3 \
 "
 
 SRUN_ARGS=" \

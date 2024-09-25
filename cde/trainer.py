@@ -89,7 +89,10 @@ class CustomTrainer(transformers.Trainer, TrainerNegativeFilterMixin):
         self._model_stages = None
         # Wrap first-stage and second-stage models in DDP/FSDP wrappers before all the HF trainer
         # boilerplate code is called.
-        self.get_model_stages(model=self.model)
+        try:
+            self.get_model_stages(model=self.model)
+        except AttributeError:
+            pass
         self._run_ddp_verify = False
 
         effective_batch_size = get_world_size() * self.args.per_device_train_batch_size
@@ -109,6 +112,33 @@ class CustomTrainer(transformers.Trainer, TrainerNegativeFilterMixin):
             torch.save(
                self.model_args, os.path.join(output_dir, "model_args.bin"),
             )
+        
+    def save_model(self, output_dir: Optional[str] = None, _internal_call: bool = False):
+        """
+        Will save the model, so you can reload it using `from_pretrained()`.
+
+        Will only save from the main process.
+        """
+
+        if output_dir is None:
+            output_dir = self.args.output_dir
+            
+        if self.is_fsdp_enabled:
+            if ("FULL_STATE_DICT" in str(self.accelerator.state.fsdp_plugin.state_dict_type)):
+                # state_dict = self.accelerator.get_state_dict(self.model)
+                import torch.distributed.checkpoint.state_dict
+                state_dict, _optim_state_dict = (
+                    torch.distributed.checkpoint.state_dict.get_state_dict(self.model, self.optimizer)
+                )
+                if self.args.should_save:
+                    self._save(output_dir, state_dict=state_dict)
+
+        elif self.args.should_save:
+            self._save(output_dir)
+
+        # Push to the Hub when `save_model` is called by the user.
+        if self.args.push_to_hub and not _internal_call:
+            self.push_to_hub(commit_message="Model save")
     
     def consider_gather(self, tensor: torch.Tensor) -> torch.Tensor:
         if self.args.ddp_share_negatives_between_gpus:
@@ -880,14 +910,9 @@ class CustomTrainer(transformers.Trainer, TrainerNegativeFilterMixin):
         should_evaluate = self.control.should_evaluate
         
         # do all the other stuff
-        try:
-            super()._maybe_log_save_evaluate(tr_loss, grad_norm, model, *args, **kwargs)
-        except Exception as e:
-            print("Error in super()._maybe_log_save_evaluate:", e)
-            print("Continuing...")
+        super()._maybe_log_save_evaluate(tr_loss, grad_norm, model, *args, **kwargs)
 
         # do my custom eval
         if should_evaluate:
-            # TODO: implement multi-gpu retrieval evaluation.
             self.evaluate_retrieval_datasets()
-            reset_memory()
+        reset_memory()

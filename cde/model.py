@@ -6,7 +6,7 @@ import torch.nn as nn
 import transformers
 
 from cde.lib.dist import print0
-from cde.lib.tensor import mean_pool, mean_pool_3d
+from cde.lib.tensor import mean_pool, mean_pool_3d, last_token_pool, mean_pool_weighted
 
 from cde.lib.contextual_bert import ContextualBertModel
 from cde.lib.contextual_bert.configuration import ContextualBertConfig
@@ -437,17 +437,14 @@ class DatasetConditionedAutoregressive(transformers.PreTrainedModel, ContextualM
         ) # (1, 4 + b + s, d)
         # trim soft prompt
         last_hidden_state = output.hidden_states[-1]
-
-        # use only these tokens
         n_soft_prompt_tokens = soft_prompt.shape[1]
-        # print("n_soft_prompt_tokens =", n_soft_prompt_tokens)
 
         output_vectors = last_hidden_state[:, n_soft_prompt_tokens:, :]
         output_attention_mask = attention_mask[:, n_soft_prompt_tokens:]
 
         # Take last token position
-        token_output_positions = attention_mask.sum(axis=1) - 1
-        output_pooled = last_hidden_state[torch.arange(output_vectors.shape[0]), token_output_positions, :]
+        # output_pooled = last_token_pool(output_vectors, output_attention_mask)
+        output_pooled = mean_pool_weighted(output_vectors, output_attention_mask)
 
         # average with original vectors
         # TODO: Argparse for pooling strategy.

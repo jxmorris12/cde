@@ -57,6 +57,16 @@ def mean_pool(
     return pooled_outputs
 
 
+def mean_pool_weighted(
+    hidden_states: torch.Tensor, attention_mask: torch.Tensor
+) -> torch.Tensor:
+    B, _S, D = hidden_states.shape
+    attention_mask *= attention_mask.cumsum(dim=1) # [0,1,1,1,0,0] -> [0,1,2,3,0,0]
+    s = torch.sum(hidden_states * attention_mask.unsqueeze(-1).float(), dim=1)
+    d = attention_mask.sum(dim=1, keepdim=True).float()
+    return s / d
+
+
 def slice_sparse_tensor_rows(t: torch.sparse.Tensor, min_row: int, max_row: int) -> torch.sparse.Tensor:
     assert min_row < max_row, f"can't slice from row {min_row} to {max_row}"
     t = t.coalesce()
@@ -193,3 +203,25 @@ def forward_batched(
             )
             i += batch_size
         return torch.cat(outputs, dim=0)
+
+
+def last_token_pool(hidden_state: torch.Tensor, attention_mask: torch.Tensor) -> torch.Tensor:
+    # https://github.com/ContextualAI/gritlm/blob/main/gritlm/gritlm.py#L190
+    b, n, d = hidden_state.size()
+    # Get the last `1` in the attention mask of each item
+    # Often it is just `gather_indices = torch.argmin(attention_mask, 1, keepdim=False) - 1`
+    # except when 1) There's all 1's 2) There's 0's before the 1's
+    reversed_mask = torch.flip(attention_mask, dims=(1,))
+    argmax_reverse = torch.argmax(reversed_mask, dim=1, keepdim=False)
+    gather_indices = attention_mask.size(1) - argmax_reverse - 1
+    # If there are empty sequences, where the index would become -1 it will crash so set them to 0
+    gather_indices = torch.clamp(gather_indices, min=0)
+    # Turn indices from shape [b] -> [b, 1, d]
+    gather_indices = gather_indices.unsqueeze(-1).repeat(1, d)
+    gather_indices = gather_indices.unsqueeze(1)
+    assert gather_indices.shape == (b, 1, d)
+    # Gather along the seq len: [b, n, d] -> [b, d]
+    # Actually no need for the attention mask as we gather the last token where attn_mask=1 but
+    # as some indices (which shouldn't be attended to) may be 0 due to clamp, use mask to ignore them again
+    input_mask_expanded = attention_mask.unsqueeze(-1).expand((b, n, d)).float()
+    return torch.gather(hidden_state * input_mask_expanded, 1, gather_indices).squeeze(dim=1)

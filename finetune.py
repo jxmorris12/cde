@@ -322,7 +322,7 @@ def main():
             },
             allow_val_change=True,
         )
-        wandb.watch(model)
+        # wandb.watch(model)
     
 
     print0("[main] creating trainer")

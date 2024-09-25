@@ -16,6 +16,10 @@ def main():
     args = parser.parse_args()
 
     model = analyze_utils.load_model_from_alias(args.alias)
+    print(model)
+    print("Taking second stage...")
+    # model = model.second_stage_model
+    model = model.first_stage_model
     model.push_to_hub(args.hf_alias)
 
 
