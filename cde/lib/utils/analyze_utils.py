@@ -10,7 +10,6 @@ import transformers
 import wandb
 
 from cde.collate import TokenizedCollator
-from cde.dataset import BeirDataset
 from cde.lib import load_embedder_and_tokenizer, ContextualModelConfig
 from cde.lib.model_configs import MODEL_FOLDER_DICT
 from cde.model import get_model_class
@@ -73,28 +72,16 @@ def load_trainer_from_checkpoint_and_args(
         level=logging.WARNING
     )
     embedder_tokenizer = transformers.AutoTokenizer.from_pretrained(model_args.embedder)
-    embedder_tokenizer.pad_token = embedder_tokenizer.eos_token
-
     beir_dataset_names = beir_dataset_names or []
     if training_args.tiny_debug: 
         beir_dataset_names = [ 'quora' ]
         training_args.max_eval_batches = 1
 
-    # beir_dict = {
-    #     d: BeirDataset(
-    #         dataset=d, 
-    #         embedder_rerank=model_args.embedder_rerank,
-    #         use_prefix=data_args.use_prefix,
-    #     ) 
-    #     for d in sorted(beir_dataset_names)
-    # }
-    retrieval_datasets = {
-        # **{f"BeIR/{k}": v for k,v in beir_dict.items()}
-    }
+    retrieval_datasets = {}
     model_args.transductive_corpus_size = training_args.transductive_corpus_size
-    model_config = ContextualModelConfig(**vars(model_args))
-    model_cls = get_model_class(model_args.architecture)
+    # model_config = ContextualModelConfig(**vars(model_args))
     # model = model_cls(config=model_config)
+    model_cls = get_model_class(model_args.architecture)
     model = model_cls.from_pretrained(checkpoint_path)
     model.eval()
 

@@ -193,14 +193,16 @@ def main():
     torch.cuda.empty_cache()
 
     datasets.enable_caching()
+    model_name_or_path = model.config.dataset_backbone or model.config.embedder
     mteb_encoder = DenseEncoder(
-        model_name_or_path=model.config.embedder,
+        model_name_or_path=model_name_or_path,
         encoder=model.second_stage_model,
         max_seq_length=model.config.max_seq_length,
         query_prefix="",     # Set later
         document_prefix="",  # Set later
         normalize_embeds=NORMALIZE_EMBEDS,
         default_doc_prefix=True,
+        first_stage_tokenizer_name=model.config.embedder,
     )
 
     random.Random(time.time()).shuffle(TASK_LIST)

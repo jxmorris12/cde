@@ -101,6 +101,7 @@ def tokenize_transform(
         max_length: int,
         max_num_chars: int,
         tokenizer: transformers.PreTrainedTokenizer,
+        first_stage_tokenizer: Optional[transformers.PreTrainedTokenizer] = None,
     ) -> Dict[str, torch.Tensor]:
     texts = examples[col]
     batch_dict = tokenizer(
@@ -109,8 +110,20 @@ def tokenize_transform(
         padding=True,
         truncation=True,
     )
+    if first_stage_tokenizer:
+        first_stage_batch_dict = first_stage_tokenizer(
+            [prefix + t[:max_num_chars] for t in texts],
+            max_length=max_length,
+            padding=True,
+            truncation=True,
+        )
+        first_stage_batch_dict = {
+            f"{k}_first_stage": v for k, v in first_stage_batch_dict.items()
+        }
+        print(first_stage_batch_dict.keys())
+
     other_cols = [k for k in examples.keys() if k != col]
-    return {**batch_dict, **{k: examples[k] for k in other_cols}}
+    return {**batch_dict, **first_stage_batch_dict, **{k: examples[k] for k in other_cols}}
 
 class DenseEncoder(torch.nn.Module):
     def __init__(
@@ -122,6 +135,7 @@ class DenseEncoder(torch.nn.Module):
             document_prefix: str = "",
             normalize_embeds: bool = False,
             default_doc_prefix: bool = False,
+            first_stage_tokenizer_name: Optional[str] = None,
         ):
         super().__init__()
         self.encoder = encoder
@@ -138,6 +152,13 @@ class DenseEncoder(torch.nn.Module):
         self._max_num_chars = (self.max_length * 4)
         self.normalize_embeds = normalize_embeds
         self.default_doc_prefix = default_doc_prefix
+
+        if first_stage_tokenizer_name:
+            self.first_stage_tokenizer = (
+                transformers.AutoTokenizer.from_pretrained(first_stage_tokenizer_name)
+            )
+        else:
+            self.first_stage_tokenizer = None
 
     def _consider_putting_model_on_device(self) -> None:
         if self.model_is_on_device:
@@ -199,6 +220,7 @@ class DenseEncoder(torch.nn.Module):
             max_length=self.max_length,
             max_num_chars=self._max_num_chars,
             tokenizer=self.tokenizer,
+            first_stage_tokenizer=self.first_stage_tokenizer,
         )
         if isinstance(dataset, datasets.IterableDataset):
             dataset = dataset.map(tokenize_fn, batched=True)
