@@ -2,7 +2,7 @@ import pytest
 import torch
 import transformers
 
-from cde.lib import load_embedder_and_tokenizer, ModelConfig
+from cde.lib import load_embedder_and_tokenizer, ContextualModelConfig
 from cde.model import DatasetTransformer
 from cde.run_args import ModelArguments
 
@@ -10,7 +10,7 @@ from cde.run_args import ModelArguments
 def test_dataset_transformer_invariance_synthetic():
     if not torch.cuda.is_available():
         pytest.skip("no CUDA found")
-    model_config = ModelConfig(**vars(ModelArguments()))
+    model_config = ContextualModelConfig(**vars(ModelArguments()))
     model, _ = load_embedder_and_tokenizer("nomic-ai/nomic-bert-2048")
     backbone, _ = load_embedder_and_tokenizer("nomic-ai/nomic-bert-2048")
     model_config.transductive_corpus_size = 2
@@ -64,7 +64,7 @@ def test_dataset_transformer_invariance_synthetic():
 def test_dataset_transformer_invariance_real():
     if not torch.cuda.is_available():
         pytest.skip("no CUDA found")
-    model_config = ModelConfig(**vars(ModelArguments()))
+    model_config = ContextualModelConfig(**vars(ModelArguments()))
     mn = "nomic-ai/nomic-bert-2048"
     model, _ = load_embedder_and_tokenizer(mn)
     backbone, _ = load_embedder_and_tokenizer(mn)

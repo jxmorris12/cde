@@ -2,7 +2,7 @@ import pytest
 import torch
 import transformers
 
-from cde.lib import load_embedder_and_tokenizer, ModelConfig
+from cde.lib import load_embedder_and_tokenizer, ContextualModelConfig
 from cde.model import DatasetTransformer
 from cde.run_args import ModelArguments
 
@@ -10,7 +10,7 @@ from cde.run_args import ModelArguments
 def test_autoregressive_default():
     if not torch.cuda.is_available():
         pytest.skip("no CUDA found")
-    model_config = ModelConfig(**vars(ModelArguments()))
+    model_config = ContextualModelConfig(**vars(ModelArguments()))
     model, _ = load_embedder_and_tokenizer("nomic-ai/nomic-bert-2048")
     backbone, _ = load_embedder_and_tokenizer("gpt2")
     model_config.transductive_corpus_size = 2
@@ -65,7 +65,7 @@ def test_autoregressive_default():
 def test_autoregressive_real():
     if not torch.cuda.is_available():
         pytest.skip("no CUDA found")
-    model_config = ModelConfig(**vars(ModelArguments()))
+    model_config = ContextualModelConfig(**vars(ModelArguments()))
     model, _ = load_embedder_and_tokenizer("nomic-ai/nomic-bert-2048")
     backbone, _ = load_embedder_and_tokenizer("gpt2")
     
@@ -128,7 +128,7 @@ def test_autoregressive_real():
 def test_autoregressive_llama3():
     if not torch.cuda.is_available():
         pytest.skip("no CUDA found")
-    model_config = ModelConfig(**vars(ModelArguments()))
+    model_config = ContextualModelConfig(**vars(ModelArguments()))
     model, _ = load_embedder_and_tokenizer("nomic-ai/nomic-bert-2048")
     # backbone, _ = load_embedder_and_tokenizer("meta-llama/Meta-Llama-3-8B")
 

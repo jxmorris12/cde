@@ -158,6 +158,7 @@ TASK_LIST = (
 # TASK_LIST = TASK_LIST_PAIR_CLASSIFICATION
 # TASK_LIST = TASK_LIST_RERANKING
 # TASK_LIST = ["Touche2020"]
+TASK_LIST = ["ArguAna"]
 
 def parse_args() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Process model key")
@@ -167,6 +168,12 @@ def parse_args() -> argparse.ArgumentParser:
         type=str, 
         choices=MODEL_FOLDER_DICT.keys()
     )
+    parser.add_argument(
+        "--batch_size", 
+        help="Batch size for evaluation", 
+        type=int, 
+        default=512,
+    )
     return parser.parse_args()
 
 
@@ -174,37 +181,35 @@ NORMALIZE_EMBEDS = False
 def main():
     args = parse_args()
     model_folder = MODEL_FOLDER_DICT[args.model_key]
-    trainer, (model_args, data_args, training_args) = analyze_utils.load_trainer_from_checkpoint_and_args(
+    model, (model_args, data_args, training_args) = analyze_utils.load_trainer_from_checkpoint_and_args(
         model_folder=model_folder,
         load_from_checkpoint=True,
-        return_args=True
+        return_args=True,
+        load_entire_trainer=False
     )
-    trainer.model.eval()
-    trainer._hn_filter_model = None
+    model.eval()
     
     gc.collect()
     torch.cuda.empty_cache()
 
     datasets.enable_caching()
     mteb_encoder = DenseEncoder(
-        model_name_or_path=trainer.model.config.embedder,
-        encoder=trainer.model.second_stage_model,
-        max_seq_length=trainer.model.config.max_seq_length,
+        model_name_or_path=model.config.embedder,
+        encoder=model.second_stage_model,
+        max_seq_length=model.config.max_seq_length,
         query_prefix="",     # Set later
         document_prefix="",  # Set later
         normalize_embeds=NORMALIZE_EMBEDS,
         default_doc_prefix=True,
     )
 
-    # TODO: Fix quora...
-    # TODO: Disable norm for classification
-    # TODO: Normalize vectors??
     random.Random(time.time()).shuffle(TASK_LIST)
     for task_idx, task in enumerate(TASK_LIST):
         prefixes = task2prefix[task]
         mteb_encoder.document_prefix = (prefixes["document"] + ": ") if data_args.use_prefix else ""
         mteb_encoder.query_prefix = (prefixes["query"] + ": ") if data_args.use_prefix else ""
-        print(f"Set prefixes to {mteb_encoder.query_prefix} and {mteb_encoder.document_prefix}")
+        mteb_encoder.normalize_embeds = "Clustering" in task
+        print(f"[{task}] Set prefixes to {mteb_encoder.query_prefix} and {mteb_encoder.document_prefix}")
 
         print(f"Beginning {task} ({task_idx+1} / {len(TASK_LIST)})")
         evaluation = MTEB(
@@ -217,7 +222,7 @@ def main():
         evaluation.tasks[0].load_data()
         if hasattr(evaluation.tasks[0], 'corpus') and split in evaluation.tasks[0].corpus:
             corpus = evaluation.tasks[0].corpus[split]
-            documents = random.choices(list(corpus.values()), k=trainer.model.config.transductive_corpus_size)
+            documents = random.choices(list(corpus.values()), k=model.config.transductive_corpus_size)
             corpus_documents = [
                 mteb_encoder.document_prefix + '{} {}'.format(doc.get('title', ''), doc['text']).strip() 
                 for doc in documents
@@ -246,7 +251,7 @@ def main():
                 raise ValueError(f"No corpus or dataset - got {column_names}")
             if isinstance(documents[0], list):
                 documents = [sentence for doc in documents for sentence in doc]
-            documents = random.choices(documents, k=trainer.model.config.transductive_corpus_size)
+            documents = random.choices(documents, k=model.config.transductive_corpus_size)
             corpus_documents = [
                 mteb_encoder.document_prefix + doc
                 for doc in documents
@@ -255,18 +260,19 @@ def main():
             raise ValueError("No corpus or dataset available")
         ##################################################
         print(f"Got {len(corpus_documents)} documents...")
-        assert len(corpus_documents) == trainer.model.config.transductive_corpus_size
+        assert len(corpus_documents) == model.config.transductive_corpus_size
         print(corpus_documents[2])
-        trainer.model.first_stage_model.cuda()
+        model.first_stage_model.cuda()
         dataset_inputs = mteb_encoder.tokenizer(
             corpus_documents,
             return_tensors="pt",
-            max_length=trainer.model.config.max_seq_length,
+            max_length=model.config.max_seq_length,
             padding=True,
             truncation=True,
         ).to(training_args.device)
+        ##################################################
         with torch.no_grad(), torch.autocast("cuda", dtype=torch.bfloat16):
-            dataset_embeddings = trainer.model.first_stage_model(
+            dataset_embeddings = model.first_stage_model(
                 **dataset_inputs
             )
         hidden_dim = dataset_embeddings.shape[-1]
@@ -281,12 +287,12 @@ def main():
         # breakpoint()
         results = evaluation.run(
             mteb_encoder, 
-            output_folder=os.path.join("results_mteb", "norm", args.model_key) if NORMALIZE_EMBEDS else os.path.join("results_mteb", args.model_key),
-            batch_size=512, 
-            # batch_size=128, 
+            output_folder=os.path.join("results_mteb", args.model_key),
             corpus_chunk_size=500_000,
             verbosity=2,
-            eval_splits=[split]
+            eval_splits=[split],
+            encode_kwargs={"batch_size": args.batch_size, "num_workers": 8 },
+            # encode_kwargs={"batch_size": args.batch_size, "num_workers": 0},
         )
         print(task)
         print("\t", results)

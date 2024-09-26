@@ -179,24 +179,11 @@ def parse_args() -> argparse.ArgumentParser:
         type=str,
         default="gtr_base",
     )
-    parser.add_argument(
-        "--normalize_embeds",
-        action="store_true",
-        default=False,
-        help="Whether to normalize the embeddings",
-    )
     return parser.parse_args()
 
 
 def main():
     args = parse_args()
-    NORMALIZE_EMBEDS = args.normalize_embeds
-
-    if args.normalize_embeds:
-        # We only care about clustering for this
-        task_list = TASK_LIST_CLUSTERING
-    else:
-        task_list = TASK_LIST
     
     model_folder = MODEL_FOLDER_DICT[args.model_key]
     trainer, (_, data_args, training_args) = analyze_utils.load_trainer_from_checkpoint_and_args(
@@ -214,22 +201,20 @@ def main():
         max_seq_length=trainer.model.config.max_seq_length,
         query_prefix="search_query: " if data_args.use_prefix else "",
         document_prefix="search_document: " if data_args.use_prefix else "",
-        normalize_embeds=NORMALIZE_EMBEDS,
+        normalize_embeds=False,
         default_doc_prefix=True,
     )
 
-    # TODO: Fix quora...
-    # TODO: Disable norm for classification
-    # TODO: Normalize vectors??
-
-    random.Random(time.time()).shuffle(task_list)
-    for task_idx, task in enumerate(task_list):
+    random.Random(time.time()).shuffle(TASK_LIST)
+    for task_idx, task in enumerate(TASK_LIST):
         prefixes = task2prefix[task]
         mteb_encoder.document_prefix = (prefixes["document"] + ": ") if data_args.use_prefix else ""
         mteb_encoder.query_prefix = (prefixes["query"] + ": ") if data_args.use_prefix else ""
+        mteb_encoder.normalize_embeds = (task in TASK_LIST_CLUSTERING)
+        if mteb_encoder.normalize_embeds: print(f"Normalizing for task {task}")
         print(f"Set prefixes to {mteb_encoder.query_prefix} and {mteb_encoder.document_prefix}")
 
-        print(f"Beginning {task} ({task_idx+1} / {len(task_list)})")
+        print(f"Beginning {task} ({task_idx+1} / {len(TASK_LIST)})")
         evaluation = MTEB(
             tasks=[task], 
             task_langs=["en"],
@@ -320,9 +305,9 @@ def main():
         }
         results = evaluation.run(
             mteb_encoder, 
-            output_folder=os.path.join("results_mteb", "cluster", "norm", args.model_key) if NORMALIZE_EMBEDS else os.path.join("results_mteb", "cluster", args.model_key),
-            batch_size=256, 
-            corpus_chunk_size=500_000,
+            output_folder=os.path.join("results_mteb", "cluster", args.model_key),
+            batch_size=512, 
+            corpus_chunk_size=1_000_000,
             verbosity=2,
             eval_splits=[split]
         )

@@ -170,7 +170,7 @@ def tqdm_if_main_worker(iterable: Iterable, **kwargs) -> Iterable:
         return iterable
 
 
-class ModelConfig(transformers.configuration_utils.PretrainedConfig):
+class ContextualModelConfig(transformers.configuration_utils.PretrainedConfig):
     """We create a dummy configuration class that will just set properties
     based on whatever kwargs we pass in.
 

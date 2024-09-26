@@ -1,1 +1,0 @@
-from .contextual_bert import ContextualBertModel

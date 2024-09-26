@@ -2,7 +2,7 @@ import torch
 import transformers
 
 
-from cde.lib import ModelConfig, load_embedder_and_tokenizer
+from cde.lib import ContextualModelConfig, load_embedder_and_tokenizer
 from cde.model import ContextualCrossAttention
 
 from cde.lib.contextual_bert import ContextualBertModel
@@ -36,7 +36,7 @@ def test_contextual_bert():
 
 def test_contextual_cross_attention():
     embedder, tokenizer = load_embedder_and_tokenizer("distilbert-base-uncased")
-    model_config = ModelConfig(
+    model_config = ContextualModelConfig(
         limit_layers=False,
         disable_dropout=False,
         logit_scale=50,

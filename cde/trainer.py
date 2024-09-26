@@ -125,13 +125,37 @@ class CustomTrainer(transformers.Trainer, TrainerNegativeFilterMixin):
             
         if self.is_fsdp_enabled:
             if ("FULL_STATE_DICT" in str(self.accelerator.state.fsdp_plugin.state_dict_type)):
-                # state_dict = self.accelerator.get_state_dict(self.model)
-                import torch.distributed.checkpoint.state_dict
-                state_dict, _optim_state_dict = (
-                    torch.distributed.checkpoint.state_dict.get_state_dict(self.model, self.optimizer)
-                )
-                if self.args.should_save:
-                    self._save(output_dir, state_dict=state_dict)
+                # from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+                # import torch.distributed.checkpoint.state_dict
+                # with FSDP.summon_full_params(self.model):
+
+                # https://github.com/pytorch/pytorch/issues/98823#issuecomment-1647496785
+                from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+                from torch.distributed.fsdp import StateDictType, FullStateDictConfig
+
+                if self.model_has_two_stages:
+                    # Weird FSDP hack: manually merge state dicts
+                    first_stage_model, second_stage_model = self.get_model_stages(self.model)
+                    save_policy = FullStateDictConfig(
+                        offload_to_cpu=True, 
+                        rank0_only=True,
+                    )
+                    with FSDP.state_dict_type(first_stage_model, StateDictType.FULL_STATE_DICT, save_policy):
+                        first_stage_state_dict = first_stage_model.state_dict()
+                        first_stage_state_dict = { f"first_stage_model.{k}": v for k, v in first_stage_state_dict.items() }
+                    with FSDP.state_dict_type(second_stage_model, StateDictType.FULL_STATE_DICT, save_policy):
+                        second_stage_state_dict = second_stage_model.state_dict()
+                        second_stage_state_dict = { f"second_stage_model.{k}": v for k, v in second_stage_state_dict.items() }
+                    cpu_state_dict = {**first_stage_state_dict, **second_stage_state_dict}
+
+                    with FSDP.state_dict_type(self.model, StateDictType.FULL_STATE_DICT, save_policy):
+                        if self.args.should_save:
+                            self._save(output_dir, state_dict=cpu_state_dict)
+                else:
+                    with FSDP.state_dict_type(self.model, StateDictType.FULL_STATE_DICT, save_policy):
+                        cpu_state_dict = self.model.state_dict()
+                        if self.args.should_save:
+                            self._save(output_dir, state_dict=cpu_state_dict)
 
         elif self.args.should_save:
             self._save(output_dir)

@@ -102,9 +102,7 @@ class RerankingEvaluator(Evaluator):
             all_docs.extend(sample["positive"])
             all_docs.extend(sample["negative"])
 
-        # all_docs_embs = np.asarray(
-        #     encode_corpus_func(all_docs, batch_size=self.batch_size)
-        # )
+        first_stage_embeddings = self.encode_first_stage(all_docs, first_stage_encoder=model.first_stage_encoder)
 
         # Compute scores
         logger.info("Evaluating...")
@@ -116,13 +114,17 @@ class RerankingEvaluator(Evaluator):
             num_pos = len(instance["positive"])
             num_neg = len(instance["negative"])
             docs = all_docs[docs_idx : docs_idx + num_pos + num_neg]
-            dataset_embeddings = self.encode_first_stage(docs, first_stage_encoder=model.first_stage_encoder).tolist()
+
+            dataset_embedding_idx = list(range(docs_idx, docs_idx + num_pos + num_neg))
             
             corpus_size = model.corpus_size
-            if len(docs) < corpus_size:
-                num_extra_docs = corpus_size - len(docs)
+            if len(dataset_embedding_idx) < corpus_size:
+                num_extra_docs = corpus_size - len(dataset_embedding_idx)
                 print(f"Only {len(docs)} docs available, adding {num_extra_docs} extra docs")
-                dataset_embeddings += random.choices(dataset_embeddings, k=num_extra_docs)
+                dataset_embedding_idx += list(np.random.randint(low=0, high=len(all_docs), size=num_extra_docs))
+            
+            random.shuffle(dataset_embedding_idx)
+            dataset_embeddings = first_stage_embeddings[dataset_embedding_idx]
             dataset_embeddings = torch.tensor(dataset_embeddings)
             
             model.model_kwargs = {
@@ -131,10 +133,10 @@ class RerankingEvaluator(Evaluator):
             }
 
             queries = all_queries[query_idx : query_idx + num_subqueries]
-            query_emb = encode_queries_func(queries, batch_size=self.batch_size)
+            query_emb = encode_queries_func(queries, num_workers=0, batch_size=self.batch_size)
             query_idx += num_subqueries
 
-            docs_emb = encode_corpus_func(docs, batch_size=self.batch_size)
+            docs_emb = encode_corpus_func(docs, num_workers=0, batch_size=self.batch_size)
             docs_idx += num_pos + num_neg
 
             if num_pos == 0 or num_neg == 0:

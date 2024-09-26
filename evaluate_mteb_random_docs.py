@@ -158,7 +158,6 @@ TASK_LIST = (
 # TASK_LIST = TASK_LIST_PAIR_CLASSIFICATION
 # TASK_LIST = TASK_LIST_RERANKING
 # TASK_LIST = ["Touche2020"]
-TASK_LIST = ["NFCorpus"]
 
 def parse_args() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Process model key")
@@ -168,13 +167,6 @@ def parse_args() -> argparse.ArgumentParser:
         type=str, 
         choices=MODEL_FOLDER_DICT.keys()
     )
-    parser.add_argument(
-        "--num_corpus_tokens",
-        help="Number of tokens to use for the corpus",
-        type=int,
-        default=512,
-    )
-    
     return parser.parse_args()
 
 
@@ -189,14 +181,9 @@ def main():
     )
     trainer.model.eval()
     trainer._hn_filter_model = None
-
-    trainer.model.config.transductive_corpus_size = args.num_corpus_tokens
-    print(f"Using {args.num_corpus_tokens} tokens for the corpus")
     
     gc.collect()
     torch.cuda.empty_cache()
-
-    # L
 
     datasets.enable_caching()
     mteb_encoder = DenseEncoder(
@@ -209,15 +196,30 @@ def main():
         default_doc_prefix=True,
     )
 
-    # TODO: Fix quora...
-    # TODO: Disable norm for classification
-    # TODO: Normalize vectors??
+    corpus_documents = open("text_data/random_docs.txt", "r").readlines()
+    corpus_documents = random.choices(corpus_documents, k=trainer.model.config.transductive_corpus_size)
+    dataset_inputs = mteb_encoder.tokenizer(
+        corpus_documents,
+        return_tensors="pt",
+        max_length=trainer.model.config.max_seq_length,
+        padding=True,
+        truncation=True,
+    ).to(training_args.device)
+    with torch.no_grad(), torch.autocast("cuda", dtype=torch.bfloat16):
+        dataset_embeddings = trainer.model.first_stage_model(
+            **dataset_inputs
+        )
+    hidden_dim = dataset_embeddings.shape[-1]
+    dataset_embeddings = dataset_embeddings.reshape((1, -1, hidden_dim)) # flatten for multiple contextual tokens
+    dataset_embeddings = dataset_embeddings.to(torch.float32).cpu().numpy()
+
     random.Random(time.time()).shuffle(TASK_LIST)
     for task_idx, task in enumerate(TASK_LIST):
         prefixes = task2prefix[task]
         mteb_encoder.document_prefix = (prefixes["document"] + ": ") if data_args.use_prefix else ""
         mteb_encoder.query_prefix = (prefixes["query"] + ": ") if data_args.use_prefix else ""
-        print(f"Set prefixes to {mteb_encoder.query_prefix} and {mteb_encoder.document_prefix}")
+        mteb_encoder.normalize_embeds = "Clustering" in task
+        print(f"[{task}] Set prefixes to {mteb_encoder.query_prefix} and {mteb_encoder.document_prefix}")
 
         print(f"Beginning {task} ({task_idx+1} / {len(TASK_LIST)})")
         evaluation = MTEB(
@@ -227,64 +229,7 @@ def main():
         )
         split = "dev" if task == "MSMARCO" else "test"
         ##################################################
-        evaluation.tasks[0].load_data()
-        if hasattr(evaluation.tasks[0], 'corpus') and split in evaluation.tasks[0].corpus:
-            corpus = evaluation.tasks[0].corpus[split]
-            documents = random.choices(list(corpus.values()), k=trainer.model.config.transductive_corpus_size)
-            corpus_documents = [
-                mteb_encoder.document_prefix + '{} {}'.format(doc.get('title', ''), doc['text']).strip() 
-                for doc in documents
-            ]
-        elif hasattr(evaluation.tasks[0], 'dataset'):
-            if isinstance(evaluation.tasks[0].dataset, datasets.Dataset):
-                dataset = evaluation.tasks[0].dataset
-            elif split in evaluation.tasks[0].dataset:
-                dataset = evaluation.tasks[0].dataset[split]
-            else:
-                dataset = next(iter(evaluation.tasks[0].dataset.values()))
-                if split in dataset:
-                    dataset = dataset[split]
-                else:
-                    dataset = next(iter(dataset.values()))
-            column_names = set(dataset.column_names)
-            if {"sentence1", "sentence2"} <= column_names:
-                documents = dataset["sentence1"] + dataset["sentence2"]
-            elif {"sentences"} <= column_names:
-                documents = dataset["sentences"]
-            elif {"text"} <= column_names:
-                documents = dataset["text"]
-            elif {"query", "positive"} <= column_names:
-                documents = dataset["positive"]
-            else:
-                raise ValueError(f"No corpus or dataset - got {column_names}")
-            if isinstance(documents[0], list):
-                documents = [sentence for doc in documents for sentence in doc]
-            documents = random.choices(documents, k=trainer.model.config.transductive_corpus_size)
-            corpus_documents = [
-                mteb_encoder.document_prefix + doc
-                for doc in documents
-            ]
-        else:
-            raise ValueError("No corpus or dataset available")
-        ##################################################
-        print(f"Got {len(corpus_documents)} documents...")
-        assert len(corpus_documents) == trainer.model.config.transductive_corpus_size
-        print(corpus_documents[2])
         trainer.model.first_stage_model.cuda()
-        dataset_inputs = mteb_encoder.tokenizer(
-            corpus_documents,
-            return_tensors="pt",
-            max_length=trainer.model.config.max_seq_length,
-            padding=True,
-            truncation=True,
-        ).to(training_args.device)
-        with torch.no_grad(), torch.autocast("cuda", dtype=torch.bfloat16):
-            dataset_embeddings = trainer.model.first_stage_model(
-                **dataset_inputs
-            )
-        hidden_dim = dataset_embeddings.shape[-1]
-        dataset_embeddings = dataset_embeddings.reshape((1, -1, hidden_dim)) # flatten for multiple contextual tokens
-        dataset_embeddings = dataset_embeddings.to(torch.float32).cpu().numpy()
         ##################################################
         mteb_encoder.model_kwargs = {
             "dataset_embeddings": dataset_embeddings,
@@ -294,8 +239,7 @@ def main():
         # breakpoint()
         results = evaluation.run(
             mteb_encoder, 
-            output_folder=os.path.join("results_mteb", "longer", str(args.num_corpus_tokens), args.model_key) 
-                if NORMALIZE_EMBEDS else os.path.join("results_mteb", "longer", str(args.num_corpus_tokens), args.model_key),
+            output_folder=os.path.join("results_mteb", "random_documents", args.model_key),
             batch_size=512, 
             # batch_size=128, 
             corpus_chunk_size=500_000,

@@ -6,10 +6,9 @@ import torch.nn as nn
 import transformers
 
 from cde.lib.dist import print0
-from cde.lib.tensor import mean_pool, mean_pool_3d, last_token_pool, mean_pool_weighted
+from cde.lib.tensor import mean_pool, mean_pool_3d, mean_pool_weighted
 
-from cde.lib.contextual_bert import ContextualBertModel
-from cde.lib.contextual_bert.configuration import ContextualBertConfig
+from cde.lib import load_embedder_and_tokenizer, ContextualModelConfig
 
 
 def limit_layers(model: transformers.PreTrainedModel, n_layers: int) -> None:
@@ -147,9 +146,11 @@ class BiEncoder(transformers.PreTrainedModel):
     def __init__(
             self, 
             config, #: transformers.PreTrainedConfig, 
-            embedder: transformers.PreTrainedModel, 
         ):
         super().__init__(config=config)
+        embedder, _ = load_embedder_and_tokenizer(
+            config.embedder,
+        )
 
         if config.limit_layers:
             print0(f"Limiting layers to {config.limit_layers}")
@@ -250,101 +251,6 @@ class BiEncoder(transformers.PreTrainedModel):
             }
         else:
             return output
-
-
-class TwoEmbeddersWithMLP(transformers.PreTrainedModel):
-    embedder: transformers.PreTrainedModel
-    embedder: transformers.PreTrainedModel
-    dataset_backbone: transformers.PreTrainedModel
-    def __init__(
-            self, 
-            config, #: transformers.PreTrainedConfig, 
-            embedder: transformers.PreTrainedModel, 
-            dataset_backbone: transformers.PreTrainedModel,
-        ):
-        super().__init__(config=config)
-
-        if config.limit_layers:
-            print0(f"Limiting layers to {config.limit_layers}")
-            limit_layers(embedder, config.limit_layers)
-            limit_layers(dataset_backbone, config.limit_layers)
-        self.embedder = embedder
-        self.backbone = dataset_backbone
-
-        # TODO make this a little nicer. (Not every model has 'embeddings...')
-        self.backbone = dataset_backbone
-        self.backbone.embeddings.word_embeddings.weight.requires_grad = False
-        self.backbone.embeddings.word_embeddings.weight.fill_(0.0)
-
-        self.hidden_size = self.embedder.config.hidden_size
-        joint_hidden_size = (self.embedder.config.hidden_size + self.backbone.config.hidden_size)
-        self.mlp = torch.nn.Sequential(
-            torch.nn.Linear(joint_hidden_size, joint_hidden_size),
-            torch.nn.GELU(),
-            torch.nn.Linear(joint_hidden_size, self.hidden_size * 2),
-            torch.nn.GELU(),
-            torch.nn.Linear(self.hidden_size * 2, self.hidden_size),
-        )
-
-        self.temp = config.logit_scale
-        if config.disable_dropout:
-            disable_dropout(self)
-    
-    def forward(
-            self,
-            input_ids: torch.Tensor,
-            attention_mask: torch.Tensor,
-            dataset_input_ids: torch.Tensor,
-            dataset_attention_mask: torch.Tensor,
-    ) -> torch.Tensor:
-        batch_size = input_ids.shape[0]
-        _corpus_size = dataset_input_ids.shape[0]
-        
-        torch.distributed.barrier()
-
-        dataset_backbone_input_embeddings = mean_pool(
-            hidden_states=self.backbone(
-                input_ids=dataset_input_ids,
-                attention_mask=dataset_attention_mask
-            ).last_hidden_state,
-            attention_mask=dataset_attention_mask,
-        )
-        emb_dtype = self.backbone.embeddings.word_embeddings.weight.dtype
-        dataset_backbone_input_embeddings = dataset_backbone_input_embeddings.to(emb_dtype)
-        assert len(dataset_backbone_input_embeddings.shape) == 2 # (b, d)
-        dataset_backbone_input_embeddings = dataset_backbone_input_embeddings[:, None, :]
-        dataset_backbone_attention_mask = torch.ones(
-            dataset_backbone_input_embeddings.shape[0:2], 
-            device=dataset_input_ids.device,
-            dtype=torch.long
-        )
-        dataset_intermediate_embeddings = self.backbone(
-            inputs_embeds=dataset_backbone_input_embeddings,
-            attention_mask=dataset_backbone_attention_mask,
-        ).last_hidden_state
-        dataset_embedding = dataset_intermediate_embeddings[:, 0, :].mean(
-            dim=0, 
-            keepdim=True
-        )
-        embeddings = mean_pool(
-            hidden_states=self.embedder(
-                input_ids=input_ids,
-                attention_mask=attention_mask
-            ).last_hidden_state,
-            attention_mask=attention_mask,
-        )
-        assert dataset_embedding.shape[0] == 1 # (1, d)
-        assert embeddings.shape[0] == batch_size # (b, d)
-        mlp_input_embeddings = torch.cat(
-            (
-                dataset_embedding.expand(batch_size, -1),
-                embeddings
-            ),
-            dim=1
-        )
-        outputs = self.mlp(mlp_input_embeddings)
-        assert outputs.shape == (batch_size, self.hidden_size)
-        return outputs
 
 
 class DatasetConditionedAutoregressive(transformers.PreTrainedModel, ContextualModelMixin):
@@ -606,19 +512,20 @@ class DatasetPrefixBiencoder(transformers.PreTrainedModel, ContextualModelMixin)
 
 
 class DatasetTransformer(transformers.PreTrainedModel):
+    config_class = ContextualModelConfig
     embedder: transformers.PreTrainedModel
     dataset_backbone: transformers.PreTrainedModel
     def __init__(
             self, 
             config,
-            embedder: transformers.PreTrainedModel, 
-            dataset_backbone: transformers.PreTrainedModel,
         ):
         super().__init__(config=config)
+        dataset_backbone, _ = load_embedder_and_tokenizer(
+            config.dataset_backbone or config.embedder
+        )
 
         if config.limit_layers:
             print0(f"Limiting layers to {config.limit_layers}")
-            limit_layers(embedder, config.limit_layers)
             limit_layers(dataset_backbone, config.limit_layers)
         
         biencoder_config = copy.deepcopy(config)
@@ -626,7 +533,6 @@ class DatasetTransformer(transformers.PreTrainedModel):
         biencoder_config.limit_layers = vars(self.config).get("limit_layers_first_stage", None)
         self.first_stage_model = BiEncoder(
             config=biencoder_config,
-            embedder=embedder
         )
 
         if vars(config).get("autoregressive_backbone", False):
@@ -675,110 +581,13 @@ class DatasetTransformer(transformers.PreTrainedModel):
         )
 
 
-class ContextualBertWrapper(transformers.PreTrainedModel, ContextualModelMixin):
-    def __init__(self, config):
-        super().__init__(config=config)
-        self.config = config
-        # TODO: Save config to disk with a new name to avoid this.
-        # second_stage_config = transformers.AutoConfig.from_pretrained(
-            # "nomic-ai/nomic-bert-2048", trust_remote_code=True)
-        # self.backbone = ContextualBertModel._from_config(second_stage_config)
-        self.backbone = ContextualBertModel.from_pretrained("nomic-ai/nomic-bert-2048")
-        self.transductive_tokens_per_document = vars(self.config).get("transductive_tokens_per_document", 1)
-        self.hidden_size = self.backbone.config.hidden_size
-        self.contextual_init()
-    
-    def forward(
-            self, 
-            input_ids: torch.Tensor,
-            attention_mask: torch.Tensor,
-            dataset_embeddings: torch.Tensor,
-            output_hidden_states: bool = False,
-            null_dataset_embedding: bool = False,
-        ) -> Union[torch.Tensor, Dict[str, torch.Tensor]]:
-        encoder_hidden_states = self._prepare_dataset_embeddings(
-            input_ids=input_ids,    
-            dataset_embeddings=dataset_embeddings,
-            null_dataset_embedding=null_dataset_embedding,
-        )
-        outputs = self.backbone(
-            input_ids=input_ids,
-            attention_mask=attention_mask,
-            encoder_hidden_states=encoder_hidden_states,
-        )
-        output_vectors = outputs.last_hidden_state
-        output_pooled = mean_pool(output_vectors, attention_mask)
-        pooled_output = self.output_projection(output_pooled) # (b, 2d) -> (b, d)
-
-        if output_hidden_states:
-            return {
-                "hidden_states": output_vectors,
-                "pooled": pooled_output,
-            }
-        else:
-            return pooled_output
-
-
-class ContextualCrossAttention(transformers.PreTrainedModel):
-    embedder: transformers.PreTrainedModel
-    dataset_backbone: transformers.PreTrainedModel
-    def __init__(
-            self, 
-            config,
-            embedder: transformers.PreTrainedModel, 
-        ):
-        super().__init__(config=config)
-
-        if config.limit_layers:
-            print0(f"Limiting layers to {config.limit_layers}")
-            limit_layers(embedder, config.limit_layers)
-        
-        biencoder_config = copy.deepcopy(config)
-        biencoder_config.embedding_output_dim = None
-        self.first_stage_model = BiEncoder(
-            config=biencoder_config,
-            embedder=embedder
-        )
-        self.temp = config.logit_scale
-        if config.disable_dropout:
-            disable_dropout(self)
-        self.hidden_size = self.first_stage_model.embedder.config.hidden_size
-        self.second_stage_model = ContextualBertWrapper(config=config)
-    
-    def forward(
-            self, 
-            input_ids: torch.Tensor,
-            attention_mask: torch.Tensor,
-            dataset_input_ids: Optional[torch.Tensor],
-            dataset_attention_mask: Optional[torch.Tensor],
-            output_hidden_states: bool = False,
-        ) -> torch.Tensor:
-        """
-        input_ids (long torch.Tensor) – ids of input tokens
-        attention_mask (bool torch.Tensor)
-        """
-        dataset_embeddings = self.first_stage_model(
-            input_ids=dataset_input_ids, 
-            attention_mask=dataset_attention_mask
-        )
-        return self.second_stage_model(
-            input_ids=input_ids,
-            attention_mask=attention_mask,
-            dataset_embeddings=dataset_embeddings,
-            output_hidden_states=output_hidden_states,
-        )
-
 
 def get_model_class(name: str):
-    if name == 'two_head_mlp':
-        return TwoEmbeddersWithMLP
-    elif name in 'transductive': 
+    if name in 'transductive': 
         return DatasetTransformer
     elif name == 'biencoder':
         return BiEncoder
     elif name == "dataset_prefix_biencoder":
         return DatasetPrefixBiencoder
-    elif name == "contextual_cross_attention":
-        return ContextualCrossAttention
     else:
         raise ValueError(f'unknown model cls {name}')

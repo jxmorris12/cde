@@ -7,7 +7,7 @@ import transformers
 
 from cde.collate import TokenizerCollator
 from cde.dataset import BeirDataset
-from cde.lib import ModelConfig 
+from cde.lib import ContextualModelConfig 
 from cde.model import get_model_class
 from cde.run_args import ModelArguments, DataArguments, TrainingArguments
 from cde.trainer import CustomTrainer
@@ -28,7 +28,7 @@ def fake_trainer():
             shlex.split(args_str))
     )
     model_args.transductive_corpus_size = 20
-    model_config = ModelConfig(**vars(model_args))
+    model_config = ContextualModelConfig(**vars(model_args))
     model_cls = get_model_class(model_args.architecture)
     embedder, tokenizer = load_fake_embedder_and_tokenizer()
     model = model_cls(

@@ -4,13 +4,14 @@ import logging
 import os
 import pickle
 
+import safetensors
 import torch
 import transformers
 import wandb
 
 from cde.collate import TokenizedCollator
 from cde.dataset import BeirDataset
-from cde.lib import load_embedder_and_tokenizer, ModelConfig
+from cde.lib import load_embedder_and_tokenizer, ContextualModelConfig
 from cde.lib.model_configs import MODEL_FOLDER_DICT
 from cde.model import get_model_class
 # from cde.run_args import ModelArguments, DataArguments, TrainingArguments
@@ -32,7 +33,8 @@ def load_trainer_from_checkpoint_and_args(
         model_folder: str, 
         beir_dataset_names: Optional[List[str]] = None,
         load_from_checkpoint: bool = True,
-        return_args: bool = False
+        return_args: bool = False,
+        load_entire_trainer: bool = True,
     ):
     torch.compiler.reset()
     torch._dynamo.config.optimize_ddp = False
@@ -47,13 +49,6 @@ def load_trainer_from_checkpoint_and_args(
         model_args = torch.load(open(os.path.join(checkpoint_path, "model_args.bin"), "rb"), weights_only=False, pickle_module=CustomPickle)
         training_args = torch.load(open(os.path.join(checkpoint_path, "training_args.bin"), "rb"), weights_only=False, pickle_module=CustomPickle)
         model_args.embedding_output_dim = None # backwards compatibility :-)
-        training_args.accelerator_config.gradient_accumulation_kwargs = None # backwards compatibility :-)
-        training_args.use_wandb = 0
-        training_args._n_gpu =  1 if torch.cuda.is_available() else 0  # Don't load in DDP
-        training_args.local_rank = -1  # Don't load in DDP
-        
-        from accelerate.state import PartialState
-        training_args.distributed_state = PartialState()
     else:
         raise RuntimeError("must have data_args.bin and model_args.bin available to load from disk")
 
@@ -77,47 +72,37 @@ def load_trainer_from_checkpoint_and_args(
         datefmt='%Y-%m-%d %H:%M:%S',
         level=logging.WARNING
     )
-    embedder, embedder_tokenizer = load_embedder_and_tokenizer(
-        model_args.embedder,
-    )
-    dataset_backbone, dataset_tokenizer = load_embedder_and_tokenizer(
-        model_args.embedder,
-    )
+    embedder_tokenizer = transformers.AutoTokenizer.from_pretrained(model_args.embedder)
+    embedder_tokenizer.pad_token = embedder_tokenizer.eos_token
 
     beir_dataset_names = beir_dataset_names or []
     if training_args.tiny_debug: 
         beir_dataset_names = [ 'quora' ]
         training_args.max_eval_batches = 1
 
-    beir_dict = {
-        d: BeirDataset(
-            dataset=d, 
-            embedder_rerank=model_args.embedder_rerank,
-            use_prefix=data_args.use_prefix,
-        ) 
-        for d in sorted(beir_dataset_names)
-    }
+    # beir_dict = {
+    #     d: BeirDataset(
+    #         dataset=d, 
+    #         embedder_rerank=model_args.embedder_rerank,
+    #         use_prefix=data_args.use_prefix,
+    #     ) 
+    #     for d in sorted(beir_dataset_names)
+    # }
     retrieval_datasets = {
-        **{f"BeIR/{k}": v for k,v in beir_dict.items()}
+        # **{f"BeIR/{k}": v for k,v in beir_dict.items()}
     }
     model_args.transductive_corpus_size = training_args.transductive_corpus_size
-    model_config = ModelConfig(**vars(model_args))
+    model_config = ContextualModelConfig(**vars(model_args))
     model_cls = get_model_class(model_args.architecture)
+    # model = model_cls(config=model_config)
+    model = model_cls.from_pretrained(checkpoint_path)
+    model.eval()
 
-    if model_args.architecture == 'biencoder':
-        model = model_cls(
-            config=model_config,
-            embedder=embedder,
-        )
-    else:
-        dataset_backbone, dataset_tokenizer = load_embedder_and_tokenizer(
-            model_args.embedder,
-        )
-        model = model_cls(
-            config=model_config,
-            embedder=embedder,
-            dataset_backbone=dataset_backbone,
-        )
+    if not load_entire_trainer:
+        if return_args:
+            return model, (model_args, data_args, training_args)
+        else:
+            return model
 
     collator = TokenizedCollator(
         tokenizer=embedder_tokenizer,
@@ -140,8 +125,7 @@ def load_trainer_from_checkpoint_and_args(
         eval_sampler_fns={},
         retrieval_datasets=retrieval_datasets,
     )
-    if load_from_checkpoint:
-        trainer._load_from_checkpoint(checkpoint_path)
+    trainer._load_from_checkpoint(checkpoint_path)
     trainer.model.eval()
 
     if return_args:

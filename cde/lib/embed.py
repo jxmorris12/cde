@@ -2,6 +2,7 @@ from typing import Dict, List, Mapping, Optional, Union
 
 import functools
 import os
+import random
 
 import datasets
 import numpy as np
@@ -18,6 +19,10 @@ from cde.lib.tensor import (
 )
 
 
+fingerprint_rng = random.Random()
+def generate_random_fingerprint(nbits: int = 64) -> str:
+    return f"{fingerprint_rng.getrandbits(nbits):0{nbits//4}x}"
+
 def embed_dataloader(
         encoder, 
         data_loader, col: str, 
@@ -25,6 +30,7 @@ def embed_dataloader(
         leave_progress_bar: bool = True, 
         convert_to_tensor: bool = True,
         output_device: str = "cuda",
+        output_dtype: torch.dtype = torch.float32,
         **kwargs
     ) -> List[torch.Tensor]:
     encoded_embeds = []
@@ -58,7 +64,7 @@ def embed_dataloader(
         encoded_embeds.append(embeds.cpu())
         
     if convert_to_tensor:
-        return torch.cat(encoded_embeds, dim=0).to(output_device)
+        return torch.cat(encoded_embeds, dim=0).to(output_device).to(output_dtype)
     else:
         encoded_embeds = [embeds.cpu().float().numpy() for embeds in encoded_embeds]
         output_array = np.concatenate(encoded_embeds, axis=0)
@@ -88,6 +94,24 @@ def move_to_cuda(sample):
     return _move_to_cuda(sample)
 
 
+def tokenize_transform(
+        examples: Dict[str, List],
+        prefix: str,
+        col: str,
+        max_length: int,
+        max_num_chars: int,
+        tokenizer: transformers.PreTrainedTokenizer,
+    ) -> Dict[str, torch.Tensor]:
+    texts = examples[col]
+    batch_dict = tokenizer(
+        [prefix + t[:max_num_chars] for t in texts],
+        max_length=max_length,
+        padding=True,
+        truncation=True,
+    )
+    other_cols = [k for k in examples.keys() if k != col]
+    return {**batch_dict, **{k: examples[k] for k in other_cols}}
+
 class DenseEncoder(torch.nn.Module):
     def __init__(
             self, 
@@ -115,23 +139,6 @@ class DenseEncoder(torch.nn.Module):
         self.normalize_embeds = normalize_embeds
         self.default_doc_prefix = default_doc_prefix
 
-    def tokenize_transform(
-            self,
-            examples: Dict[str, List],
-            prefix: str,
-            col: str,
-            max_length: int,
-        ) -> Dict[str, torch.Tensor]:
-        texts = examples[col]
-        batch_dict = self.tokenizer(
-            [prefix + t[:self._max_num_chars] for t in texts],
-            max_length=max_length,
-            padding=True,
-            truncation=True,
-        )
-        other_cols = [k for k in examples.keys() if k != col]
-        return {**batch_dict, **{k: examples[k] for k in other_cols}}
-
     def _consider_putting_model_on_device(self) -> None:
         if self.model_is_on_device:
             return
@@ -139,7 +146,7 @@ class DenseEncoder(torch.nn.Module):
             print("[DenseEncoder] initializing from", self.model_name_or_path)
             self.encoder = transformers.AutoModel.from_pretrained(
                 self.model_name_or_path, 
-                torch_dtype=torch.float16,
+                # torch_dtype=torch.float16,
                 trust_remote_code=True,
             )
             self.encoder.eval()
@@ -172,6 +179,7 @@ class DenseEncoder(torch.nn.Module):
             col: str,
             prefix: str,
             batch_size: int,
+            num_workers: Optional[int] = None,
         ) -> torch.utils.data.DataLoader:
         if isinstance(dataset, list):
             if isinstance(dataset[0], str):
@@ -181,13 +189,16 @@ class DenseEncoder(torch.nn.Module):
             else:
                 raise RuntimeError("unknown dataset format to encode")
         
+        print("_create_dataloader() called with batch size:", batch_size, "and num_workers:", num_workers)
         os.environ["TOKENIZERS_PARALLELISM"] = "0"
 
         tokenize_fn = functools.partial(
-            self.tokenize_transform, 
+            tokenize_transform, 
             prefix=prefix,
             col=col, 
             max_length=self.max_length,
+            max_num_chars=self._max_num_chars,
+            tokenizer=self.tokenizer,
         )
         if isinstance(dataset, datasets.IterableDataset):
             dataset = dataset.map(tokenize_fn, batched=True)
@@ -196,7 +207,8 @@ class DenseEncoder(torch.nn.Module):
             dataset.set_transform(tokenize_fn)
         data_collator = transformers.DataCollatorWithPadding(self.tokenizer, pad_to_multiple_of=8)
         effective_batch_size = (batch_size * max(1, self.gpu_count))
-        num_workers = min(len(os.sched_getaffinity(0)), self.gpu_count * 4)
+        if num_workers is None:
+            num_workers = min(len(os.sched_getaffinity(0)), self.gpu_count * 4)
 
         try:
             len_dataset = len(dataset)
@@ -229,6 +241,8 @@ class DenseEncoder(torch.nn.Module):
             show_progress_bar: bool = True,
             convert_to_tensor: bool = True,
             output_device: str = "cuda",
+            output_dtype: torch.dtype = torch.float32,
+            num_workers: Optional[int] = None,
             **kwargs,
         ) -> Union[torch.Tensor, np.ndarray]:
         """ Returns a list of embeddings for the given sentences.
@@ -247,6 +261,7 @@ class DenseEncoder(torch.nn.Module):
             col=col,
             batch_size=batch_size,
             prefix=prefix,
+            num_workers=num_workers,
         )
         self._consider_putting_model_on_device()
 
@@ -262,6 +277,7 @@ class DenseEncoder(torch.nn.Module):
             data_loader, 
             col=col,
             convert_to_tensor=convert_to_tensor,
+            output_dtype=output_dtype,
             show_progress_bar=show_progress_bar,
             output_device=output_device,
             **kwargs,

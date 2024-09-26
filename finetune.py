@@ -23,9 +23,8 @@ from cde.dataset import (
 from cde.lib import (
     get_rank, 
     get_world_size, 
-    load_embedder_and_tokenizer, 
     load_model_state_dict_from_path, 
-    ModelConfig,
+    ContextualModelConfig,
     print0
 )
 from cde.model import get_model_class
@@ -131,42 +130,38 @@ def main():
         datefmt='%Y-%m-%d %H:%M:%S',
         level=logging.WARNING
     )
-    embedder, embedder_tokenizer = load_embedder_and_tokenizer(
+    embedder_tokenizer = transformers.AutoTokenizer.from_pretrained(
         model_args.embedder,
     )
+    embedder_tokenizer.pad_token = embedder_tokenizer.eos_token
 
     model_args.transductive_corpus_size = training_args.transductive_corpus_size
-    model_config = ModelConfig(**vars(model_args))
+    model_config = ContextualModelConfig(**vars(model_args))
     model_cls = get_model_class(model_args.architecture)
     if model_args.architecture in ['biencoder', 'dataset_prefix_biencoder', 'contextual_cross_attention']:
-        model = model_cls(
-            config=model_config,
-            embedder=embedder,
-        )
         dataset_backbone_tokenizer = embedder_tokenizer
+        dataset_backbone_tokenizer.pad_token = dataset_backbone_tokenizer.eos_token
     else:
-        dataset_backbone, dataset_backbone_tokenizer = load_embedder_and_tokenizer(
+        dataset_backbone_tokenizer = transformers.AutoTokenizer.from_pretrained(
             model_args.dataset_backbone or model_args.embedder,
         )
-        if training_args.use_lora:
-            from peft import LoraConfig, get_peft_model
-            lora_config = LoraConfig(
-                r=32,
-                lora_alpha=64,
-                # target_modules="q_proj,k_proj,v_proj,o_proj,down_proj,up_proj,gate_proj",
-                target_modules=["q_proj", "k_proj", "v_proj", "o_proj", "down_proj", "up_proj", "gate_proj"],
-                # target_modules="q_proj,k_proj,v_proj,o_proj,down_proj,up_proj,gate_proj",
-                lora_dropout=0.1,
-                init_lora_weights="gaussian",
-                use_dora=True,
-                inference_mode=False
-            )
-            dataset_backbone = get_peft_model(dataset_backbone, lora_config)
-        model = model_cls(
-            config=model_config,
-            embedder=embedder,
-            dataset_backbone=dataset_backbone,
-        )
+        # if training_args.use_lora:
+        #     from peft import LoraConfig, get_peft_model
+        #     lora_config = LoraConfig(
+        #         r=32,
+        #         lora_alpha=64,
+        #         # target_modules="q_proj,k_proj,v_proj,o_proj,down_proj,up_proj,gate_proj",
+        #         target_modules=["q_proj", "k_proj", "v_proj", "o_proj", "down_proj", "up_proj", "gate_proj"],
+        #         # target_modules="q_proj,k_proj,v_proj,o_proj,down_proj,up_proj,gate_proj",
+        #         lora_dropout=0.1,
+        #         init_lora_weights="gaussian",
+        #         use_dora=True,
+        #         inference_mode=False
+        #     )
+        #     dataset_backbone = get_peft_model(dataset_backbone, lora_config)
+    model = model_cls(
+        config=model_config,
+    )
 
     if training_args.tiny_debug: 
         datasets.logging.set_verbosity_info()

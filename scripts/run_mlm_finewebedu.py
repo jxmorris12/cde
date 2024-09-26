@@ -17,7 +17,7 @@ from cde.lib import (
     get_rank, get_world_size, 
     load_embedder_and_tokenizer, 
     load_model_state_dict_from_path, 
-    ModelConfig,
+    ContextualModelConfig,
     print0
 )
 from cde.model import get_model_class
@@ -269,7 +269,7 @@ def main():
         seed=training_args.seed,
     )
     model_args.transductive_corpus_size = training_args.transductive_corpus_size
-    model_config = ModelConfig(**vars(model_args))
+    model_config = ContextualModelConfig(**vars(model_args))
     model_cls = get_model_class(model_args.architecture)
     if model_args.architecture in ['biencoder', 'dataset_prefix_biencoder', 'contextual_cross_attention']:
         model = model_cls(
