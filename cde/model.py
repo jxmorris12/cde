@@ -35,6 +35,17 @@ def disable_dropout(model: torch.nn.Module):
         f"Disabled {len(dropout_modules)} dropout modules from model type {type(model)}"
     )
 
+
+def disable_causality(model: torch.nn.Module):
+    disabled_modules = 0
+    for m in model.modules():
+        if hasattr(m, "is_causal"):
+            m.is_causal = False
+            disabled_modules += 1
+    print0(
+        f"Set is_causal=False in {disabled_modules} modules from model type {type(model)}"
+    )
+
 class ContextualModelMixin(nn.Module):
     @property
     def num_corpus_tokens(self) -> int:
@@ -265,6 +276,7 @@ class DatasetConditionedAutoregressive(transformers.PreTrainedModel, ContextualM
         self.backbone_hidden_size = self.backbone.config.hidden_size
         self.hidden_size = first_stage_hidden_size # Input token size
         self.contextual_init()
+        disable_causality(self.backbone)
         
         self.input_ln = torch.nn.LayerNorm(
             self.backbone_hidden_size, 
@@ -321,6 +333,7 @@ class DatasetConditionedAutoregressive(transformers.PreTrainedModel, ContextualM
         soft_prompt = soft_prompt.reshape(
             (soft_prompt.shape[0], -1, self.backbone_hidden_size)
         )
+        soft_prompt = self.input_ln(soft_prompt)
         # print("[DatasetConditionedAutoregressive] 2 -> soft_prompt.shape =", soft_prompt.shape)
 
         backbone_attention_mask = torch.ones(
@@ -332,10 +345,10 @@ class DatasetConditionedAutoregressive(transformers.PreTrainedModel, ContextualM
         inputs_embeds = token_embeddings(input_ids) # (b, s) -> (b, s, d)
         # print("[2] inputs_embeds.shape =", inputs_embeds.shape)
         inputs_embeds = torch.cat((soft_prompt, inputs_embeds), dim=1) # (v, 4+b+s, d)
-        inputs_embeds = self.input_ln(inputs_embeds)
         # print("[3.a] inputs_embeds.shape =", inputs_embeds.shape)
         attention_mask = torch.cat((backbone_attention_mask, attention_mask), dim=1)
         # print("[3.b] attention_mask.shape =", attention_mask.shape)
+
         output = self.backbone(
             inputs_embeds=inputs_embeds,
             attention_mask=attention_mask,

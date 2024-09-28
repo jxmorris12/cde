@@ -55,7 +55,7 @@ def embed_dataloader(
         elif hasattr(outputs, 'last_hidden_state'):
             embeds = mean_pool(
                 hidden_states=outputs.last_hidden_state,
-                attention_mask=batch_dict['attention_mask']
+                attention_mask=batch_dict["attention_mask"]
             )
         else:
             # already pooled
@@ -101,7 +101,6 @@ def tokenize_transform(
         max_length: int,
         max_num_chars: int,
         tokenizer: transformers.PreTrainedTokenizer,
-        first_stage_tokenizer: Optional[transformers.PreTrainedTokenizer] = None,
     ) -> Dict[str, torch.Tensor]:
     texts = examples[col]
     batch_dict = tokenizer(
@@ -109,21 +108,10 @@ def tokenize_transform(
         max_length=max_length,
         padding=True,
         truncation=True,
+        return_tensors="pt",
     )
-    if first_stage_tokenizer:
-        first_stage_batch_dict = first_stage_tokenizer(
-            [prefix + t[:max_num_chars] for t in texts],
-            max_length=max_length,
-            padding=True,
-            truncation=True,
-        )
-        first_stage_batch_dict = {
-            f"{k}_first_stage": v for k, v in first_stage_batch_dict.items()
-        }
-        print(first_stage_batch_dict.keys())
-
     other_cols = [k for k in examples.keys() if k != col]
-    return {**batch_dict, **first_stage_batch_dict, **{k: examples[k] for k in other_cols}}
+    return {**batch_dict, **{k: examples[k] for k in other_cols}}
 
 class DenseEncoder(torch.nn.Module):
     def __init__(
@@ -135,13 +123,16 @@ class DenseEncoder(torch.nn.Module):
             document_prefix: str = "",
             normalize_embeds: bool = False,
             default_doc_prefix: bool = False,
-            first_stage_tokenizer_name: Optional[str] = None,
         ):
         super().__init__()
         self.encoder = encoder
         self.model_name_or_path = model_name_or_path
         self.tokenizer = transformers.AutoTokenizer.from_pretrained(
-            model_name_or_path)
+            model_name_or_path,
+            padding_side="right",
+        )
+        self.tokenizer.pad_token = self.tokenizer.eos_token
+        self.tokenizer.add_eos_token = True
         self.gpu_count = torch.cuda.device_count()
 
         self.model_is_on_device = False
@@ -152,13 +143,6 @@ class DenseEncoder(torch.nn.Module):
         self._max_num_chars = (self.max_length * 4)
         self.normalize_embeds = normalize_embeds
         self.default_doc_prefix = default_doc_prefix
-
-        if first_stage_tokenizer_name:
-            self.first_stage_tokenizer = (
-                transformers.AutoTokenizer.from_pretrained(first_stage_tokenizer_name)
-            )
-        else:
-            self.first_stage_tokenizer = None
 
     def _consider_putting_model_on_device(self) -> None:
         if self.model_is_on_device:
@@ -220,7 +204,6 @@ class DenseEncoder(torch.nn.Module):
             max_length=self.max_length,
             max_num_chars=self._max_num_chars,
             tokenizer=self.tokenizer,
-            first_stage_tokenizer=self.first_stage_tokenizer,
         )
         if isinstance(dataset, datasets.IterableDataset):
             dataset = dataset.map(tokenize_fn, batched=True)
@@ -241,7 +224,7 @@ class DenseEncoder(torch.nn.Module):
             effective_batch_size = batch_size
         effective_batch_size = max(1, effective_batch_size)
 
-        print(f"[DenseEncoder] created dataloader with {num_workers} workers, effective_batch_size={effective_batch_size}, len(dataset)={len_dataset}")
+        print(f"[DenseEncoder] created dataloader with num_workers={num_workers}, effective_batch_size={effective_batch_size}, len(dataset)={len_dataset}")
         return torch.utils.data.DataLoader(
             dataset,
             batch_size=effective_batch_size,

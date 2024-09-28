@@ -6,6 +6,7 @@ import time
 
 import datasets
 import torch
+import transformers
 
 # from cde.lib import cluster_dataset
 from cde.lib.embed import DenseEncoder
@@ -202,8 +203,8 @@ def main():
         document_prefix="",  # Set later
         normalize_embeds=NORMALIZE_EMBEDS,
         default_doc_prefix=True,
-        first_stage_tokenizer_name=model.config.embedder,
     )
+    first_stage_tokenizer = transformers.AutoTokenizer.from_pretrained(model.config.embedder)
 
     random.Random(time.time()).shuffle(TASK_LIST)
     for task_idx, task in enumerate(TASK_LIST):
@@ -265,7 +266,8 @@ def main():
         assert len(corpus_documents) == model.config.transductive_corpus_size
         print(corpus_documents[2])
         model.first_stage_model.cuda()
-        dataset_inputs = mteb_encoder.tokenizer(
+
+        dataset_inputs = first_stage_tokenizer(
             corpus_documents,
             return_tensors="pt",
             max_length=model.config.max_seq_length,
@@ -289,12 +291,13 @@ def main():
         # breakpoint()
         results = evaluation.run(
             mteb_encoder, 
-            output_folder=os.path.join("results_mteb", args.model_key),
+            output_folder=os.path.join("results_mteb", "test", args.model_key),
             corpus_chunk_size=500_000,
             verbosity=2,
             eval_splits=[split],
-            encode_kwargs={"batch_size": args.batch_size, "num_workers": 8 },
-            # encode_kwargs={"batch_size": args.batch_size, "num_workers": 0},
+            # encode_kwargs={"batch_size": args.batch_size, "num_workers": 8 },
+            encode_kwargs={"batch_size": args.batch_size, "num_workers": 0},
+            # encode_kwargs={"batch_size": args.batch_size, "num_workers": 1},
         )
         print(task)
         print("\t", results)

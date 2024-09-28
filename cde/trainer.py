@@ -47,14 +47,14 @@ def calculate_gradient_norm(model: torch.nn.Module) -> torch.Tensor:
 
 class CustomTrainer(transformers.Trainer, TrainerNegativeFilterMixin):
     retrieval_datasets: Dict[str, datasets.Dataset]
-    embedder_tokenizer: transformers.PreTrainedTokenizer
+    dataset_backbone_tokenizer: transformers.PreTrainedTokenizer
     _train_sampler_fn: Callable[[], Sampler]
     _eval_sampler_fns: Callable[[], Dict[str, Sampler]]
 
     def __init__(
             self, 
             *args,
-                embedder_tokenizer: transformers.PreTrainedTokenizer,
+                dataset_backbone_tokenizer: transformers.PreTrainedTokenizer,
                 retrieval_datasets: Dict[str, datasets.Dataset],
                 train_sampler_fn: Callable[[], Sampler],
                 eval_sampler_fns: Callable[[], Dict[str, Sampler]],
@@ -81,7 +81,7 @@ class CustomTrainer(transformers.Trainer, TrainerNegativeFilterMixin):
             "query_input_ids", "query_attention_mask",
             "query_embedding", "document_embedding",
         ]
-        self.embedder_tokenizer = embedder_tokenizer 
+        self.dataset_backbone_tokenizer = dataset_backbone_tokenizer 
         self.use_gc = self.args.use_gc # whether to use gradcache
         self.gc = None # lazily initialized during training
         self._extra_logs = TensorRunningAverages()
@@ -264,7 +264,7 @@ class CustomTrainer(transformers.Trainer, TrainerNegativeFilterMixin):
             return None
     
         keys = ["query_input_ids", "document_input_ids"]
-        tokenizers = [ self.embedder_tokenizer,  self.embedder_tokenizer, self.embedder_tokenizer]
+        tokenizers = [ self.dataset_backbone_tokenizer,  self.dataset_backbone_tokenizer, self.dataset_backbone_tokenizer]
         data = [
                 tokenizer.batch_decode(batch[key][:n], skip_special_tokens=True)
                 for (tokenizer, key) in zip(tokenizers, keys)
@@ -616,7 +616,7 @@ class CustomTrainer(transformers.Trainer, TrainerNegativeFilterMixin):
         all_document_input_ids = self.consider_gather(document_inputs["input_ids"])
         all_query_input_ids = self.consider_gather(query_inputs["input_ids"])
         # Uncomment next line to log text on every GPU.
-        # print(f"[rank {get_rank()}] query 0 =", self.embedder_tokenizer.decode(document_inputs["input_ids"][0], skip_special_tokens=True))
+        # print(f"[rank {get_rank()}] query 0 =", self.dataset_backbone_tokenizer.decode(document_inputs["input_ids"][0], skip_special_tokens=True))
         document_first_tokens = all_document_input_ids[:, 1].contiguous()
         query_first_tokens = all_query_input_ids[:, 1].contiguous()
 
@@ -773,7 +773,7 @@ class CustomTrainer(transformers.Trainer, TrainerNegativeFilterMixin):
         
         reranker = RerankHelper(
             model=model, 
-            tokenizer=self.embedder_tokenizer, 
+            tokenizer=self.dataset_backbone_tokenizer, 
             max_seq_length=self.max_seq_length,
             batch_size=self.args.max_batch_size_fits_in_memory,
             max_reranking_queries=n,

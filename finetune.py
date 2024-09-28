@@ -132,6 +132,7 @@ def main():
     )
     embedder_tokenizer = transformers.AutoTokenizer.from_pretrained(
         model_args.embedder,
+        padding_side="right"
     )
 
     model_args.transductive_corpus_size = training_args.transductive_corpus_size
@@ -144,6 +145,7 @@ def main():
     else:
         dataset_backbone_tokenizer = transformers.AutoTokenizer.from_pretrained(
             model_args.dataset_backbone or model_args.embedder,
+            padding_side="right",
         )
         dataset_backbone_tokenizer.pad_token = dataset_backbone_tokenizer.eos_token
         dataset_backbone_tokenizer.add_eos_token = True
@@ -185,14 +187,7 @@ def main():
             'msmarco',
         #############################################
             'nq',
-            # 'cqadupstack',
         #############################################
-            #  'bioasq', # huge (14m samples)
-            #  'robust04',   
-            #  'fever', # JSON parse error
-            #  'dbpedia-entity',
-            #  'hotpotqa',
-            # 'climate-fever', # pyarrow.lib.ArrowIndexError: array slice would exceed array length
         ]
 
     beir_dict = {
@@ -337,7 +332,7 @@ def main():
         train_dataset=train_dataset,
         # eval_dataset=eval_dataset,
         eval_dataset=None,
-        embedder_tokenizer=embedder_tokenizer,
+        dataset_backbone_tokenizer=dataset_backbone_tokenizer,
         train_sampler_fn=train_sampler_fn,
         eval_sampler_fns=eval_sampler_fns,
         retrieval_datasets=retrieval_datasets,

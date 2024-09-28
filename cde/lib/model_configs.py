@@ -41,5 +41,11 @@ MODEL_FOLDER_DICT = {
    #####################
    # LLAMA models
    "cde--llama--save--test": "/fsx-checkpoints/jxm/cde/2024-09-24-supervised-final-bge-llama-7/",
+   # this one was not bidirectional and padding was wrong
    "cde--supervised--llama-1--epoch-1": "/fsx-checkpoints/jxm/cde/2024-09-26-supervised-final-bge-llama-4-fsdp-test--epoch-1",
+   # this one was bidirectional but had messed up input_ln
+   "cde--supervised--llama-2--epoch-1": "/fsx-checkpoints/jxm/cde/2024-09-26-supervised-final-bge-llama-5-fsdp--epoch-1",
+   "cde--supervised--llama-2--epoch-2": "/fsx-checkpoints/jxm/cde/2024-09-26-supervised-final-bge-llama-5-fsdp--epoch-2",
+   # fixed input_ln
+   "cde--supervised--llama-3--epoch-1": "/fsx-checkpoints/jxm/cde/2024-09-28-supervised-final-bge-llama-8-fsdp--epoch-1",
 }
