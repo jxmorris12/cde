@@ -657,7 +657,7 @@ def process_bge_dataset_cached(dataset: datasets.Dataset):
             split = split.map(_flatten_docs)
             splits.append(split)
         dataset = datasets.concatenate_datasets(splits)
-        dataset.save_to_disk(cache_file_path)
+        dataset.save_to_disk(cache_file_path, num_proc=32)
         return dataset
         
 

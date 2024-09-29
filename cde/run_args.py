@@ -75,6 +75,12 @@ class ModelArguments:
             "choices": ["biencoder", "dataset_prefix_biencoder", "transductive", "transductive__encoder_decoder", "two_head_mlp", "contextual_cross_attention"],
         }
     )
+    pooling_strategy: str = field(
+        default="mean",
+        metadata = {
+            "choices": ["mean", "mean_weighted", "last_token"],
+        }
+    )
     limit_layers_first_stage: Optional[int] = field(
         default=None,
         metadata={
@@ -164,7 +170,7 @@ class DataArguments:
         default="gtr_base",
         metadata={
             "help": "Model to use for clustering",
-            "choices": ["bm25", "gtr_base", "bert", "sbert", "nomic"],
+            "choices": ["bm25", "gtr_base", "bert", "sbert", "mixedbread"],
         }
     )
     clustering_query_to_doc: bool = field(

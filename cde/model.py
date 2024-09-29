@@ -6,7 +6,7 @@ import torch.nn as nn
 import transformers
 
 from cde.lib.dist import print0
-from cde.lib.tensor import mean_pool, mean_pool_3d, mean_pool_weighted
+from cde.lib.tensor import mean_pool, mean_pool_3d, mean_pool_weighted, last_token_pool
 
 from cde.lib import load_embedder_and_tokenizer, ContextualModelConfig
 
@@ -346,12 +346,12 @@ class DatasetConditionedAutoregressive(transformers.PreTrainedModel, ContextualM
         # print("[2] inputs_embeds.shape =", inputs_embeds.shape)
         inputs_embeds = torch.cat((soft_prompt, inputs_embeds), dim=1) # (v, 4+b+s, d)
         # print("[3.a] inputs_embeds.shape =", inputs_embeds.shape)
-        attention_mask = torch.cat((backbone_attention_mask, attention_mask), dim=1)
+        input_attention_mask = torch.cat((backbone_attention_mask, attention_mask), dim=1)
         # print("[3.b] attention_mask.shape =", attention_mask.shape)
 
         output = self.backbone(
             inputs_embeds=inputs_embeds,
-            attention_mask=attention_mask,
+            attention_mask=input_attention_mask,
             output_hidden_states=True,
         ) # (1, 4 + b + s, d)
         # trim soft prompt
@@ -359,11 +359,13 @@ class DatasetConditionedAutoregressive(transformers.PreTrainedModel, ContextualM
         n_soft_prompt_tokens = soft_prompt.shape[1]
 
         output_vectors = last_hidden_state[:, n_soft_prompt_tokens:, :]
-        output_attention_mask = attention_mask[:, n_soft_prompt_tokens:]
+        output_attention_mask = input_attention_mask[:, n_soft_prompt_tokens:]
 
         # Take last token position
-        # output_pooled = last_token_pool(output_vectors, output_attention_mask)
-        output_pooled = mean_pool_weighted(output_vectors, output_attention_mask)
+        if vars(self.config).get("pooling_strategy") == "last_token":
+            output_pooled = last_token_pool(output_vectors, output_attention_mask)
+        else:
+            output_pooled = mean_pool_weighted(output_vectors, output_attention_mask)
 
         # average with original vectors
         # TODO: Argparse for pooling strategy.

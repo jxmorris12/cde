@@ -181,7 +181,7 @@ def embed_for_clustering(
         print(f"[embed_with_cache] returning all embeddings => avg_sim={avg_sim:.2f}")
         return query_embeddings, corpus_embeddings
     
-    elif model == "nomic":
+    elif model == "mixedbread":
         assert query_to_doc
         dataset_fingerprint = dataset._fingerprint
         num_gpus = torch.cuda.device_count()
@@ -193,11 +193,13 @@ def embed_for_clustering(
         dataset.set_format("pt")
         print("[embed_with_cache] embedding queries")
         query_embeddings = embed_with_cache(
-            "nomic-ai/nomic-embed-text-v1", 
+            "mixedbread-ai/mxbai-embed-large-v1",
             dataset_fingerprint + "_queries", 
             dataset,
             query_key,
             save_to_disk=True,
+            prefix="Represent this sentence for searching relevant passages: ",
+            normalize_embeds=True,
             batch_size=1024,
         )
         print("[embed_with_cache] halving query embeddings")
@@ -211,11 +213,13 @@ def embed_for_clustering(
         else:
             print(f"[embed_with_cache] computing corpus_embeddings num_gpus={num_gpus}")
             corpus_embeddings = embed_with_cache(
-                "nomic-ai/nomic-embed-text-v1",
-                dataset._fingerprint + "_documents", 
+            "mixedbread-ai/mxbai-embed-large-v1",
+                dataset_fingerprint + "_documents", 
                 dataset,
                 document_key,
                 save_to_disk=True,
+                prefix="",
+                normalize_embeds=True,
                 batch_size=1024,
             )
             corpus_embeddings = corpus_embeddings["embeds"].half().cpu()

@@ -159,7 +159,7 @@ TASK_LIST = (
 # TASK_LIST = TASK_LIST_PAIR_CLASSIFICATION
 # TASK_LIST = TASK_LIST_RERANKING
 # TASK_LIST = ["Touche2020"]
-TASK_LIST = ["ArguAna"]
+# TASK_LIST = ["ArguAna"]
 
 def parse_args() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Process model key")
@@ -178,7 +178,6 @@ def parse_args() -> argparse.ArgumentParser:
     return parser.parse_args()
 
 
-NORMALIZE_EMBEDS = False
 def main():
     args = parse_args()
     model_folder = MODEL_FOLDER_DICT[args.model_key]
@@ -199,9 +198,9 @@ def main():
         model_name_or_path=model_name_or_path,
         encoder=model.second_stage_model,
         max_seq_length=model.config.max_seq_length,
-        query_prefix="",     # Set later
-        document_prefix="",  # Set later
-        normalize_embeds=NORMALIZE_EMBEDS,
+        query_prefix="",        # Set later
+        document_prefix="",     # Set later
+        normalize_embeds=False, # Set later
         default_doc_prefix=True,
     )
     first_stage_tokenizer = transformers.AutoTokenizer.from_pretrained(model.config.embedder)
@@ -291,13 +290,13 @@ def main():
         # breakpoint()
         results = evaluation.run(
             mteb_encoder, 
-            output_folder=os.path.join("results_mteb", "test", args.model_key),
+            output_folder=os.path.join("results_mteb", args.model_key),
             corpus_chunk_size=500_000,
             verbosity=2,
             eval_splits=[split],
             # encode_kwargs={"batch_size": args.batch_size, "num_workers": 8 },
-            encode_kwargs={"batch_size": args.batch_size, "num_workers": 0},
-            # encode_kwargs={"batch_size": args.batch_size, "num_workers": 1},
+            # encode_kwargs={"batch_size": args.batch_size, "num_workers": 0},
+            encode_kwargs={"batch_size": args.batch_size, "num_workers": 1},
         )
         print(task)
         print("\t", results)

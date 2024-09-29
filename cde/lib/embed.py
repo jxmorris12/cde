@@ -55,7 +55,7 @@ def embed_dataloader(
         elif hasattr(outputs, 'last_hidden_state'):
             embeds = mean_pool(
                 hidden_states=outputs.last_hidden_state,
-                attention_mask=batch_dict["attention_mask"]
+                attention_mask=batch_dict['attention_mask']
             )
         else:
             # already pooled
@@ -131,10 +131,10 @@ class DenseEncoder(torch.nn.Module):
             model_name_or_path,
             padding_side="right",
         )
-        self.tokenizer.pad_token = self.tokenizer.eos_token
+        if not (self.tokenizer.pad_token) and self.tokenizer.bos_token:
+            self.tokenizer.pad_token = self.tokenizer.bos_token
         self.tokenizer.add_eos_token = True
         self.gpu_count = torch.cuda.device_count()
-
         self.model_is_on_device = False
         self.max_length = max_seq_length
         self.query_prefix = query_prefix
@@ -224,7 +224,7 @@ class DenseEncoder(torch.nn.Module):
             effective_batch_size = batch_size
         effective_batch_size = max(1, effective_batch_size)
 
-        print(f"[DenseEncoder] created dataloader with num_workers={num_workers}, effective_batch_size={effective_batch_size}, len(dataset)={len_dataset}")
+        print(f"[DenseEncoder] created dataloader with {num_workers} workers, effective_batch_size={effective_batch_size}, len(dataset)={len_dataset}")
         return torch.utils.data.DataLoader(
             dataset,
             batch_size=effective_batch_size,
@@ -309,6 +309,8 @@ def embed_with_cache(
         batch_size: int = 4096,
         max_seq_length: int = 512,
         model: Optional[DenseEncoder] = None,
+        normalize_embeds: bool = False,
+        prefix: str = "",
     ) -> datasets.Dataset:
     embedder_cache_path = model_name.replace('/', '__')
     cache_folder = os.path.join(get_cde_cache_dir(), 'corpus_embeddings', embedder_cache_path)
@@ -328,8 +330,18 @@ def embed_with_cache(
 
     print(f"[embed_with_cache] encoding {len(d)} with batch size {batch_size}")
     if model is None:
-        model = DenseEncoder(model_name, max_seq_length=max_seq_length)
-    embeddings = model.encode(d_subset, col, batch_size=batch_size, output_device="cpu")
+        model = DenseEncoder(
+            model_name, 
+            max_seq_length=max_seq_length,
+            normalize_embeds=normalize_embeds,
+        )
+    embeddings = model.encode(
+        d_subset, 
+        col, 
+        batch_size=batch_size, 
+        output_device="cpu",
+        prefix=prefix,
+    )
 
     print(f"[embed_with_cache] creating datasets")
 

@@ -138,17 +138,13 @@ def main():
     model_args.transductive_corpus_size = training_args.transductive_corpus_size
     model_config = ContextualModelConfig(**vars(model_args))
     model_cls = get_model_class(model_args.architecture)
-    if model_args.architecture in ['biencoder', 'dataset_prefix_biencoder', 'contextual_cross_attention']:
+    if model_args.architecture in ["biencoder", "dataset_prefix_biencoder"]:
         dataset_backbone_tokenizer = embedder_tokenizer
-        dataset_backbone_tokenizer.pad_token = dataset_backbone_tokenizer.eos_token
-        dataset_backbone_tokenizer.add_eos_token = True
     else:
         dataset_backbone_tokenizer = transformers.AutoTokenizer.from_pretrained(
             model_args.dataset_backbone or model_args.embedder,
             padding_side="right",
         )
-        dataset_backbone_tokenizer.pad_token = dataset_backbone_tokenizer.eos_token
-        dataset_backbone_tokenizer.add_eos_token = True
         # if training_args.use_lora:
         #     from peft import LoraConfig, get_peft_model
         #     lora_config = LoraConfig(
@@ -163,6 +159,11 @@ def main():
         #         inference_mode=False
         #     )
         #     dataset_backbone = get_peft_model(dataset_backbone, lora_config)
+    if not (dataset_backbone_tokenizer.pad_token) and dataset_backbone_tokenizer.bos_token:
+        dataset_backbone_tokenizer.pad_token = dataset_backbone_tokenizer.bos_token
+        print(f"Set pad token to bos token: {dataset_backbone_tokenizer.pad_token}")   
+    dataset_backbone_tokenizer.add_eos_token = True
+
     model = model_cls(
         config=model_config,
     )
