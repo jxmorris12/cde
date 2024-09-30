@@ -72,6 +72,14 @@ def load_trainer_from_checkpoint_and_args(
         level=logging.WARNING
     )
     embedder_tokenizer = transformers.AutoTokenizer.from_pretrained(model_args.embedder)
+    dataset_backbone_tokenizer = transformers.AutoTokenizer.from_pretrained(
+            model_args.dataset_backbone or model_args.embedder,
+            padding_side="right",
+        )
+    if not (dataset_backbone_tokenizer.pad_token) and dataset_backbone_tokenizer.bos_token:
+        dataset_backbone_tokenizer.pad_token = dataset_backbone_tokenizer.bos_token
+        print(f"Set pad token to bos token: {dataset_backbone_tokenizer.pad_token}")   
+    dataset_backbone_tokenizer.add_eos_token = True
     beir_dataset_names = beir_dataset_names or []
     if training_args.tiny_debug: 
         beir_dataset_names = [ 'quora' ]
@@ -107,7 +115,7 @@ def load_trainer_from_checkpoint_and_args(
         model_args=model_args,
         train_dataset=None,
         eval_dataset=None,
-        embedder_tokenizer=embedder_tokenizer,
+        dataset_backbone_tokenizer=dataset_backbone_tokenizer,
         train_sampler_fn=None,
         eval_sampler_fns={},
         retrieval_datasets=retrieval_datasets,

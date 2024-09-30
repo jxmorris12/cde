@@ -279,7 +279,7 @@ class CustomTrainer(transformers.Trainer, TrainerNegativeFilterMixin):
     def _is_main_worker(self) -> bool:
         return (
             (self.args.local_rank <= 0) and 
-            (int(os.environ.get("LOCAL_RANK", 0)) <= 0) and
+            # (int(os.environ.get("LOpCAL_RANK", 0)) <= 0) and
             get_rank() == 0
         )
 
@@ -340,6 +340,7 @@ class CustomTrainer(transformers.Trainer, TrainerNegativeFilterMixin):
         # self.control.should_evaluate = True  #########
         ##############################################
         # print("[2] training_step accelerator.backward", get_rank())
+        # breakpoint()
         if not self.use_gc:
             self.accelerator.backward(loss)
         self._log_grad_norm_metrics(model=model)

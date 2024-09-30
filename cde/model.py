@@ -242,10 +242,7 @@ class BiEncoder(transformers.PreTrainedModel):
             )
 
             attention_mask = attention_mask.reshape((batch_size, self.transductive_tokens_per_document, -1))
-            if self.pooling_strategy == "mean":
-                document_embeddings = mean_pool_3d(outputs, attention_mask)
-            else:
-                document_embeddings = document_embeddings.max(dim=1)
+            document_embeddings = mean_pool_3d(outputs, attention_mask)
             
             document_embeddings = document_embeddings.reshape((batch_size, self.transductive_tokens_per_document, output_dim))
         else:
@@ -276,7 +273,7 @@ class DatasetConditionedAutoregressive(transformers.PreTrainedModel, ContextualM
         self.backbone_hidden_size = self.backbone.config.hidden_size
         self.hidden_size = first_stage_hidden_size # Input token size
         self.contextual_init()
-        disable_causality(self.backbone)
+        # disable_causality(self.backbone)
         
         self.input_ln = torch.nn.LayerNorm(
             self.backbone_hidden_size, 
@@ -364,11 +361,12 @@ class DatasetConditionedAutoregressive(transformers.PreTrainedModel, ContextualM
         # Take last token position
         if vars(self.config).get("pooling_strategy") == "last_token":
             output_pooled = last_token_pool(output_vectors, output_attention_mask)
+        elif vars(self.config).get("pooling_strategy") == "mean":
+            output_pooled = mean_pool(output_vectors, output_attention_mask)
         else:
             output_pooled = mean_pool_weighted(output_vectors, output_attention_mask)
 
         # average with original vectors
-        # TODO: Argparse for pooling strategy.
         output = self.output_projection(output_pooled) # (b, 2d) -> (b, d)
 
         if output_hidden_states:
@@ -390,10 +388,6 @@ class DatasetConditionedBiencoder(transformers.PreTrainedModel, ContextualModelM
         self.backbone = dataset_backbone
         self.hidden_size = self.backbone.config.hidden_size
         self.hidden_size = dataset_backbone.config.hidden_size
-        # self.input_ln = torch.nn.LayerNorm(
-        #     self.hidden_size, 
-        #     eps=self.backbone.config.layer_norm_epsilon
-        # )
         self.contextual_init()
         self._shift_rotary_embedding()
                 
@@ -424,24 +418,19 @@ class DatasetConditionedBiencoder(transformers.PreTrainedModel, ContextualModelM
             output_hidden_states: bool = False,
             null_dataset_embedding: bool = False,
         ) -> torch.Tensor:
-        # print(f"[DatasetConditionedBiencoder - 0] input_ids.shape => {input_ids.shape} // dataset_embeddings.shape =", dataset_embeddings.shape)
         soft_prompt = self._prepare_dataset_embeddings(
             input_ids=input_ids,
             dataset_embeddings=dataset_embeddings,
             null_dataset_embedding=null_dataset_embedding,
         )
-        # print(f"[DatasetConditionedBiencoder - 1] soft_prompt.shape => {soft_prompt.shape}")
         backbone_attention_mask = torch.ones(
             soft_prompt.shape[0:2],
             dtype=torch.long,
             device=soft_prompt.device,
         )
         inputs_embeds = self.backbone.embeddings(input_ids) # (b, s) -> (b, s, d)
-        # print("[2] inputs_embeds.shape =", inputs_embeds.shape)
         inputs_embeds = torch.cat((soft_prompt, inputs_embeds), dim=1) # (v, 4+b+s, d)
-        # print("[3.a] inputs_embeds.shape =", inputs_embeds.shape)
         attention_mask = torch.cat((backbone_attention_mask, attention_mask), dim=1)
-        # print("[3.b] attention_mask.shape =", attention_mask.shape)
         output = self.backbone(
             inputs_embeds=inputs_embeds,
             attention_mask=attention_mask,
@@ -451,12 +440,10 @@ class DatasetConditionedBiencoder(transformers.PreTrainedModel, ContextualModelM
 
         # use only these tokens
         n_soft_prompt_tokens = soft_prompt.shape[1]
-        # print("n_soft_prompt_tokens =", n_soft_prompt_tokens)
 
         output_vectors = output.last_hidden_state[:, n_soft_prompt_tokens:, :]
         output_attention_mask = attention_mask[:, n_soft_prompt_tokens:]
 
-        # print("pooling output_vectors.shape =", output_vectors.shape, "and output_attention_mask.shape =", output_attention_mask.shape)
         output_pooled = mean_pool(output_vectors, output_attention_mask)
 
         # average with original vectors
@@ -536,7 +523,7 @@ class DatasetTransformer(transformers.PreTrainedModel):
         ):
         super().__init__(config=config)
         dataset_backbone, _ = load_embedder_and_tokenizer(
-            config.dataset_backbone or config.embedder
+            vars(config).get("dataset_backbone", config.embedder)
         )
 
         if config.limit_layers:

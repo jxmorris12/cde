@@ -129,13 +129,6 @@ class ModelArguments:
             "help": "Number of tokens per document for transductive model"
         }
     )
-    biencoder_pooling_strategy: str = field(
-        default="mean",
-        metadata={
-            "help": "Pooling strategy for biencoder",
-            "choices": ["mean", "max"]
-        }
-    )
     transductive_tie_token_embeddings: bool = field(
         default=False,
         metadata={
@@ -426,10 +419,6 @@ class TrainingArguments(transformers.TrainingArguments):
     num_eval_rerank_samples: int = field(
         default=64,
         metadata={"help": "Number of samples to rerank during eval"}
-    )
-    use_lora: bool = field(
-        default=False,
-        metadata={"help": "Whether to use LoRA for training"}
     )
 
     def __setattr__(self, name, value):

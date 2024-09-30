@@ -223,16 +223,16 @@ class TokenizerMixin:
             ex_col = ex[col]
             
             if isinstance(ex_col, list):
-                tokenized_col = tokenize_fn([s[:max_num_chars] for s in ex_col])
+                tokenized_col = tokenize_fn([s[:max_num_chars] + self.text_suffix for s in ex_col])
                 ex[f'{col}_input_ids'] = tokenized_col.input_ids
                 ex[f'{col}_attention_mask'] = tokenized_col.attention_mask
 
                 if self.first_stage_tokenizer:
-                    tokenized_col = dataset_tokenize_fn([s[:max_num_chars] for s in ex_col])
+                    tokenized_col = dataset_tokenize_fn([s[:max_num_chars] + self.text_suffix for s in ex_col])
                     ex[f'{col}_input_ids_first_stage'] = tokenized_col.input_ids
                     ex[f'{col}_attention_mask_first_stage'] = tokenized_col.attention_mask
             else:
-                ex_col = ex_col[:max_num_chars]
+                ex_col = ex_col[:max_num_chars] + self.text_suffix
                 tokenized_col = tokenize_fn(ex_col)
                 ex[f'{col}_input_ids'] = tokenized_col.input_ids[0]
                 ex[f'{col}_attention_mask'] = tokenized_col.attention_mask[0]
@@ -249,7 +249,7 @@ class FineWeb(torch.utils.data.Dataset, TokenizerMixin):
     max_seq_length: int
     num_hard_negatives: int
     use_prefix: bool
-    def __init__(self, tokenizer: transformers.AutoTokenizer, max_seq_length: int, tiny: bool = False):
+    def __init__(self, tokenizer: transformers.AutoTokenizer, max_seq_length: int, tiny: bool = False, text_suffix: str = ""):
         self.dataset = datasets.load_dataset(
             "HuggingFaceFW/fineweb", ("sample-10BT" if tiny else "sample-350BT"),
             keep_in_memory=False,
@@ -260,6 +260,7 @@ class FineWeb(torch.utils.data.Dataset, TokenizerMixin):
         self.subdomain_idxs = { 0: range(len(self.dataset)) }
         self.tokenizer = tokenizer
         self.max_seq_length = max_seq_length
+        self.text_suffix = text_suffix
 
         self._query_input_ids_key = "text"
         self._document_input_ids_key = "text"
@@ -301,7 +302,7 @@ class FineWebEdu(torch.utils.data.Dataset, TokenizerMixin):
     max_seq_length: int
     num_hard_negatives: int
     use_prefix: bool
-    def __init__(self, tokenizer: transformers.AutoTokenizer, max_seq_length: int, tiny: bool = False):
+    def __init__(self, tokenizer: transformers.AutoTokenizer, max_seq_length: int, tiny: bool = False, text_suffix: str = ""):
         self.dataset = datasets.load_dataset(
             "HuggingFaceFW/fineweb", ("sample-10BT" if tiny else "sample-350BT"),
             keep_in_memory=False,
@@ -312,6 +313,7 @@ class FineWebEdu(torch.utils.data.Dataset, TokenizerMixin):
         self.subdomain_idxs = { 0: range(len(self.dataset)) }
         self.tokenizer = tokenizer
         self.max_seq_length = max_seq_length
+        self.text_suffix = text_suffix
 
         self._query_input_ids_key = "text"
         self._document_input_ids_key = "text"
@@ -356,7 +358,9 @@ class NomicSupervisedDataset(torch.utils.data.Dataset, TokenizerMixin):
             self, 
             tokenizer: transformers.AutoTokenizer, 
             first_stage_tokenizer: Optional[transformers.AutoTokenizer],
-            max_seq_length: int, num_hard_negatives: int = 0, use_prefix: bool = False
+            max_seq_length: int,
+            text_suffix: str = "",
+            num_hard_negatives: int = 0, use_prefix: bool = False
         ):
         self.dataset = datasets.load_dataset(
             "nomic-ai/nomic_embed_supervised",
@@ -368,6 +372,7 @@ class NomicSupervisedDataset(torch.utils.data.Dataset, TokenizerMixin):
         self.tokenizer = tokenizer
         self.first_stage_tokenizer = first_stage_tokenizer
         self.max_seq_length = max_seq_length
+        self.text_suffix = text_suffix
         self.num_hard_negatives = num_hard_negatives
 
         current_file_directory = os.path.dirname(os.path.abspath(__file__))
@@ -504,7 +509,9 @@ class BGEDataset(torch.utils.data.Dataset, TokenizerMixin):
             self, 
             tokenizer: transformers.AutoTokenizer, 
             first_stage_tokenizer: Optional[transformers.AutoTokenizer], 
-            max_seq_length: int, num_hard_negatives: int = 0, use_prefix: bool = False
+            max_seq_length: int, 
+            text_suffix: str = "",
+            num_hard_negatives: int = 0, use_prefix: bool = False,
         ):
         dataset = datasets.load_dataset(
             "cfli/bge-full-data",
@@ -515,6 +522,7 @@ class BGEDataset(torch.utils.data.Dataset, TokenizerMixin):
         self.tokenizer = tokenizer
         self.first_stage_tokenizer = first_stage_tokenizer
         self.max_seq_length = max_seq_length
+        self.text_suffix = text_suffix
         self.num_hard_negatives = num_hard_negatives
         self.use_prefix = use_prefix
         
@@ -670,7 +678,9 @@ class NomicUnsupervisedDataset(torch.utils.data.Dataset, TokenizerMixin):
     def __init__(self, 
             tokenizer: transformers.AutoTokenizer, 
             first_stage_tokenizer: Optional[transformers.AutoTokenizer],
-            max_seq_length: int, use_prefix: bool = False, train_subdomain_key: Optional[str] = None
+            max_seq_length: int, 
+            text_suffix: str = "",
+            use_prefix: bool = False, train_subdomain_key: Optional[str] = None
         ):
         print0("[NomicUnsupervisedDataset] loading dataset")
         self.dataset = (
@@ -687,6 +697,7 @@ class NomicUnsupervisedDataset(torch.utils.data.Dataset, TokenizerMixin):
         self.tokenizer = tokenizer
         self.first_stage_tokenizer = first_stage_tokenizer
         self.max_seq_length = max_seq_length
+        self.text_suffix = text_suffix
 
         current_file_directory = os.path.dirname(os.path.abspath(__file__))
         yaml_path = os.path.join(current_file_directory, "config", "nomic_unsupervised.yaml")

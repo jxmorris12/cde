@@ -541,7 +541,6 @@ class GradCache:
                 no_sync_func for _ in range(len(model_inputs) - 1)
             ] + [nullcontext]
         else:
-            print("not no_sync")
             sync_contexts = [nullcontext for _ in range(len(first_stage_input_chunks))]
         
         # TODO: There's a *2 here too; get that from argparsed value once we add argparse

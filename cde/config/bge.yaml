@@ -8,19 +8,22 @@ datasets:
   - name: "arguana"
     query_prefix: "search_query"
     document_prefix: "search_document"
-  - name: "arxiv_title" # ?
+  - name: "arxiv_title"
+    query_prefix: "clustering"
+    document_prefix: "clustering"
+  - name: "arXiv_abstract"
     query_prefix: "clustering"
     document_prefix: "clustering"
   - name: "banking_classification"
     query_prefix: "classification"
     document_prefix: "classification"
-  - name: "biorxiv_abstract" # ?
+  - name: "biorxiv_abstract"
     query_prefix: "clustering"
     document_prefix: "clustering"
-  - name: "biorxiv_title" # ?
+  - name: "biorxiv_title"
     query_prefix: "clustering"
     document_prefix: "clustering"
-  - name: "eli5" # ?
+  - name: "eli5"
     query_prefix: "search_query"
     document_prefix: "search_document"
   - name: "emotion_classification"

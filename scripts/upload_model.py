@@ -16,10 +16,9 @@ def main():
     args = parser.parse_args()
 
     model = analyze_utils.load_model_from_alias(args.alias)
-    print(model)
-    print("Taking second stage...")
-    # model = model.second_stage_model
-    model = model.first_stage_model
+    
+    model.config.__class__.register_for_auto_class()
+    model.__class__.register_for_auto_class("AutoModel")
     model.push_to_hub(args.hf_alias)
 
 

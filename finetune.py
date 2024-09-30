@@ -145,20 +145,6 @@ def main():
             model_args.dataset_backbone or model_args.embedder,
             padding_side="right",
         )
-        # if training_args.use_lora:
-        #     from peft import LoraConfig, get_peft_model
-        #     lora_config = LoraConfig(
-        #         r=32,
-        #         lora_alpha=64,
-        #         # target_modules="q_proj,k_proj,v_proj,o_proj,down_proj,up_proj,gate_proj",
-        #         target_modules=["q_proj", "k_proj", "v_proj", "o_proj", "down_proj", "up_proj", "gate_proj"],
-        #         # target_modules="q_proj,k_proj,v_proj,o_proj,down_proj,up_proj,gate_proj",
-        #         lora_dropout=0.1,
-        #         init_lora_weights="gaussian",
-        #         use_dora=True,
-        #         inference_mode=False
-        #     )
-        #     dataset_backbone = get_peft_model(dataset_backbone, lora_config)
     if not (dataset_backbone_tokenizer.pad_token) and dataset_backbone_tokenizer.bos_token:
         dataset_backbone_tokenizer.pad_token = dataset_backbone_tokenizer.bos_token
         print(f"Set pad token to bos token: {dataset_backbone_tokenizer.pad_token}")   
@@ -203,6 +189,19 @@ def main():
         **{f"BeIR/{k}": v for k,v in beir_dict.items()}
     }
 
+    if model_args.autoregressive_backbone:
+        embed_eos = "</e>"
+        if embed_eos in dataset_backbone_tokenizer.vocab:
+            logger.info("Embed eos token already in vocab: %s", embed_eos)
+        else:
+            logger.info("Adding embed eos token to vocab: %s", embed_eos)
+            dataset_backbone_tokenizer.add_tokens([embed_eos], special_tokens=True)
+            model.second_stage_model.backbone.resize_token_embeddings(len(dataset_backbone_tokenizer))
+        text_suffix = embed_eos
+        print0(f"[*] Added text_suffix={text_suffix}, new len(tokenizer.vocab)={len(dataset_backbone_tokenizer)}")
+    else:
+        text_suffix = ""
+
     if data_args.dataset == 'nomic_unsupervised':
         train_dataset = NomicUnsupervisedDataset(
             tokenizer=dataset_backbone_tokenizer,
@@ -210,6 +209,7 @@ def main():
             max_seq_length=model_args.max_seq_length,
             use_prefix=data_args.use_prefix,
             train_subdomain_key=data_args.train_subdomain_key,
+            text_suffix=text_suffix,
         )
         eval_dataset = None
         # Need to tokenize and collate for this dataset
@@ -221,6 +221,7 @@ def main():
             num_hard_negatives=data_args.num_hard_negatives,
             max_seq_length=model_args.max_seq_length,
             use_prefix=data_args.use_prefix,
+            text_suffix=text_suffix,
         )
         eval_dataset = None
         collator_cls = TokenizedCollator
@@ -231,13 +232,13 @@ def main():
             num_hard_negatives=data_args.num_hard_negatives,
             max_seq_length=model_args.max_seq_length,
             use_prefix=data_args.use_prefix,
+            text_suffix=text_suffix,
         )
         eval_dataset = None
         collator_cls = TokenizedCollator
     else:
         raise ValueError(f'Unsupported dataset {data_args.dataset}')
     
-
     if training_args.ddp_share_negatives_between_gpus:
         effective_train_batch_size = (training_args.per_device_train_batch_size * get_world_size())
     else:
