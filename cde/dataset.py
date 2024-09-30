@@ -228,7 +228,7 @@ class TokenizerMixin:
                 ex[f'{col}_attention_mask'] = tokenized_col.attention_mask
 
                 if self.first_stage_tokenizer:
-                    tokenized_col = dataset_tokenize_fn([s[:max_num_chars] + self.text_suffix for s in ex_col])
+                    tokenized_col = dataset_tokenize_fn([s[:max_num_chars]for s in ex_col])
                     ex[f'{col}_input_ids_first_stage'] = tokenized_col.input_ids
                     ex[f'{col}_attention_mask_first_stage'] = tokenized_col.attention_mask
             else:
@@ -238,7 +238,8 @@ class TokenizerMixin:
                 ex[f'{col}_attention_mask'] = tokenized_col.attention_mask[0]
 
                 if self.first_stage_tokenizer:
-                    tokenized_col = dataset_tokenize_fn(ex_col)
+                    ex_col_no_suffix = ex_col[:max_num_chars]
+                    tokenized_col = dataset_tokenize_fn(ex_col_no_suffix)
                     ex[f'{col}_input_ids_first_stage'] = tokenized_col.input_ids[0]
                     ex[f'{col}_attention_mask_first_stage'] = tokenized_col.attention_mask[0]
         return ex

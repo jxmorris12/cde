@@ -8,7 +8,6 @@ MODEL_FOLDER_DICT = {
    "cde--supervised--nomic-1": "/fsx-checkpoints/jxm/cde/2024-09-18-supervised-final--epoch-5",
    "cde--small-v1": "/fsx-checkpoints/jxm/cde/2024-09-18-supervised-final-bge--epoch-4",
    ######################
-   # Ran below supervised exp and found epoch 5 is highest MTEB, so using that going forward.
    "cde--supervised--nomic-1--epoch-1": "/fsx-checkpoints/jxm/cde/2024-09-18-supervised-final--epoch-1",
    "cde--supervised--nomic-1--epoch-2": "/fsx-checkpoints/jxm/cde/2024-09-18-supervised-final--epoch-2",
    "cde--supervised--nomic-1--epoch-3": "/fsx-checkpoints/jxm/cde/2024-09-18-supervised-final--epoch-3",
@@ -27,7 +26,6 @@ MODEL_FOLDER_DICT = {
    "cde--supervised--nomic-3--epoch-2": "/fsx-checkpoints/jxm/cde/2024-09-18-supervised-final-bge-big-batch-2--epoch-2",
    "cde--supervised--nomic-3--epoch-3": "/fsx-checkpoints/jxm/cde/2024-09-18-supervised-final-bge-big-batch-2--epoch-3",
    "cde--supervised--nomic-3--epoch-4": "/fsx-checkpoints/jxm/cde/2024-09-18-supervised-final-bge-big-batch-2--epoch-4",
-
    "cde--supervised--nomic-3--epoch-5": "/fsx-checkpoints/jxm/cde/2024-09-18-supervised-final-bge-big-batch-2--epoch-5",
    #####################
    # Hardest setting for BGE. (4096 batch, 1 hard negative)
@@ -36,8 +34,6 @@ MODEL_FOLDER_DICT = {
    "cde--supervised--nomic-4--epoch-3": "/fsx-checkpoints/jxm/cde/2024-09-21-supervised-final-bge-big-batch-3--epoch-3",
    "cde--supervised--nomic-4--epoch-4": "/fsx-checkpoints/jxm/cde/2024-09-21-supervised-final-bge-big-batch-3--epoch-4",
    "cde--supervised--nomic-4--epoch-5": "/fsx-checkpoints/jxm/cde/2024-09-21-supervised-final-bge-big-batch-3--epoch-5",
-
-
    #####################
    # LLAMA models
    "cde--llama--save--test": "/fsx-checkpoints/jxm/cde/2024-09-24-supervised-final-bge-llama-7/",

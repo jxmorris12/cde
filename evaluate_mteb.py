@@ -193,7 +193,11 @@ def main():
     torch.cuda.empty_cache()
 
     datasets.enable_caching()
-    model_name_or_path = model.config.dataset_backbone or model.config.embedder
+
+    if hasattr(model.config, "dataset_backbone"):
+        model_name_or_path = model.config.dataset_backbone
+    else:
+        model_name_or_path = model.config.embedder
     mteb_encoder = DenseEncoder(
         model_name_or_path=model_name_or_path,
         encoder=model.second_stage_model,

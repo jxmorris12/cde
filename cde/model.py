@@ -1,4 +1,4 @@
-from typing import Dict, Optional, Union
+from typing import Optional
 
 import copy
 import torch
@@ -304,7 +304,7 @@ class DatasetConditionedAutoregressive(transformers.PreTrainedModel, ContextualM
     def _shift_rotary_embedding(self) -> None:
         disable_transductive_rotary_embedding = vars(self.config).get("disable_transductive_rotary_embedding", True)
         # TODO: Can we do this for LLAMA?
-        print("Warning: Positional embedding disabling not implemented for LLAMA.")
+        print0("Warning: Positional embedding disabling not implemented for LLAMA.")
     
     def forward(
             self, 
@@ -345,7 +345,6 @@ class DatasetConditionedAutoregressive(transformers.PreTrainedModel, ContextualM
         # print("[3.a] inputs_embeds.shape =", inputs_embeds.shape)
         input_attention_mask = torch.cat((backbone_attention_mask, attention_mask), dim=1)
         # print("[3.b] attention_mask.shape =", attention_mask.shape)
-
         output = self.backbone(
             inputs_embeds=inputs_embeds,
             attention_mask=input_attention_mask,
@@ -523,7 +522,7 @@ class DatasetTransformer(transformers.PreTrainedModel):
         ):
         super().__init__(config=config)
         dataset_backbone, _ = load_embedder_and_tokenizer(
-            vars(config).get("dataset_backbone", config.embedder)
+            vars(config).get("dataset_backbone") or config.embedder
         )
 
         if config.limit_layers:

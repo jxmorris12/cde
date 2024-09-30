@@ -450,7 +450,7 @@ class GradCache:
                 first_stage_input_chunks_tqdm,
                 desc="computing first stage outputs",
                 leave=False,
-                colour="pink"
+                colour="MAGENTA"
             )
 
         first_stage_rnd_states = []

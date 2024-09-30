@@ -111,9 +111,12 @@ def main():
     os.environ["WANDB__SERVICE_WAIT"] = "30"
     os.environ["TOKENIZERS_PARALLELISM"] = "0"
 
-    # Higher DDP log level.
+    # Higher DDP/FSDP log levels; optional.
     # os.environ["TORCH_CPP_LOG_LEVEL"] = "INFO"
     # os.environ["TORCH_DISTRIBUTED_DEBUG"] = "DETAIL"
+    # os.environ["NCCL_DEBUG"] = "INFO"
+    # os.environ["NCCL_DEBUG_SUBSYS"] = "INIT,COLL"
+
 
     # transformers.logging.set_verbosity_error()
     # datasets.logging.set_verbosity_error()
@@ -307,7 +310,8 @@ def main():
             project="tti-nomic-7",
             name=wandb_run_id,
             resume=False, # (checkpoint is not None),
-    )
+            settings=wandb.Settings(symlink=False),
+        )
         wandb.config.update(
             {
                 **vars(model_args),
