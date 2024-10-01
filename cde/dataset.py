@@ -223,7 +223,7 @@ class TokenizerMixin:
             ex_col = ex[col]
             
             if isinstance(ex_col, list):
-                tokenized_col = tokenize_fn([s[:max_num_chars] + self.text_suffix for s in ex_col])
+                tokenized_col = tokenize_fn([s[:max_num_chars] for s in ex_col])
                 ex[f'{col}_input_ids'] = tokenized_col.input_ids
                 ex[f'{col}_attention_mask'] = tokenized_col.attention_mask
 
@@ -232,7 +232,7 @@ class TokenizerMixin:
                     ex[f'{col}_input_ids_first_stage'] = tokenized_col.input_ids
                     ex[f'{col}_attention_mask_first_stage'] = tokenized_col.attention_mask
             else:
-                ex_col = ex_col[:max_num_chars] + self.text_suffix
+                ex_col = ex_col[:max_num_chars]
                 tokenized_col = tokenize_fn(ex_col)
                 ex[f'{col}_input_ids'] = tokenized_col.input_ids[0]
                 ex[f'{col}_attention_mask'] = tokenized_col.attention_mask[0]
@@ -250,7 +250,7 @@ class FineWeb(torch.utils.data.Dataset, TokenizerMixin):
     max_seq_length: int
     num_hard_negatives: int
     use_prefix: bool
-    def __init__(self, tokenizer: transformers.AutoTokenizer, max_seq_length: int, tiny: bool = False, text_suffix: str = ""):
+    def __init__(self, tokenizer: transformers.AutoTokenizer, max_seq_length: int, tiny: bool = False):
         self.dataset = datasets.load_dataset(
             "HuggingFaceFW/fineweb", ("sample-10BT" if tiny else "sample-350BT"),
             keep_in_memory=False,
@@ -261,7 +261,6 @@ class FineWeb(torch.utils.data.Dataset, TokenizerMixin):
         self.subdomain_idxs = { 0: range(len(self.dataset)) }
         self.tokenizer = tokenizer
         self.max_seq_length = max_seq_length
-        self.text_suffix = text_suffix
 
         self._query_input_ids_key = "text"
         self._document_input_ids_key = "text"
@@ -303,7 +302,7 @@ class FineWebEdu(torch.utils.data.Dataset, TokenizerMixin):
     max_seq_length: int
     num_hard_negatives: int
     use_prefix: bool
-    def __init__(self, tokenizer: transformers.AutoTokenizer, max_seq_length: int, tiny: bool = False, text_suffix: str = ""):
+    def __init__(self, tokenizer: transformers.AutoTokenizer, max_seq_length: int, tiny: bool = False):
         self.dataset = datasets.load_dataset(
             "HuggingFaceFW/fineweb", ("sample-10BT" if tiny else "sample-350BT"),
             keep_in_memory=False,
@@ -314,7 +313,6 @@ class FineWebEdu(torch.utils.data.Dataset, TokenizerMixin):
         self.subdomain_idxs = { 0: range(len(self.dataset)) }
         self.tokenizer = tokenizer
         self.max_seq_length = max_seq_length
-        self.text_suffix = text_suffix
 
         self._query_input_ids_key = "text"
         self._document_input_ids_key = "text"
@@ -360,7 +358,6 @@ class NomicSupervisedDataset(torch.utils.data.Dataset, TokenizerMixin):
             tokenizer: transformers.AutoTokenizer, 
             first_stage_tokenizer: Optional[transformers.AutoTokenizer],
             max_seq_length: int,
-            text_suffix: str = "",
             num_hard_negatives: int = 0, use_prefix: bool = False
         ):
         self.dataset = datasets.load_dataset(
@@ -373,7 +370,6 @@ class NomicSupervisedDataset(torch.utils.data.Dataset, TokenizerMixin):
         self.tokenizer = tokenizer
         self.first_stage_tokenizer = first_stage_tokenizer
         self.max_seq_length = max_seq_length
-        self.text_suffix = text_suffix
         self.num_hard_negatives = num_hard_negatives
 
         current_file_directory = os.path.dirname(os.path.abspath(__file__))
@@ -498,7 +494,6 @@ class NomicSupervisedDataset(torch.utils.data.Dataset, TokenizerMixin):
             "negative_document_idx": [query_id] * len(negative_documents),
             ######################################################################
         })
-
         ######################################################################
         if "query_embedding" in ex: out_ex["query_embedding"] = ex["query_embedding"]
         if "document_embedding" in ex: out_ex["document_embedding"] = ex["query_embedding"]
@@ -511,8 +506,9 @@ class BGEDataset(torch.utils.data.Dataset, TokenizerMixin):
             tokenizer: transformers.AutoTokenizer, 
             first_stage_tokenizer: Optional[transformers.AutoTokenizer], 
             max_seq_length: int, 
-            text_suffix: str = "",
-            num_hard_negatives: int = 0, use_prefix: bool = False,
+            num_hard_negatives: int = 0, 
+            use_prefix: bool = False,
+            use_short_prefix: bool = True,
         ):
         dataset = datasets.load_dataset(
             "cfli/bge-full-data",
@@ -523,9 +519,9 @@ class BGEDataset(torch.utils.data.Dataset, TokenizerMixin):
         self.tokenizer = tokenizer
         self.first_stage_tokenizer = first_stage_tokenizer
         self.max_seq_length = max_seq_length
-        self.text_suffix = text_suffix
         self.num_hard_negatives = num_hard_negatives
         self.use_prefix = use_prefix
+        self.use_short_prefix = use_short_prefix
         
         current_file_directory = os.path.dirname(os.path.abspath(__file__))
         yaml_path = os.path.join(current_file_directory, "config", "bge.yaml")
@@ -589,10 +585,14 @@ class BGEDataset(torch.utils.data.Dataset, TokenizerMixin):
     def __getitem__(self, query_id: int) -> Dict[str, torch.Tensor]: 
         ex = self.dataset[query_id]
         if self.use_prefix:
-            query_prefix = self.get_query_prefix(ex["dataset"])
-            document_prefix = self.get_document_prefix(ex["dataset"])
-            query_prefix = f"{query_prefix}: "
-            document_prefix = f"{document_prefix}: "
+            if self.use_short_prefix:
+                query_prefix = self.get_query_prefix(ex["dataset"])
+                document_prefix = self.get_document_prefix(ex["dataset"])
+                query_prefix = f"{query_prefix}: "
+                document_prefix = f"{document_prefix}: "
+            else:
+                query_prefix = ex["prompt"] + " "
+                document_prefix = ""
         else:
             query_prefix = ""
             document_prefix = ""
@@ -600,8 +600,12 @@ class BGEDataset(torch.utils.data.Dataset, TokenizerMixin):
         document = document_prefix + ex["document"]
         random_document = document_prefix + document
 
-        num_hard_negatives = min(self.num_hard_negatives, len(ex["neg"]))
-        negative_documents_raw_text = random.sample(ex["neg"], num_hard_negatives)
+        if len(ex["neg"]) < self.num_hard_negatives:
+            # sample w/ replacement
+            negative_documents_raw_text = random.choices(ex["neg"], k=self.num_hard_negatives)
+        else:
+            # sample w/o replacement
+            negative_documents_raw_text = random.sample(ex["neg"], self.num_hard_negatives)
         negative_documents = [document_prefix + d for d in negative_documents_raw_text]
         out_ex = self._tokenize({
             "idx": query_id,
@@ -646,9 +650,11 @@ def get_subdomain_idxs_cached(dataset: datasets.Dataset):
         pickle.dump(subdomain_idxs, open(cache_file_path, 'wb'))
         return subdomain_idxs
 
+
 def _flatten_docs(ex):
     ex["document"] = ex["document"][0]
     return ex
+
 
 def process_bge_dataset_cached(dataset: datasets.Dataset):
     cache_folder = os.path.join(get_cde_cache_dir(), "bge")
@@ -680,7 +686,6 @@ class NomicUnsupervisedDataset(torch.utils.data.Dataset, TokenizerMixin):
             tokenizer: transformers.AutoTokenizer, 
             first_stage_tokenizer: Optional[transformers.AutoTokenizer],
             max_seq_length: int, 
-            text_suffix: str = "",
             use_prefix: bool = False, train_subdomain_key: Optional[str] = None
         ):
         print0("[NomicUnsupervisedDataset] loading dataset")
@@ -698,7 +703,6 @@ class NomicUnsupervisedDataset(torch.utils.data.Dataset, TokenizerMixin):
         self.tokenizer = tokenizer
         self.first_stage_tokenizer = first_stage_tokenizer
         self.max_seq_length = max_seq_length
-        self.text_suffix = text_suffix
 
         current_file_directory = os.path.dirname(os.path.abspath(__file__))
         yaml_path = os.path.join(current_file_directory, "config", "nomic_unsupervised.yaml")

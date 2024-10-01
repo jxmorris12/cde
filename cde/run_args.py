@@ -214,6 +214,12 @@ class DataArguments:
             "help": "Whether to add domain-specific prefixes to data"
         }
     )
+    use_short_prefix: bool = field(
+        default=True,
+        metadata={
+            "help": "Whether to use short prefixes for the BGE dataset, or the long ones, when prefixes are enabled"
+        }
+    )
     def __post_init__(self):
         pass
 

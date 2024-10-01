@@ -13,7 +13,7 @@ import torch
 import transformers
 import wandb
 
-from cde.collate import DocumentQueryCollatorWithPadding, TokenizedCollator
+from cde.collate import TokenizedCollator
 from cde.dataset import (
     BeirDataset, 
     BGEDataset,
@@ -147,11 +147,12 @@ def main():
         dataset_backbone_tokenizer = transformers.AutoTokenizer.from_pretrained(
             model_args.dataset_backbone or model_args.embedder,
             padding_side="right",
+            add_eos_token=True,
+            use_fast=True,
         )
     if not (dataset_backbone_tokenizer.pad_token) and dataset_backbone_tokenizer.bos_token:
         dataset_backbone_tokenizer.pad_token = dataset_backbone_tokenizer.bos_token
         print(f"Set pad token to bos token: {dataset_backbone_tokenizer.pad_token}")   
-    dataset_backbone_tokenizer.add_eos_token = True
 
     model = model_cls(
         config=model_config,
@@ -192,18 +193,16 @@ def main():
         **{f"BeIR/{k}": v for k,v in beir_dict.items()}
     }
 
-    if model_args.autoregressive_backbone:
-        embed_eos = "</e>"
-        if embed_eos in dataset_backbone_tokenizer.vocab:
-            logger.info("Embed eos token already in vocab: %s", embed_eos)
-        else:
-            logger.info("Adding embed eos token to vocab: %s", embed_eos)
-            dataset_backbone_tokenizer.add_tokens([embed_eos], special_tokens=True)
-            model.second_stage_model.backbone.resize_token_embeddings(len(dataset_backbone_tokenizer))
-        text_suffix = embed_eos
-        print0(f"[*] Added text_suffix={text_suffix}, new len(tokenizer.vocab)={len(dataset_backbone_tokenizer)}")
-    else:
-        text_suffix = ""
+    # if model_args.autoregressive_backbone:
+    #     embed_eos = "</e>"
+    #     if embed_eos not in dataset_backbone_tokenizer.vocab:
+    #         dataset_backbone_tokenizer.add_tokens([embed_eos], special_tokens=True)
+    #         model.second_stage_model.backbone.resize_token_embeddings(len(dataset_backbone_tokenizer))
+        
+    #     new_token_id = dataset_backbone_tokenizer.vocab[embed_eos]
+    #     dataset_backbone_tokenizer.eos_token = embed_eos
+    #     dataset_backbone_tokenizer.eos_token_id = new_token_id
+    #     print0(f"[*] Added eos_token={embed_eos}, new len(tokenizer.vocab)={len(dataset_backbone_tokenizer)}")
 
     if data_args.dataset == 'nomic_unsupervised':
         train_dataset = NomicUnsupervisedDataset(
@@ -212,7 +211,6 @@ def main():
             max_seq_length=model_args.max_seq_length,
             use_prefix=data_args.use_prefix,
             train_subdomain_key=data_args.train_subdomain_key,
-            text_suffix=text_suffix,
         )
         eval_dataset = None
         # Need to tokenize and collate for this dataset
@@ -224,7 +222,6 @@ def main():
             num_hard_negatives=data_args.num_hard_negatives,
             max_seq_length=model_args.max_seq_length,
             use_prefix=data_args.use_prefix,
-            text_suffix=text_suffix,
         )
         eval_dataset = None
         collator_cls = TokenizedCollator
@@ -235,7 +232,7 @@ def main():
             num_hard_negatives=data_args.num_hard_negatives,
             max_seq_length=model_args.max_seq_length,
             use_prefix=data_args.use_prefix,
-            text_suffix=text_suffix,
+            use_short_prefix=data_args.use_short_prefix,
         )
         eval_dataset = None
         collator_cls = TokenizedCollator
@@ -311,6 +308,7 @@ def main():
             name=wandb_run_id,
             resume=False, # (checkpoint is not None),
             settings=wandb.Settings(symlink=False),
+            mode=(None if training_args.use_wandb else "disabled")
         )
         wandb.config.update(
             {
