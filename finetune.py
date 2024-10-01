@@ -33,7 +33,10 @@ from cde.sampler import get_sampler
 from cde.trainer import CustomTrainer
 
 
-torch.cuda.set_device(get_rank()) # Try to fix a DDP issue: https://github.com/pytorch/torchrec/issues/328
+try:
+    torch.cuda.set_device(get_rank()) # Try to fix a DDP issue: https://github.com/pytorch/torchrec/issues/328
+except RuntimeError: #No CUDA GPUs are available
+    pass
 
 
 logger = logging.getLogger(__name__)

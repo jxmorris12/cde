@@ -364,8 +364,6 @@ class DatasetConditionedAutoregressive(transformers.PreTrainedModel, ContextualM
             output_pooled = mean_pool(output_vectors, output_attention_mask)
         else:
             output_pooled = mean_pool_weighted(output_vectors, output_attention_mask)
-        
-        breakpoint()
 
         # average with original vectors
         output = self.output_projection(output_pooled) # (b, 2d) -> (b, d)

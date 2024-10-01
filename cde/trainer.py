@@ -264,7 +264,7 @@ class CustomTrainer(transformers.Trainer, TrainerNegativeFilterMixin):
             return None
     
         keys = ["query_input_ids", "document_input_ids"]
-        tokenizers = [ self.dataset_backbone_tokenizer,  self.dataset_backbone_tokenizer, self.dataset_backbone_tokenizer]
+        tokenizers = [self.dataset_backbone_tokenizer, self.dataset_backbone_tokenizer]
         data = [
                 tokenizer.batch_decode(batch[key][:n], skip_special_tokens=False)
                 for (tokenizer, key) in zip(tokenizers, keys)
