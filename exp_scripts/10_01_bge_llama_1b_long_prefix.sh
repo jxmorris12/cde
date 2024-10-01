@@ -1,6 +1,6 @@
 #!/bin/bash
-#SBATCH -A differential
-#SBATCH -q differential_high
+#SBATCH -A memorization
+#SBATCH -q memorization_high
 #SBATCH --job-name=test_multinode
 #SBATCH --output=log_submitit/multinode/llama/pretrain_%j.out
 #SBATCH --error=log_submitit/multinode/llama/pretrain_%j.err
@@ -13,7 +13,6 @@
 #SBATCH --requeue
 
 export HF_DATASETS_OFFLINE=1 
-export HF_HUB_OFFLINE=1 
 
 # export TORCH_DISTRIBUTED_DEBUG=DETAIL
 # export NCCL_DEBUG=INFO
@@ -29,29 +28,32 @@ MAIN_PORT=6000
 CMD=" \
     finetune.py --per_device_train_batch_size 256 --per_device_eval_batch_size 256 \
                  --dataset nomic_supervised --sampling_strategy cluster_within_domain \
-                 --num_train_epochs 2 --learning_rate 2e-5 \
+                 --num_train_epochs 3 --learning_rate 2e-5 \
                  --embedder nomic-ai/nomic-bert-2048 --clustering_model mixedbread \
                  --clustering_query_to_doc 1 \
-                  --eval_rerank_topk 512 --lr_scheduler_type constant_with_warmup \
-                 --warmup_steps 80 --max_seq_length 512 \
+                  --eval_rerank_topk 512 --lr_scheduler_type linear \
+                 --warmup_steps 160 --max_seq_length 512 \
                  --logging_steps 1 --train_cluster_size 256 --eval_cluster_size 256 \
                  --use_prefix 1 --transductive_corpus_size 512 --transductive_tokens_per_document 4 \
                  --logit_scale 50 \
                  --max_eval_batches 16 --torch_compile 0 --use_gc 1 --fp16 0 --bf16 1 \
-                 --eval_steps 5000 --disable_dropout 1 --arch transductive \
-                 --exp_name 2024-09-31-supervised-final-bge-llama-16-fsdp \
-                 --exp_group 2024-09-31-supervised-filter-filtered-llama-16-fsdp \
+                 --eval_steps 5000 --disable_dropout 0 --arch transductive \
+                 --exp_name 2024-10-01-supervised-final-bge-llama-1b-3-fsdp \
+                 --exp_group 2024-10-01-supervised-filter-filtered-llama-1b-3-fsdp \
                  --hn_filter_model stella --hn_tune_threshold 1 \
                  --hn_filter_precompute_vector 0 \
                  --ddp_share_negatives_between_gpus 0 --num_hard_negatives 1 \
-                 --num_eval_rerank_samples 1024 --save_strategy steps --save_steps 256 --save_total_limit 50000 \
-                 --max_batch_size_fits_in_memory 2 \
-                 --max_batch_size_fits_in_memory_first_stage 32 \
+                 --num_eval_rerank_samples 1024 --save_strategy epoch --save_total_limit 5 \
+                 --max_batch_size_fits_in_memory 8 \
+                 --max_batch_size_fits_in_memory_first_stage 64 \
                  --use_wandb 1 --ddp_find_unused_parameters 1 --dataset bge \
-                 --dataset_backbone "meta-llama/Meta-Llama-3.1-8B" \
+                 --dataset_backbone "meta-llama/Llama-3.2-1B" \
                  --autoregressive_backbone 1 --transductive_sequence_dropout_prob 0.005 \
                  --pooling_strategy mean --use_short_prefix 0
-"
+    "
+
+#  --clustering_batch_packing_strategy tsp_greedy \
+# --save_steps 2 --save_strategy steps --use_wandb 1 --max_seq_length 32 --transductive_corpus_size 8 --use_wandb 0
 
 LAUNCHER="accelerate launch \
     --config_file fsdp_config_16.yaml \
@@ -64,7 +66,7 @@ LAUNCHER="accelerate launch \
 "
 
 SRUN_ARGS=" \
-    --wait=60 \
+    --wait=600 \
     --kill-on-bad-exit=1 \
 "
 srun $SRUN_ARGS --jobid $SLURM_JOB_ID bash -c "$LAUNCHER $CMD"

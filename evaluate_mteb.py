@@ -10,6 +10,7 @@ import transformers
 
 # from cde.lib import cluster_dataset
 from cde.lib.embed import DenseEncoder
+from cde.lib.eval.mteb import TASK_LIST_STS, TASK_LIST, task2prefix_short, task2prefix_long
 from cde.lib.model_configs import MODEL_FOLDER_DICT
 from cde.lib.utils import analyze_utils
 
@@ -18,148 +19,13 @@ from mteb import MTEB
 
 os.environ['OPENBLAS_NUM_THREADS'] = '16'
 
-TASK_LIST_CLASSIFICATION = [
-    "AmazonCounterfactualClassification",
-    "AmazonPolarityClassification",
-    "AmazonReviewsClassification",
-    "Banking77Classification",
-    "EmotionClassification",
-    "ImdbClassification",
-    "MassiveIntentClassification",
-    "MassiveScenarioClassification",
-    "MTOPDomainClassification",
-    "MTOPIntentClassification",
-    "ToxicConversationsClassification",
-    "TweetSentimentExtractionClassification",
-]
-
-TASK_LIST_CLUSTERING = [
-    "ArxivClusteringP2P",
-    "ArxivClusteringS2S",
-    "BiorxivClusteringP2P",
-    "BiorxivClusteringS2S",
-    "MedrxivClusteringP2P",
-    "MedrxivClusteringS2S",
-    "RedditClustering",
-    "RedditClusteringP2P",
-    "StackExchangeClustering",
-    "StackExchangeClusteringP2P",
-    "TwentyNewsgroupsClustering",
-]
-
-TASK_LIST_PAIR_CLASSIFICATION = [
-    "SprintDuplicateQuestions",
-    "TwitterSemEval2015",
-    "TwitterURLCorpus",
-]
-
-TASK_LIST_RERANKING = [
-    "AskUbuntuDupQuestions",
-    "MindSmallReranking",
-    "SciDocsRR",
-    "StackOverflowDupQuestions",
-]
-
-TASK_LIST_RETRIEVAL = [
-    "HotpotQA",
-    "ArguAna",
-    "ClimateFEVER",
-    "CQADupstackAndroidRetrieval",
-    "CQADupstackEnglishRetrieval",
-    "CQADupstackGamingRetrieval",
-    "CQADupstackGisRetrieval",
-    "CQADupstackMathematicaRetrieval",
-    "CQADupstackPhysicsRetrieval",
-    "CQADupstackProgrammersRetrieval",
-    "CQADupstackStatsRetrieval",
-    "CQADupstackTexRetrieval",
-    "CQADupstackUnixRetrieval",
-    "CQADupstackWebmastersRetrieval",
-    "CQADupstackWordpressRetrieval",
-    "DBPedia",
-    "FiQA2018",
-    "NFCorpus",
-    "NQ",
-    "QuoraRetrieval",
-    "SCIDOCS",
-    "SciFact",
-    "Touche2020",
-    "TRECCOVID",
-    "FEVER",
-    "MSMARCO",
-]
-
-# TASK_LIST_RETRIEVAL = ["SCIDOCS", "SciFact", "NFCorpus", "TRECCOVID", "Touche2020"] # Small datasets.
-# TASK_LIST_RETRIEVAL = ["TRECCOVID"]
-# TASK_LIST_RETRIEVAL = ["FiQA2018"]
-
-
-# TASK_LIST_RETRIEVAL = [
-#     "ArguAna",
-#     "NFCorpus", 
-#     "SCIDOCS", 
-#     "TRECCOVID", 
-#     "SciFact", 
-#     "FiQA2018", 
-#     "Touche2020",
-# ] # Small datasets.
-
-
-# TASK_LIST_RETRIEVAL = ["QuoraRetrieval"]
-# TASK_LIST_RETRIEVAL = ["NFCorpus"]
-# TASK_LIST_RETRIEVAL = ["ArguAna"]
-
-TASK_LIST_STS = [
-    "BIOSSES",
-    "SICK-R",
-    "STS12",
-    "STS13",
-    "STS14",
-    "STS15",
-    "STS16",
-    "STS17",
-    "STS22",
-    "STSBenchmark",
-    "SummEval",
-]
-
-task2prefix = {}
-for task in TASK_LIST_CLASSIFICATION:
-    task2prefix[task] = {"query": "classification", "document": "classification"}
-
-for task in TASK_LIST_CLUSTERING:
-    task2prefix[task] = {"query": "clustering", "document": "clustering"}
-
-for task in TASK_LIST_PAIR_CLASSIFICATION:
-    task2prefix[task] = {"query": "classification", "document": "classification"}
-
-for task in TASK_LIST_RERANKING:
-    task2prefix[task] = {"query": "classification", "document": "classification"}
-
-for task in TASK_LIST_RETRIEVAL:
-    task2prefix[task] = {"query": "search_query", "document": "search_document"}
-
-for task in TASK_LIST_STS:
-    task2prefix[task] = {"query": "classification", "document": "classification"}
-
-task2prefix["QuoraRetrieval"] = {"query": "search_query", "document": "search_query"}
-
-
-TASK_LIST = (
-    TASK_LIST_CLASSIFICATION
-    + TASK_LIST_CLUSTERING
-    + TASK_LIST_PAIR_CLASSIFICATION
-    + TASK_LIST_RERANKING
-    + TASK_LIST_RETRIEVAL
-    + TASK_LIST_STS
-)
 # TASK_LIST = TASK_LIST_RETRIEVAL
 # TASK_LIST = TASK_LIST_STS
 # TASK_LIST = TASK_LIST_CLUSTERING
 # TASK_LIST = TASK_LIST_PAIR_CLASSIFICATION
 # TASK_LIST = TASK_LIST_RERANKING
 # TASK_LIST = ["Touche2020"]
-# TASK_LIST = ["ArguAna"]
+TASK_LIST = ["ArguAna"]
 
 def parse_args() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Process model key")
@@ -211,9 +77,21 @@ def main():
 
     random.Random(time.time()).shuffle(TASK_LIST)
     for task_idx, task in enumerate(TASK_LIST):
-        prefixes = task2prefix[task]
-        mteb_encoder.document_prefix = (prefixes["document"] + ": ") if data_args.use_prefix else ""
-        mteb_encoder.query_prefix = (prefixes["query"] + ": ") if data_args.use_prefix else ""
+        document_prefix = ""
+        query_prefix = ""
+        if data_args.use_prefix:
+            if data_args.use_short_prefix:
+                prefixes = task2prefix_short[task]
+                document_prefix = (prefixes["document"] + ": ") if data_args.use_prefix else ""
+                query_prefix = (prefixes["query"] + ": ") if data_args.use_prefix else ""
+            else:
+                document_prefix = task2prefix_long[task]
+                if task in (TASK_LIST_STS + ["QuoraRetrieval"]):
+                    # todo: verify this
+                    query_prefix = document_prefix
+        mteb_encoder.document_prefix = document_prefix
+        mteb_encoder.query_prefix = query_prefix
+        print(f"Set prefixes to {mteb_encoder.query_prefix} and {mteb_encoder.document_prefix}")
         mteb_encoder.normalize_embeds = "Clustering" in task
         print(f"[{task}] Set prefixes to {mteb_encoder.query_prefix} and {mteb_encoder.document_prefix}")
 
