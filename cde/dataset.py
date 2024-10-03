@@ -221,6 +221,7 @@ class TokenizerMixin:
         for col in ["query", "document", "negative_document", "text"]:
             if not len(ex.get(col, [])): continue 
             ex_col = ex[col]
+            print(col, "-> type(ex_col) = ", type(ex_col))
             
             if isinstance(ex_col, list):
                 tokenized_col = tokenize_fn([s[:max_num_chars] for s in ex_col])
@@ -228,11 +229,13 @@ class TokenizerMixin:
                 ex[f'{col}_attention_mask'] = tokenized_col.attention_mask
 
                 if self.first_stage_tokenizer:
-                    tokenized_col = dataset_tokenize_fn([s[:max_num_chars]for s in ex_col])
+                    tokenized_col = dataset_tokenize_fn([s[:max_num_chars] for s in ex_col])
                     ex[f'{col}_input_ids_first_stage'] = tokenized_col.input_ids
                     ex[f'{col}_attention_mask_first_stage'] = tokenized_col.attention_mask
-            else:
+            elif isinstance(ex_col, str):
                 ex_col = ex_col[:max_num_chars]
+                if not len(ex_col):
+                    ex_col = "[empty]" # Hack to fix empty-string issue from a couple datasets.
                 tokenized_col = tokenize_fn(ex_col)
                 ex[f'{col}_input_ids'] = tokenized_col.input_ids[0]
                 ex[f'{col}_attention_mask'] = tokenized_col.attention_mask[0]
@@ -242,6 +245,8 @@ class TokenizerMixin:
                     tokenized_col = dataset_tokenize_fn(ex_col_no_suffix)
                     ex[f'{col}_input_ids_first_stage'] = tokenized_col.input_ids[0]
                     ex[f'{col}_attention_mask_first_stage'] = tokenized_col.attention_mask[0]
+            else:
+                raise ValueError(f"Cannot tokenize value from column {col} of type {type(ex_col)}")
         return ex
 
 

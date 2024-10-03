@@ -47,4 +47,7 @@ MODEL_FOLDER_DICT = {
    "cde--supervised--llama-3--epoch-2": "/fsx-checkpoints/jxm/cde/2024-09-28-supervised-final-bge-llama-8-fsdp--epoch-2",
    # moved back to mean pooling, slightly better clustering, much larger batch size
    "cde--supervised--llama-4--epoch-1": "/fsx-checkpoints/jxm/cde/2024-09-29-supervised-final-bge-llama-11-fsdp--epoch-1/",
+   # changed to 1b, changed prefixes
+   "cde--supervised--llama1b-1--epoch-1": "/fsx-checkpoints/jxm/cde/2024-09-30-supervised-final-bge-llama-1b-2-fsdp--epoch-1/",
+   "cde--supervised--llama1b-1--epoch-2": "/fsx-checkpoints/jxm/cde/2024-09-30-supervised-final-bge-llama-1b-2-fsdp--epoch-2/",
 }

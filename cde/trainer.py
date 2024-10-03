@@ -593,7 +593,6 @@ class CustomTrainer(transformers.Trainer, TrainerNegativeFilterMixin):
     ) -> Union[Tuple[torch.Tensor, Dict[str, torch.Tensor]], torch.Tensor]:
         query_inputs, document_inputs, negative_document_inputs = self._split_inputs(inputs=inputs)
 
-        seq_len = document_inputs["input_ids"].shape[1]
         # doc_random_integers = torch.randint(0, 2, (seq_len,))
         # query_random_integers = torch.randint(0, 2, (query_inputs["input_ids"].shape[1],))
         
@@ -616,8 +615,6 @@ class CustomTrainer(transformers.Trainer, TrainerNegativeFilterMixin):
         
         all_document_input_ids = self.consider_gather(document_inputs["input_ids"])
         all_query_input_ids = self.consider_gather(query_inputs["input_ids"])
-        # Uncomment next line to log text on every GPU.
-        # print(f"[rank {get_rank()}] query 0 =", self.dataset_backbone_tokenizer.decode(document_inputs["input_ids"][0], skip_special_tokens=True))
         document_first_tokens = all_document_input_ids[:, 1].contiguous()
         query_first_tokens = all_query_input_ids[:, 1].contiguous()
 
@@ -637,10 +634,7 @@ class CustomTrainer(transformers.Trainer, TrainerNegativeFilterMixin):
             batch_size = document_first_tokens.shape[0]
             one_hot_labels = torch.eye(batch_size, device=self.args.device, dtype=torch.bool)
 
-        smart_labels_doc = one_hot_labels.cpu().clone()
-        # query_unique_ids = all_query_input_ids.cpu() @ query_seq_len_hash
-        smart_labels = smart_labels_doc
-        
+        smart_labels = one_hot_labels.cpu().clone()
         # Automatically filter out too-hard negatives.
         hard_negatives_metrics = {}
         if (self.args.hn_tune_threshold is not None) and (self.args.hn_tune_threshold > 0.0):
@@ -658,7 +652,27 @@ class CustomTrainer(transformers.Trainer, TrainerNegativeFilterMixin):
                 hn_match_mask = (inputs["idx"][:, None] == neg_doc_idx[None, :]).to(smart_labels_neg.device)
                 smart_labels_neg = smart_labels_neg & (~hn_match_mask)
             
-            assert smart_labels_neg.shape == smart_labels.shape, f"got different shapes {smart_labels_neg.shape} and {smart_labels.shape}"
+            try:
+                assert smart_labels_neg.shape == smart_labels.shape, f"got different shapes {smart_labels_neg.shape} and {smart_labels.shape}"
+            except AssertionError:
+                print("shape 0", qd_scores.shape)
+                print("shape 1", inputs["idx"].shape)
+                # print("shape 2", neg_doc_idx.shape)
+                print("shape 3", torch.zeros_like(inputs["idx"]).shape)
+                # print("shape 4", hn_match_mask.shape)
+                print("shape 5", all_document_input_ids.shape)
+                print("shape 6", all_query_input_ids.shape)
+                print("shape 7", document_inputs["input_ids"].shape)
+                for k,v in inputs.items():
+                    if isinstance(v, torch.Tensor):
+                        print("-->", k, v.shape)
+                    elif isinstance(v, list):
+                        print("-->", k, len(v))
+                    else:
+                        print("--> unknown", k, type(v))
+
+                print("(offending shapes...)", smart_labels_neg.shape, smart_labels.shape)
+                breakpoint()
             
             smart_labels = smart_labels | smart_labels_neg
             hard_negatives_metrics = {
