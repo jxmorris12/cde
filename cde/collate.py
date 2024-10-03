@@ -67,8 +67,12 @@ class TokenizedCollator(transformers.DataCollatorWithPadding):
         for k, v in out_ex.items():
             if isinstance(v, list) and isinstance(v[0], int):
                 out_ex[k] = torch.tensor(v)
-            if isinstance(v, list) and isinstance(v[0], list) and isinstance(v[0][0], int):
-                out_ex[k] = torch.tensor(v)
+            if isinstance(v, list) and isinstance(v[0], list):
+                if (len(v[0]) > 0) and isinstance(v[0][0], int):
+                    out_ex[k] = torch.tensor(v)
+                else:
+                    # skip empty lists
+                    continue
             else:
                 try:
                     out_ex[k] = torch.stack(v)

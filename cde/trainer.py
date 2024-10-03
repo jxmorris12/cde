@@ -476,7 +476,7 @@ class CustomTrainer(transformers.Trainer, TrainerNegativeFilterMixin):
             dataset_inputs["input_ids"] = fake_dataset_input_ids
             dataset_inputs["attention_mask"] = fake_dataset_attention_mask
         elif self.args.transductive_input_strategy in ["topk", "random_corpus"]:
-            if len(negative_document_inputs) and len(negative_document_inputs["input_ids"]):
+            if len(negative_document_inputs) and ("input_ids" in negative_document_inputs) and len(negative_document_inputs["input_ids"]):
                 # Also consider negative documents in the transductive selection step
                 dataset_inputs["input_ids"] = torch.cat(
                     (document_inputs.get("input_ids_first_stage", "input_ids"), negative_document_inputs.get("input_ids_first_stage", "input_ids")),
