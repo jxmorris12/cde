@@ -221,8 +221,6 @@ class TokenizerMixin:
         for col in ["query", "document", "negative_document", "text"]:
             if not len(ex.get(col, [])): continue 
             ex_col = ex[col]
-            print(col, "-> type(ex_col) = ", type(ex_col))
-            
             if isinstance(ex_col, list):
                 tokenized_col = tokenize_fn([s[:max_num_chars] for s in ex_col])
                 ex[f'{col}_input_ids'] = tokenized_col.input_ids
@@ -237,14 +235,14 @@ class TokenizerMixin:
                 if not len(ex_col):
                     ex_col = "[empty]" # Hack to fix empty-string issue from a couple datasets.
                 tokenized_col = tokenize_fn(ex_col)
-                ex[f'{col}_input_ids'] = tokenized_col.input_ids[0]
-                ex[f'{col}_attention_mask'] = tokenized_col.attention_mask[0]
+                ex[f'{col}_input_ids'] = tokenized_col.input_ids.squeeze()
+                ex[f'{col}_attention_mask'] = tokenized_col.attention_mask.squeeze()
 
                 if self.first_stage_tokenizer:
                     ex_col_no_suffix = ex_col[:max_num_chars]
                     tokenized_col = dataset_tokenize_fn(ex_col_no_suffix)
-                    ex[f'{col}_input_ids_first_stage'] = tokenized_col.input_ids[0]
-                    ex[f'{col}_attention_mask_first_stage'] = tokenized_col.attention_mask[0]
+                    ex[f'{col}_input_ids_first_stage'] = tokenized_col.input_ids.squeeze()
+                    ex[f'{col}_attention_mask_first_stage'] = tokenized_col.attention_mask.squeeze()
             else:
                 raise ValueError(f"Cannot tokenize value from column {col} of type {type(ex_col)}")
         return ex
@@ -589,6 +587,10 @@ class BGEDataset(torch.utils.data.Dataset, TokenizerMixin):
     
     def __getitem__(self, query_id: int) -> Dict[str, torch.Tensor]: 
         ex = self.dataset[query_id]
+
+        document = ex["document"]
+        if not len(document): document = "[null]" # fix empty-string issue. unlikely.
+
         if self.use_prefix:
             if self.use_short_prefix:
                 query_prefix = self.get_query_prefix(ex["dataset"])
@@ -602,7 +604,7 @@ class BGEDataset(torch.utils.data.Dataset, TokenizerMixin):
             query_prefix = ""
             document_prefix = ""
         query = query_prefix + ex["query"]
-        document = document_prefix + ex["document"]
+        document = document_prefix + document
         random_document = document_prefix + document
 
         if len(ex["neg"]) < self.num_hard_negatives:
@@ -621,8 +623,8 @@ class BGEDataset(torch.utils.data.Dataset, TokenizerMixin):
             "query_text__no_prefix": ex["query"],
             "document_prefix": document_prefix,
             "document": document,
-            "document_text": document_prefix + ex["document"],
-            "document_text__no_prefix": ex["document"],
+            "document_text": document_prefix + document,
+            "document_text__no_prefix": document,
             ######################################################################
             "random_document": random_document,
             "negative_document": negative_documents, 

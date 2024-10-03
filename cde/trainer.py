@@ -607,8 +607,8 @@ class CustomTrainer(transformers.Trainer, TrainerNegativeFilterMixin):
             document_inputs["attention_mask"] = torch.cat(
                 (document_inputs["attention_mask"], negative_document_inputs["attention_mask"]), dim=0
             )
-            document_inputs["text"] = document_inputs["text"] + negative_document_inputs["text"]
-            document_inputs["text__no_prefix"] = document_inputs["text__no_prefix"] + negative_document_inputs["text__no_prefix"]
+            document_inputs["text"] = document_inputs["text"] + [hn_text for hn_text_list in negative_document_inputs["text"] for hn_text in hn_text_list]
+            document_inputs["text__no_prefix"] = document_inputs["text__no_prefix"] + [hn_text for hn_text_list in negative_document_inputs["text__no_prefix"] for hn_text in hn_text_list]
             #########################################################################################################
             negative_document_inputs["dataset_input_ids"] = document_inputs["dataset_input_ids"]
             negative_document_inputs["dataset_attention_mask"] = document_inputs["dataset_attention_mask"]
@@ -623,12 +623,12 @@ class CustomTrainer(transformers.Trainer, TrainerNegativeFilterMixin):
 
         # We have to stack the hard negatives within device (before the gather) to mimic
         # the way that embeddings are computed and gathered.
-        all_idx = inputs["idx"]
-        num_hn = len(document_inputs["input_ids"]) - len(inputs["idx"])
+        all_idx = inputs["idx"].flatten()
+        num_hn = len(document_inputs["input_ids"]) - len(all_idx)
         if num_hn > 0:
             hn_idx = torch.zeros((num_hn,), dtype=torch.long, device=self.args.device) - 1
             all_idx = torch.cat((all_idx, hn_idx), dim=0)
-            one_hot_labels = self.consider_gather(inputs["idx"])[:, None] == self.consider_gather(all_idx)[None, :]
+            one_hot_labels = self.consider_gather(inputs["idx"].flatten())[:, None] == self.consider_gather(all_idx)[None, :]
         else:
             # doing this without a gather because that takes forever with large batches.
             batch_size = document_first_tokens.shape[0]
@@ -648,8 +648,8 @@ class CustomTrainer(transformers.Trainer, TrainerNegativeFilterMixin):
             
             # Don't mask hard negatives for a given sample!
             if num_hn > 0:
-                neg_doc_idx = torch.cat((torch.zeros_like(inputs["idx"]), negative_document_inputs["idx"]))
-                hn_match_mask = (inputs["idx"][:, None] == neg_doc_idx[None, :]).to(smart_labels_neg.device)
+                neg_doc_idx = torch.cat((inputs["idx"].flatten(), negative_document_inputs["idx"].flatten()))
+                hn_match_mask = (inputs["idx"].flatten()[:, None] == neg_doc_idx[None, :]).to(smart_labels_neg.device)
                 smart_labels_neg = smart_labels_neg & (~hn_match_mask)
             
             try:

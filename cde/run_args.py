@@ -439,6 +439,8 @@ class TrainingArguments(transformers.TrainingArguments):
             self.report_to = []
             print0("disabling wandb.")
             os.environ["WANDB_MODE"] = "disabled"
+            import wandb
+            wandb.init(mode="disabled")
         ############################################################################
         num_devices = max(1, torch.cuda.device_count())
         num_cpus = count_cpus()

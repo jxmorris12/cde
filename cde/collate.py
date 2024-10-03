@@ -61,16 +61,13 @@ class TokenizedCollator(transformers.DataCollatorWithPadding):
         out_ex = collections.defaultdict(list)
         for ex in features:
             for col in ex:
-                if isinstance(ex[col], list):
-                    if not len(ex[col]): continue
-                    out_ex[col].extend(ex[col])
-                else:
-                    out_ex[col].append(ex[col])
-
+                out_ex[col].append(ex[col])
 
         extra_keys = []
         for k, v in out_ex.items():
             if isinstance(v, list) and isinstance(v[0], int):
+                out_ex[k] = torch.tensor(v)
+            if isinstance(v, list) and isinstance(v[0], list) and isinstance(v[0][0], int):
                 out_ex[k] = torch.tensor(v)
             else:
                 try:
@@ -78,12 +75,7 @@ class TokenizedCollator(transformers.DataCollatorWithPadding):
                 except TypeError:
                     # can't stack string, etc. -- just leave em
                     extra_keys.append(k)
-        
-        # cut_keys = [key.replace("input_ids", "") for key in out_ex.keys() if key.endswith("input_ids")]
-        # for prefix in cut_keys:
-        #     out_ex = cut_padding(out_ex, self.tokenizer.pad_token_id, prefix=prefix)
-        # for k in extra_keys: del out_ex[k]
-        # print("collator keys", dict(out_ex).keys())
+
         return dict(out_ex)
 
 
