@@ -26,7 +26,7 @@ MAIN_ADDR=$(scontrol show hostnames $SLURM_JOB_NODELIST | head -n 1)
 MAIN_PORT=6000
 
 CMD=" \
-    finetune.py --per_device_train_batch_size 256 --per_device_eval_batch_size 256 \
+    finetune.py --per_device_train_batch_size 512 --per_device_eval_batch_size 256 \
                  --dataset nomic_supervised --sampling_strategy cluster_within_domain \
                  --num_train_epochs 3 --learning_rate 2e-5 \
                  --embedder nomic-ai/nomic-bert-2048 --clustering_model mixedbread \
@@ -42,7 +42,7 @@ CMD=" \
                  --exp_group 2024-10-01-supervised-filter-filtered-llama-1b-3-fsdp \
                  --hn_filter_model stella --hn_tune_threshold 1 \
                  --hn_filter_precompute_vector 0 \
-                 --ddp_share_negatives_between_gpus 0 --num_hard_negatives 1 \
+                 --ddp_share_negatives_between_gpus 0 --num_hard_negatives 0 \
                  --num_eval_rerank_samples 1024 --save_strategy epoch --save_total_limit 5 \
                  --max_batch_size_fits_in_memory 8 \
                  --max_batch_size_fits_in_memory_first_stage 64 \

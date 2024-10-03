@@ -26,7 +26,7 @@ MAIN_ADDR=$(scontrol show hostnames $SLURM_JOB_NODELIST | head -n 1)
 MAIN_PORT=6000
 
 CMD=" \
-    finetune.py --per_device_train_batch_size 256 --per_device_eval_batch_size 256 \
+    finetune.py --per_device_train_batch_size 512 --per_device_eval_batch_size 256 \
                  --dataset nomic_supervised --sampling_strategy cluster_within_domain \
                  --num_train_epochs 5 --learning_rate 2e-5 \
                  --embedder nomic-ai/nomic-bert-2048 --clustering_model mixedbread \

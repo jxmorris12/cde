@@ -12,13 +12,13 @@ fsdp_config:
   fsdp_offload_params: false
   fsdp_sharding_strategy: HYBRID_SHARD_ZERO2 
   fsdp_state_dict_type: FULL_STATE_DICT
-  fsdp_sync_module_states: false
+  fsdp_sync_module_states: true
   fsdp_use_orig_params: true
 machine_rank: 0
 main_training_function: main
 mixed_precision: bf16
-num_machines: 16
-num_processes: 128
+num_machines: 8
+num_processes: 64
 rdzv_backend: static
 same_network: true
 tpu_env: []
