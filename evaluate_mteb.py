@@ -25,7 +25,7 @@ os.environ['OPENBLAS_NUM_THREADS'] = '16'
 # TASK_LIST = TASK_LIST_PAIR_CLASSIFICATION
 # TASK_LIST = TASK_LIST_RERANKING
 # TASK_LIST = ["Touche2020"]
-TASK_LIST = ["ArguAna"]
+# TASK_LIST = ["ArguAna"]
 
 def parse_args() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Process model key")
