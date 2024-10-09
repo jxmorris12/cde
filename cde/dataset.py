@@ -693,7 +693,9 @@ class NomicUnsupervisedDataset(torch.utils.data.Dataset, TokenizerMixin):
             tokenizer: transformers.AutoTokenizer, 
             first_stage_tokenizer: Optional[transformers.AutoTokenizer],
             max_seq_length: int, 
-            use_prefix: bool = False, train_subdomain_key: Optional[str] = None
+            use_prefix: bool = False, 
+            use_short_prefix: bool = False,
+            train_subdomain_key: Optional[str] = None
         ):
         print0("[NomicUnsupervisedDataset] loading dataset")
         self.dataset = (
@@ -712,7 +714,11 @@ class NomicUnsupervisedDataset(torch.utils.data.Dataset, TokenizerMixin):
         self.max_seq_length = max_seq_length
 
         current_file_directory = os.path.dirname(os.path.abspath(__file__))
-        yaml_path = os.path.join(current_file_directory, "config", "nomic_unsupervised.yaml")
+        self.use_short_prefix = use_short_prefix
+        if use_short_prefix:
+            yaml_path = os.path.join(current_file_directory, "config", "nomic_unsupervised.yaml")
+        else:
+            yaml_path =  os.path.join(current_file_directory, "config", "nomic_unsupervised_long_prefix.yaml")
         config_yaml = yaml.safe_load(open(yaml_path, "r"))
         self.config = { row["name"]: row for row in config_yaml["datasets"] }
         self.use_prefix = use_prefix
@@ -723,10 +729,21 @@ class NomicUnsupervisedDataset(torch.utils.data.Dataset, TokenizerMixin):
         
     
     def get_query_prefix(self, dataset: str) -> str:
-        return self.config[dataset]["query_prefix"]
+        if self.use_short_prefix:
+            return self.config[dataset]["query_prefix"] + ": "
+        else:
+            return self.config[dataset]["query_prefix"] + " "
     
     def get_document_prefix(self, dataset: str) -> str:
-        return self.config[dataset]["document_prefix"]
+        if self.use_short_prefix:
+            return self.config[dataset]["document_prefix"] + ": "
+        else:
+            # For long prefixes, we either duplicate the query prefix ("query-only")
+            # or just don't use one at all (most non-STS datasets).
+            if self.config[dataset].get("query_only", False):
+                return self.config[dataset]["query_prefix"] + " "
+            else:
+                return ""
     
     def __hash__(self) -> int:
         return hash(self.__reduce__())
@@ -768,9 +785,6 @@ class NomicUnsupervisedDataset(torch.utils.data.Dataset, TokenizerMixin):
         if self.use_prefix:
             query_prefix = self.get_query_prefix(ex["dataset"])
             document_prefix = self.get_document_prefix(ex["dataset"])
-
-            query_prefix = f"{query_prefix}: "
-            document_prefix = f"{document_prefix}: "
         else:
             query_prefix = ""
             document_prefix = ""

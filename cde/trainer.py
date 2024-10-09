@@ -260,6 +260,7 @@ class CustomTrainer(transformers.Trainer, TrainerNegativeFilterMixin):
         elif not (self.args.local_rank <= 0):
              return None
         batch = next(iter(dataloader))
+        print("[get_examples_table] got batch", batch is None)
         if batch is None:
             return None
     
@@ -600,7 +601,7 @@ class CustomTrainer(transformers.Trainer, TrainerNegativeFilterMixin):
         # query_seq_len_hash = torch.where(random_integers == 0, torch.tensor(-1), torch.tensor(1)).long()
 
         # non_neg_doc_unique_ids = self.consider_gather(document_inputs["input_ids"]).cpu() @ doc_seq_len_hash
-        if len(negative_document_inputs):
+        if ("input_ids" in negative_document_inputs) and (negative_document_inputs["input_ids"].numel() > 0):
             document_inputs["input_ids"] = torch.cat(
                 (document_inputs["input_ids"], negative_document_inputs["input_ids"]), dim=0
             )

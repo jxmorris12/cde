@@ -612,10 +612,10 @@ def cluster_subdomains_uncached(
     # subdomains_largest_first = sorted(subdomains.items(), key=lambda x: -len(x[1]))
     all_cluster_assignments = []
 
-    # import random
-    # import time
-    # random.seed(time.time())
-    # random.shuffle(subdomains_smallest_first)
+    import random
+    import time
+    random.seed(time.time())
+    random.shuffle(subdomains_smallest_first)
     for j, (_, data_idxs) in enumerate(subdomains_smallest_first):
         perc = (j + 1) / len(subdomains) * 100
         print0(f"({j + 1} / {len(subdomains)} -- {perc:.1f}%) selecting {len(data_idxs)} indices for clustering")

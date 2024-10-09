@@ -448,16 +448,6 @@ def inputs_for_key(inputs: Dict[str, torch.Tensor], key: str):
     return {k.replace(key, ""): v for k,v in inputs.items() if k.startswith(key)}
 
 
-def load_model_state_dict_from_path(folder: str) -> Dict:
-    checkpoint_folder = transformers.trainer_utils.get_last_checkpoint(folder)
-    if checkpoint_folder is None:
-        raise FileNotFoundError(f"no checkpoint found in {folder}")
-    WEIGHTS_NAME = "model.safetensors"
-    weights_path = os.path.join(checkpoint_folder, WEIGHTS_NAME)
-    if not os.path.exists(weights_path):
-        raise FileNotFoundError(f"no model weights found at {weights_path}")
-    return safetensors.torch.load_file(weights_path, device="cpu")
-
 def count_cpus() -> int:
     try:
         return len(os.sched_getaffinity(0)) 

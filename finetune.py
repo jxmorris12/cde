@@ -23,7 +23,6 @@ from cde.dataset import (
 from cde.lib import (
     get_rank, 
     get_world_size, 
-    load_model_state_dict_from_path, 
     ContextualModelConfig,
     print0
 )
@@ -213,6 +212,7 @@ def main():
             first_stage_tokenizer=embedder_tokenizer,
             max_seq_length=model_args.max_seq_length,
             use_prefix=data_args.use_prefix,
+            use_short_prefix=data_args.use_short_prefix,
             train_subdomain_key=data_args.train_subdomain_key,
         )
         eval_dataset = None
@@ -285,13 +285,12 @@ def main():
     
     if training_args.model_state_dict_from_path:
         print0("[load_model] loading from path", training_args.model_state_dict_from_path)
-        state_dict = load_model_state_dict_from_path(
-            training_args.model_state_dict_from_path
+
+        state_dict_checkpoint_folder = transformers.trainer_utils.get_last_checkpoint(training_args.model_state_dict_from_path)
+        print0("[load_model] loading from folder", state_dict_checkpoint_folder)
+        model = model.__class__.from_pretrained(
+            state_dict_checkpoint_folder
         )
-        # del state_dict["second_stage_model._orig_mod.output_projection.2.weight"]
-        # del state_dict["second_stage_model._orig_mod.output_projection.2.bias"]
-        load_result = model.load_state_dict(state_dict, strict=False)
-        issue_warnings_after_load(load_result)
 
     print0("[main] creating collator")
     collator = collator_cls(

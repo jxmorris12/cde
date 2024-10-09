@@ -34,7 +34,7 @@ CMD=" \
                   --eval_rerank_topk 512 --lr_scheduler_type linear \
                  --warmup_steps 160 --max_seq_length 512 \
                  --logging_steps 1 --train_cluster_size 256 --eval_cluster_size 256 \
-                 --use_prefix 1 --transductive_corpus_size 512 --transductive_tokens_per_document 4 \
+                 --use_prefix 1 --use_short_prefix 0 --transductive_corpus_size 512 --transductive_tokens_per_document 4 \
                  --logit_scale 50 \
                  --max_eval_batches 16 --torch_compile 0 --use_gc 1 --fp16 0 --bf16 1 \
                  --eval_steps 5000 --disable_dropout 0 --arch transductive \
@@ -49,7 +49,7 @@ CMD=" \
                  --use_wandb 1 --ddp_find_unused_parameters 1 --dataset bge \
                  --dataset_backbone "meta-llama/Llama-3.2-1B" \
                  --autoregressive_backbone 1 --transductive_sequence_dropout_prob 0.005 \
-                 --pooling_strategy mean --use_short_prefix 0
+                 --pooling_strategy mean
     "
 
 #  --clustering_batch_packing_strategy tsp_greedy \
