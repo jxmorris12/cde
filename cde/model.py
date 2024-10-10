@@ -366,16 +366,15 @@ class DatasetConditionedAutoregressive(transformers.PreTrainedModel, ContextualM
                 (input_ids == self.pool_instruction_end_id) & 
                 (torch.arange(input_ids.shape[1], device=input_ids.device)[None, :] > 0)
             ).int().argmax(1)
-            instruction_end_mask = (
+            is_instruction_token_mask = (
                 torch.arange(input_ids.shape[1], device=input_ids.device)[None, :] <= instruction_end_idx[:, None]
             )
-            instruction_end_mask = attention_mask & ~instruction_end_mask
-            input_attention_mask = torch.cat((backbone_attention_mask, attention_mask), dim=1)
+            input_attention_mask = torch.cat((backbone_attention_mask, attention_mask & ~is_instruction_token_mask), dim=1)
 
         output_attention_mask = input_attention_mask
         if self.pool_ignore_contextual_tokens:
             output_vectors = output_vectors[:, n_soft_prompt_tokens:, :]
-            output_attention_mask = input_attention_mask[:, n_soft_prompt_tokens:]
+            output_attention_mask = output_attention_mask[:, n_soft_prompt_tokens:]
 
         # Take last token position
         if vars(self.config).get("pooling_strategy") == "last_token":
@@ -471,16 +470,15 @@ class DatasetConditionedBiencoder(transformers.PreTrainedModel, ContextualModelM
                 (input_ids == self.pool_instruction_end_id) & 
                 (torch.arange(input_ids.shape[1], device=input_ids.device)[None, :] > 0)
             ).int().argmax(1)
-            instruction_end_mask = (
+            is_instruction_token_mask = (
                 torch.arange(input_ids.shape[1], device=input_ids.device)[None, :] <= instruction_end_idx[:, None]
             )
-            instruction_end_mask = attention_mask & ~instruction_end_mask
-            input_attention_mask = torch.cat((backbone_attention_mask, attention_mask), dim=1)
+            input_attention_mask = torch.cat((backbone_attention_mask, attention_mask & ~is_instruction_token_mask), dim=1)
 
         output_attention_mask = input_attention_mask
         if self.pool_ignore_contextual_tokens:
             output_vectors = output_vectors[:, n_soft_prompt_tokens:, :]
-            output_attention_mask = input_attention_mask[:, n_soft_prompt_tokens:]
+            output_attention_mask = output_attention_mask[:, n_soft_prompt_tokens:]
         output_pooled = mean_pool(output_vectors, output_attention_mask)
 
         # average with original vectors

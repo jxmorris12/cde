@@ -135,6 +135,18 @@ class ModelArguments:
             "help": "Whether to tie token embeddings for transductive model"
         }
     )
+    pool_ignore_instruction_tokens: bool = field(
+        default=False,
+        metadata={
+            "help": "Whether to ignore instruction tokens when pooling. Only applies in the long-format case."
+        }
+    )
+    pool_ignore_contextual_tokens: bool = field(
+        default=False,
+        metadata={
+            "help": "Whether to ignore contextual tokens when pooling."
+        }
+    )
     def __post_init__(self):
         if self.transductive_tokens_per_document > 1:
             assert self.architecture in ["transductive", "contextual_cross_attention"], "transductive_tokens_per_document only works with transductive architectures"
@@ -218,18 +230,6 @@ class DataArguments:
         default=True,
         metadata={
             "help": "Whether to use short prefixes for the BGE dataset, or the long ones, when prefixes are enabled"
-        }
-    )
-    pool_ignore_instruction_tokens: bool = field(
-        default=False,
-        metadata={
-            "help": "Whether to ignore instruction tokens when pooling. Only applies in the long-format case."
-        }
-    )
-    pool_ignore_contextual_tokens: bool = field(
-        default=False,
-        metadata={
-            "help": "Whether to ignore contextual tokens when pooling."
         }
     )
     def __post_init__(self):

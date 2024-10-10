@@ -1,6 +1,6 @@
 #!/bin/bash
-#SBATCH -A memorization,differential
-#SBATCH -q memorization_high,differential_high
+#SBATCH -A memorization
+#SBATCH -q memorization_high
 #SBATCH --job-name=test_multinode
 #SBATCH --output=log_submitit/multinode/llama/pretrain_%j.out
 #SBATCH --error=log_submitit/multinode/llama/pretrain_%j.err
