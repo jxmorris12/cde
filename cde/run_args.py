@@ -220,6 +220,18 @@ class DataArguments:
             "help": "Whether to use short prefixes for the BGE dataset, or the long ones, when prefixes are enabled"
         }
     )
+    pool_ignore_instruction_tokens: bool = field(
+        default=False,
+        metadata={
+            "help": "Whether to ignore instruction tokens when pooling. Only applies in the long-format case."
+        }
+    )
+    pool_ignore_contextual_tokens: bool = field(
+        default=False,
+        metadata={
+            "help": "Whether to ignore contextual tokens when pooling."
+        }
+    )
     def __post_init__(self):
         pass
 

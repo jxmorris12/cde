@@ -279,6 +279,10 @@ class DatasetConditionedAutoregressive(transformers.PreTrainedModel, ContextualM
             self.backbone_hidden_size, 
             eps=1e-5
         )
+
+        self.pool_ignore_contextual_tokens = vars(self.config).get("pool_ignore_contextual_tokens", False)
+        self.pool_ignore_instruction_tokens = vars(self.config).get("pool_ignore_instruction_tokens", False)
+        self.pool_instruction_end_id = self.backbone.config.bos_token_id
         
         # Override contextual init
         self.output_projection = torch.nn.Sequential(
@@ -351,11 +355,27 @@ class DatasetConditionedAutoregressive(transformers.PreTrainedModel, ContextualM
             output_hidden_states=True,
         ) # (1, 4 + b + s, d)
         # trim soft prompt
-        last_hidden_state = output.hidden_states[-1]
+        output_vectors = output.hidden_states[-1]
         n_soft_prompt_tokens = soft_prompt.shape[1]
 
-        output_vectors = last_hidden_state[:, n_soft_prompt_tokens:, :]
-        output_attention_mask = input_attention_mask[:, n_soft_prompt_tokens:]
+        if self.pool_ignore_instruction_tokens:
+            # Denote the end of an instruction with an extra BOS token.
+            # This is a bit arcane but relies on the fact that there will be a BOS token after the
+            # instruction, but also there may or may not be a BOS token at the beginning.
+            instruction_end_idx = (
+                (input_ids == self.pool_instruction_end_id) & 
+                (torch.arange(input_ids.shape[1], device=input_ids.device)[None, :] > 0)
+            ).int().argmax(1)
+            instruction_end_mask = (
+                torch.arange(input_ids.shape[1], device=input_ids.device)[None, :] <= instruction_end_idx[:, None]
+            )
+            instruction_end_mask = attention_mask & ~instruction_end_mask
+            input_attention_mask = torch.cat((backbone_attention_mask, attention_mask), dim=1)
+
+        output_attention_mask = input_attention_mask
+        if self.pool_ignore_contextual_tokens:
+            output_vectors = output_vectors[:, n_soft_prompt_tokens:, :]
+            output_attention_mask = input_attention_mask[:, n_soft_prompt_tokens:]
 
         # Take last token position
         if vars(self.config).get("pooling_strategy") == "last_token":
@@ -389,6 +409,9 @@ class DatasetConditionedBiencoder(transformers.PreTrainedModel, ContextualModelM
         self.hidden_size = dataset_backbone.config.hidden_size
         self.contextual_init()
         self._shift_rotary_embedding()
+
+        self.pool_ignore_contextual_tokens = vars(self.config).get("pool_ignore_contextual_tokens", False)
+        self.pool_ignore_instruction_tokens = vars(self.config).get("pool_ignore_instruction_tokens", False)
                 
     @property
     def num_corpus_tokens(self) -> int:
@@ -440,9 +463,24 @@ class DatasetConditionedBiencoder(transformers.PreTrainedModel, ContextualModelM
         # use only these tokens
         n_soft_prompt_tokens = soft_prompt.shape[1]
 
-        output_vectors = output.last_hidden_state[:, n_soft_prompt_tokens:, :]
-        output_attention_mask = attention_mask[:, n_soft_prompt_tokens:]
+        if self.pool_ignore_instruction_tokens:
+            # Denote the end of an instruction with an extra BOS token.
+            # This is a bit arcane but relies on the fact that there will be a BOS token after the
+            # instruction, but also there may or may not be a BOS token at the beginning.
+            instruction_end_idx = (
+                (input_ids == self.pool_instruction_end_id) & 
+                (torch.arange(input_ids.shape[1], device=input_ids.device)[None, :] > 0)
+            ).int().argmax(1)
+            instruction_end_mask = (
+                torch.arange(input_ids.shape[1], device=input_ids.device)[None, :] <= instruction_end_idx[:, None]
+            )
+            instruction_end_mask = attention_mask & ~instruction_end_mask
+            input_attention_mask = torch.cat((backbone_attention_mask, attention_mask), dim=1)
 
+        output_attention_mask = input_attention_mask
+        if self.pool_ignore_contextual_tokens:
+            output_vectors = output_vectors[:, n_soft_prompt_tokens:, :]
+            output_attention_mask = input_attention_mask[:, n_soft_prompt_tokens:]
         output_pooled = mean_pool(output_vectors, output_attention_mask)
 
         # average with original vectors

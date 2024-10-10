@@ -7,6 +7,7 @@ datasets:
 
   - name: "amazon_reviews"
     query_prefix: "Classify the given Amazon review into its appropriate rating category."
+    is_symmetric: true
     objective:
       type: "paired"
       columns: ["query", "document"]
@@ -46,7 +47,7 @@ datasets:
   # sets of duplicate questions
   - name: "wikianswers"
     bucket: "s3://contrastive-index-filtered/wikianswers_full/shard-{00000..00100}.jsonl.gz"
-    query_only: true
+    is_symmetric: true
     query_prefix: "Retrieve semantically similar questions."
     objective:
       type: "paired"
@@ -138,7 +139,7 @@ datasets:
 
   - name: "stackexchange_duplicate_questions"
     bucket: "s3://contrastive-index-filtered/stackexchange_question_question_full/shard-00000.jsonl.gz"
-    query_only: true
+    is_symmetric: true
     query_prefix: "Retrieve semantically similar questions."
     objective:
       type: "paired"
@@ -153,7 +154,7 @@ datasets:
 
   - name: "stackexchange_body_body"
     bucket: "s3://contrastive-index-filtered/stackexchange_body_body_full/shard-00000.jsonl.gz"
-    query_only: true
+    is_symmetric: true
     query_prefix: "Retrieve semantically similar questions."
     objective:
       type: "paired"
@@ -175,7 +176,7 @@ datasets:
 
   - name: "altlex"
     bucket: "s3://contrastive-index-filtered/altlex_full/shard-00000.jsonl.gz"
-    query_only: true
+    is_symmetric: true
     query_prefix: "Retrieve semantically similar questions."
     objective:
       type: "paired"
@@ -183,7 +184,7 @@ datasets:
 
   - name: "quora"
     bucket: "s3://contrastive-index-filtered/quora_full/shard-00000.jsonl.gz"
-    query_only: true
+    is_symmetric: true
     query_prefix: "Retrieve semantically similar questions."
     objective:
       type: "paired"

@@ -50,4 +50,8 @@ MODEL_FOLDER_DICT = {
    # changed to 1b, changed prefixes
    "cde--supervised--llama1b-1--epoch-1": "/fsx-checkpoints/jxm/cde/2024-09-30-supervised-final-bge-llama-1b-2-fsdp--epoch-1/",
    "cde--supervised--llama1b-1--epoch-2": "/fsx-checkpoints/jxm/cde/2024-09-30-supervised-final-bge-llama-1b-2-fsdp--epoch-2/",
+   # pretrained for .85 epoch w/ long prefixes, then sft for epochs
+   "cde--supervised--llama1b-2--epoch-1": "/fsx-checkpoints/jxm/cde/2024-10-10-supervised-pretrain-llama-1b/",
+   # pretrained for .85 epoch w/ long prefixes, then sft for epochs w/ better/fixed symmetry
+   "cde--supervised--llama1b-3--epoch-1": "/fsx-checkpoints/jxm/cde/2024-10-10-supervised-pretrain-llama-1b-2--epoch-1/",
 }

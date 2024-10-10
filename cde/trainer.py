@@ -4,6 +4,7 @@ import functools
 import gc
 import math
 import os
+import re
 import time
 
 import datasets
@@ -257,7 +258,7 @@ class CustomTrainer(transformers.Trainer, TrainerNegativeFilterMixin):
         """
         if not self.args.use_wandb:
              return None
-        elif not (self.args.local_rank <= 0):
+        elif not self._is_main_worker:
              return None
         batch = next(iter(dataloader))
         print("[get_examples_table] got batch", batch is None)
@@ -266,10 +267,12 @@ class CustomTrainer(transformers.Trainer, TrainerNegativeFilterMixin):
     
         keys = ["query_input_ids", "document_input_ids"]
         tokenizers = [self.dataset_backbone_tokenizer, self.dataset_backbone_tokenizer]
-        data = [
-                tokenizer.batch_decode(batch[key][:n], skip_special_tokens=False)
-                for (tokenizer, key) in zip(tokenizers, keys)
 
+        bot_pattern = r"(<\|begin_of_text\|>)+"
+        bot_replacement = "<|begin_of_text|>"
+        data = [
+                [re.sub(bot_pattern, bot_replacement, text) for text in tokenizer.batch_decode(batch[key][:n], skip_special_tokens=False)]
+                for (tokenizer, key) in zip(tokenizers, keys)
         ]
         names = [k.replace("_input_ids", "") for k in keys]
         # transpose the list of lists
@@ -278,21 +281,13 @@ class CustomTrainer(transformers.Trainer, TrainerNegativeFilterMixin):
 
     @property
     def _is_main_worker(self) -> bool:
-        return (
-            (self.args.local_rank <= 0) and 
-            # (int(os.environ.get("LOpCAL_RANK", 0)) <= 0) and
-            get_rank() == 0
-        )
-
-    def _main_worker_breakpoint(self) -> None:
-        if self._is_main_worker:
-            breakpoint()
-        torch.distributed.barrier()
+        return get_rank() == 0
     
     def _inner_training_loop(self, *args, **kwargs):
         """Override pre-training loop to do a couple of things. This happens after model is loaded from checkpoint."""
         # Log examples table!
         if self._is_main_worker:
+            print0(f"[inner_training_loop] getting examples table")
             # On beginning of train, log tables of examples.
             train_table: wandb.Table = self._get_examples_table(
                 super().get_train_dataloader()
@@ -318,7 +313,7 @@ class CustomTrainer(transformers.Trainer, TrainerNegativeFilterMixin):
     def training_step(self, model: torch.nn.Module, inputs: Dict[str, Union[torch.Tensor, Any]]) -> torch.Tensor:
         """
         Overriding from trainer so that we can disable backward()
-        in favor of the gradcache backward()
+        in favor of the gradcache backward().
         """
         self.train_dataloader.dataset.reset_dataset_idx()
 
@@ -327,8 +322,6 @@ class CustomTrainer(transformers.Trainer, TrainerNegativeFilterMixin):
             if get_rank() == 0:
                 print("[rank 0] Resetting memory")
             reset_memory()
-        
-        # print("[0] training_step init", get_rank())
 
         model.train()
         inputs = self._prepare_inputs(inputs)
@@ -340,8 +333,6 @@ class CustomTrainer(transformers.Trainer, TrainerNegativeFilterMixin):
         # Uncomment next line to test eval straightaway.
         # self.control.should_evaluate = True  #########
         ##############################################
-        # print("[2] training_step accelerator.backward", get_rank())
-        # breakpoint()
         if not self.use_gc:
             self.accelerator.backward(loss)
         self._log_grad_norm_metrics(model=model)
@@ -673,7 +664,6 @@ class CustomTrainer(transformers.Trainer, TrainerNegativeFilterMixin):
                         print("--> unknown", k, type(v))
 
                 print("(offending shapes...)", smart_labels_neg.shape, smart_labels.shape)
-                breakpoint()
             
             smart_labels = smart_labels | smart_labels_neg
             hard_negatives_metrics = {

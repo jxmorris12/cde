@@ -71,7 +71,7 @@ def main():
         query_prefix="",        # Set later
         document_prefix="",     # Set later
         normalize_embeds=False, # Set later
-        default_doc_prefix=True,
+        default_doc_prefix=data_args.use_short_prefix,
     )
     first_stage_tokenizer = transformers.AutoTokenizer.from_pretrained(model.config.embedder)
 
@@ -80,15 +80,15 @@ def main():
         document_prefix = ""
         query_prefix = ""
         if data_args.use_prefix:
+            short_prefixes = task2prefix_short[task]
+            is_symmetric = (short_prefixes["query"] == short_prefixes["document"])
             if data_args.use_short_prefix:
-                prefixes = task2prefix_short[task]
-                document_prefix = (prefixes["document"] + ": ") if data_args.use_prefix else ""
-                query_prefix = (prefixes["query"] + ": ") if data_args.use_prefix else ""
+                document_prefix = (short_prefixes["document"] + ": ") if data_args.use_prefix else ""
+                query_prefix = (short_prefixes["query"] + ": ") if data_args.use_prefix else ""
             else:
-                document_prefix = task2prefix_long[task]
-                if task in (TASK_LIST_STS + ["QuoraRetrieval"]):
-                    # todo: verify this
-                    query_prefix = document_prefix
+                query_prefix = task2prefix_long[task] + " "
+                document_prefix = query_prefix if is_symmetric else ""
+                
         mteb_encoder.document_prefix = document_prefix
         mteb_encoder.query_prefix = query_prefix
         print(f"Set prefixes to {mteb_encoder.query_prefix} and {mteb_encoder.document_prefix}")
@@ -176,9 +176,9 @@ def main():
             corpus_chunk_size=500_000,
             verbosity=2,
             eval_splits=[split],
-            # encode_kwargs={"batch_size": args.batch_size, "num_workers": 8 },
+            encode_kwargs={"batch_size": args.batch_size, "num_workers": 8 },
             # encode_kwargs={"batch_size": args.batch_size, "num_workers": 0},
-            encode_kwargs={"batch_size": args.batch_size, "num_workers": 1},
+            # encode_kwargs={"batch_size": args.batch_size, "num_workers": 1},
         )
         print(task)
         print("\t", results)

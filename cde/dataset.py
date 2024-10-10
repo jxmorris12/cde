@@ -588,24 +588,25 @@ class BGEDataset(torch.utils.data.Dataset, TokenizerMixin):
     def __getitem__(self, query_id: int) -> Dict[str, torch.Tensor]: 
         ex = self.dataset[query_id]
 
-        document = ex["document"]
-        if not len(document): document = "[null]" # fix empty-string issue. unlikely.
+        short_query_prefix = self.get_query_prefix(ex["dataset"])
+        short_document_prefix = self.get_document_prefix(ex["dataset"])
+        is_symmetric = (short_query_prefix == short_document_prefix)
 
         if self.use_prefix:
             if self.use_short_prefix:
-                query_prefix = self.get_query_prefix(ex["dataset"])
-                document_prefix = self.get_document_prefix(ex["dataset"])
-                query_prefix = f"{query_prefix}: "
-                document_prefix = f"{document_prefix}: "
+                query_prefix = f"{short_query_prefix}: "
+                document_prefix = f"{short_document_prefix}: "
             else:
-                query_prefix = ex["prompt"] + " "
-                document_prefix = ""
+                query_prefix = ex["prompt"] + self.tokenizer.bos_token + " "
+                document_prefix = query_prefix if is_symmetric else ""
         else:
             query_prefix = ""
             document_prefix = ""
         query = query_prefix + ex["query"]
-        document = document_prefix + document
+        document = document_prefix + ex["document"]
         random_document = document_prefix + document
+
+        # print(ex["dataset"], is_symmetric, "/", query_prefix, "/", document_prefix)
 
         if len(ex["neg"]) < self.num_hard_negatives:
             # sample w/ replacement
@@ -732,7 +733,7 @@ class NomicUnsupervisedDataset(torch.utils.data.Dataset, TokenizerMixin):
         if self.use_short_prefix:
             return self.config[dataset]["query_prefix"] + ": "
         else:
-            return self.config[dataset]["query_prefix"] + " "
+            return self.config[dataset]["query_prefix"] + self.tokenizer.bos_token + " "
     
     def get_document_prefix(self, dataset: str) -> str:
         if self.use_short_prefix:
@@ -740,8 +741,8 @@ class NomicUnsupervisedDataset(torch.utils.data.Dataset, TokenizerMixin):
         else:
             # For long prefixes, we either duplicate the query prefix ("query-only")
             # or just don't use one at all (most non-STS datasets).
-            if self.config[dataset].get("query_only", False):
-                return self.config[dataset]["query_prefix"] + " "
+            if self.config[dataset].get("is_symmetric", False):
+                return self.get_query_prefix(dataset)
             else:
                 return ""
     
@@ -782,6 +783,7 @@ class NomicUnsupervisedDataset(torch.utils.data.Dataset, TokenizerMixin):
     
     def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]: 
         ex = self.dataset[idx]
+
         if self.use_prefix:
             query_prefix = self.get_query_prefix(ex["dataset"])
             document_prefix = self.get_document_prefix(ex["dataset"])
