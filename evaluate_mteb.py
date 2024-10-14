@@ -86,7 +86,7 @@ def main():
                 document_prefix = (short_prefixes["document"] + ": ") if data_args.use_prefix else ""
                 query_prefix = (short_prefixes["query"] + ": ") if data_args.use_prefix else ""
             else:
-                query_prefix = task2prefix_long[task] + " "
+                query_prefix = task2prefix_long[task] + first_stage_tokenizer.bos_token + " "
                 document_prefix = query_prefix if is_symmetric else ""
                 
         mteb_encoder.document_prefix = document_prefix

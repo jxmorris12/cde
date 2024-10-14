@@ -11,6 +11,8 @@ from cde.lib.tensor import mean_pool, mean_pool_3d, mean_pool_weighted, last_tok
 from cde.lib import load_embedder_and_tokenizer, ContextualModelConfig
 
 
+gpt_tokenizer = transformers.AutoTokenizer.from_pretrained("gpt2")
+
 def limit_layers(model: transformers.PreTrainedModel, n_layers: int) -> None:
     if hasattr(model, 'transformer'):
         if hasattr(model.transformer, 'h'):
@@ -364,10 +366,15 @@ class DatasetConditionedAutoregressive(transformers.PreTrainedModel, ContextualM
             # instruction, but also there may or may not be a BOS token at the beginning.
             instruction_end_idx = (
                 (input_ids == self.pool_instruction_end_id) & 
+                attention_mask &
                 (torch.arange(input_ids.shape[1], device=input_ids.device)[None, :] > 0)
             ).int().argmax(1)
             is_instruction_token_mask = (
                 torch.arange(input_ids.shape[1], device=input_ids.device)[None, :] <= instruction_end_idx[:, None]
+            )
+            # catch edge case where there is no instruction
+            is_instruction_token_mask = is_instruction_token_mask.where(
+                (instruction_end_idx > 0)[:, None], torch.zeros_like(is_instruction_token_mask)
             )
             input_attention_mask = torch.cat((backbone_attention_mask, attention_mask & ~is_instruction_token_mask), dim=1)
 
@@ -468,10 +475,15 @@ class DatasetConditionedBiencoder(transformers.PreTrainedModel, ContextualModelM
             # instruction, but also there may or may not be a BOS token at the beginning.
             instruction_end_idx = (
                 (input_ids == self.pool_instruction_end_id) & 
+                attention_mask &
                 (torch.arange(input_ids.shape[1], device=input_ids.device)[None, :] > 0)
             ).int().argmax(1)
             is_instruction_token_mask = (
                 torch.arange(input_ids.shape[1], device=input_ids.device)[None, :] <= instruction_end_idx[:, None]
+            )
+            # catch edge case where there is no instruction
+            is_instruction_token_mask = is_instruction_token_mask.where(
+                (instruction_end_idx > 0)[:, None], torch.zeros_like(is_instruction_token_mask)
             )
             input_attention_mask = torch.cat((backbone_attention_mask, attention_mask & ~is_instruction_token_mask), dim=1)
 

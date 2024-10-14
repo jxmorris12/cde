@@ -54,4 +54,6 @@ MODEL_FOLDER_DICT = {
    "cde--supervised--llama1b-2--epoch-1": "/fsx-checkpoints/jxm/cde/2024-10-10-supervised-pretrain-llama-1b/",
    # pretrained for .85 epoch w/ long prefixes, then sft for epochs w/ better/fixed symmetry
    "cde--supervised--llama1b-3--epoch-1": "/fsx-checkpoints/jxm/cde/2024-10-10-supervised-pretrain-llama-1b-2--epoch-1/",
+   # pretrained for .85 epoch w/ long prefixes without pooling over prefix
+   "cde--supervised--llama1b-4--unsup": "/fsx-checkpoints/jxm/cde/2024-10-11-llama-1b-pretrain-2/",
 }
