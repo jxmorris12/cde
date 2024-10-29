@@ -140,7 +140,7 @@ class DenseEncoder(torch.nn.Module):
         self.query_prefix = query_prefix
         self.document_prefix = document_prefix
         self.model_kwargs = {}
-        self._max_num_chars = (self.max_length * 4)
+        self._max_num_chars = (self.max_length * 16)
         self.normalize_embeds = normalize_embeds
         self.default_doc_prefix = default_doc_prefix
 
@@ -260,7 +260,7 @@ class DenseEncoder(torch.nn.Module):
         """
         if not len(prefix) and self.default_doc_prefix:
             prefix = self.document_prefix
-
+        
         data_loader = self._create_dataloader(
             dataset=dataset,
             col=col,

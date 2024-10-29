@@ -310,7 +310,9 @@ class CustomTrainer(transformers.Trainer, TrainerNegativeFilterMixin):
 
         super()._inner_training_loop(*args, **kwargs)
         
-    def training_step(self, model: torch.nn.Module, inputs: Dict[str, Union[torch.Tensor, Any]]) -> torch.Tensor:
+    def training_step(
+            self, model: torch.nn.Module, inputs: Dict[str, Union[torch.Tensor, Any]], num_items_in_batch=None
+        ) -> torch.Tensor:
         """
         Overriding from trainer so that we can disable backward()
         in favor of the gradcache backward().

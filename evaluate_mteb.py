@@ -26,6 +26,7 @@ os.environ['OPENBLAS_NUM_THREADS'] = '16'
 # TASK_LIST = TASK_LIST_RERANKING
 # TASK_LIST = ["Touche2020"]
 # TASK_LIST = ["ArguAna"]
+# TASK_LIST = ["ArguAna", "Touche2020", "STS12", "STS22"]
 
 def parse_args() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Process model key")
@@ -64,6 +65,7 @@ def main():
         model_name_or_path = model.config.dataset_backbone
     else:
         model_name_or_path = model.config.embedder
+    
     mteb_encoder = DenseEncoder(
         model_name_or_path=model_name_or_path,
         encoder=model.second_stage_model,
@@ -71,9 +73,10 @@ def main():
         query_prefix="",        # Set later
         document_prefix="",     # Set later
         normalize_embeds=False, # Set later
-        default_doc_prefix=data_args.use_short_prefix,
+        default_doc_prefix=True,
     )
     first_stage_tokenizer = transformers.AutoTokenizer.from_pretrained(model.config.embedder)
+    second_stage_tokenizer = transformers.AutoTokenizer.from_pretrained(vars(model.config).get("dataset_backbone") or model.config.embedder)
 
     random.Random(time.time()).shuffle(TASK_LIST)
     for task_idx, task in enumerate(TASK_LIST):
@@ -86,11 +89,12 @@ def main():
                 document_prefix = (short_prefixes["document"] + ": ") if data_args.use_prefix else ""
                 query_prefix = (short_prefixes["query"] + ": ") if data_args.use_prefix else ""
             else:
-                query_prefix = task2prefix_long[task] + first_stage_tokenizer.bos_token + " "
+                query_prefix = task2prefix_long[task] + second_stage_tokenizer.bos_token + " "
                 document_prefix = query_prefix if is_symmetric else ""
                 
         mteb_encoder.document_prefix = document_prefix
         mteb_encoder.query_prefix = query_prefix
+
         print(f"Set prefixes to {mteb_encoder.query_prefix} and {mteb_encoder.document_prefix}")
         mteb_encoder.normalize_embeds = "Clustering" in task
         print(f"[{task}] Set prefixes to {mteb_encoder.query_prefix} and {mteb_encoder.document_prefix}")
@@ -102,7 +106,7 @@ def main():
             embedder_rerank="sentence-transformers/gtr-t5-base",
         )
         split = "dev" if task == "MSMARCO" else "test"
-        ##################################################
+        ####################################################################################################
         evaluation.tasks[0].load_data()
         if hasattr(evaluation.tasks[0], 'corpus') and split in evaluation.tasks[0].corpus:
             corpus = evaluation.tasks[0].corpus[split]
@@ -163,22 +167,22 @@ def main():
         hidden_dim = dataset_embeddings.shape[-1]
         dataset_embeddings = dataset_embeddings.reshape((1, -1, hidden_dim)) # flatten for multiple contextual tokens
         dataset_embeddings = dataset_embeddings.to(torch.float32).cpu().numpy()
+
         ##################################################
         mteb_encoder.model_kwargs = {
             "dataset_embeddings": dataset_embeddings,
             "null_dataset_embedding": False,
             # ""
         }
-        # breakpoint()
         results = evaluation.run(
             mteb_encoder, 
-            output_folder=os.path.join("results_mteb", args.model_key),
+            output_folder=os.path.join("results_mteb", "fixed", args.model_key),
             corpus_chunk_size=500_000,
             verbosity=2,
             eval_splits=[split],
-            encode_kwargs={"batch_size": args.batch_size, "num_workers": 8 },
             # encode_kwargs={"batch_size": args.batch_size, "num_workers": 0},
             # encode_kwargs={"batch_size": args.batch_size, "num_workers": 1},
+            encode_kwargs={"batch_size": args.batch_size, "num_workers": 8 },
         )
         print(task)
         print("\t", results)

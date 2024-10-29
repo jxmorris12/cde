@@ -56,4 +56,15 @@ MODEL_FOLDER_DICT = {
    "cde--supervised--llama1b-3--epoch-1": "/fsx-checkpoints/jxm/cde/2024-10-10-supervised-pretrain-llama-1b-2--epoch-1/",
    # pretrained for .85 epoch w/ long prefixes without pooling over prefix
    "cde--supervised--llama1b-4--unsup": "/fsx-checkpoints/jxm/cde/2024-10-11-llama-1b-pretrain-2/",
+   "cde--supervised--llama1b-4--epoch-1": "/fsx-checkpoints/jxm/cde/2024-10-14-supervised-pretrain-llama-1b-4--epoch-1/",
+   "cde--supervised--llama1b-4--epoch-2": "/fsx-checkpoints/jxm/cde/2024-10-14-supervised-pretrain-llama-1b-4--epoch-2/",
+   "cde--supervised--llama1b-4--epoch-3": "/fsx-checkpoints/jxm/cde/2024-10-14-supervised-pretrain-llama-1b-4--epoch-3/",
+   "cde--supervised--llama1b-4--epoch-4": "/fsx-checkpoints/jxm/cde/2024-10-14-supervised-pretrain-llama-1b-4--epoch-4/",
+   "cde--supervised--llama1b-4--epoch-5": "/fsx-checkpoints/jxm/cde/2024-10-14-supervised-pretrain-llama-1b-4--epoch-5/",
+   # same as above but with more hard negatives
+   "cde--supervised--llama1b-5--epoch-1": "/fsx-checkpoints/jxm/cde/2024-10-17-supervised-pretrain-llama-1b-5--epoch-1",
+   "cde--supervised--llama1b-5--epoch-2": "/fsx-checkpoints/jxm/cde/2024-10-17-supervised-pretrain-llama-1b-5--epoch-2",
+   # same as two above but with weighted-mean pooling
+   "cde--supervised--llama1b-6--epoch-1": "/fsx-checkpoints/jxm/cde/2024-10-21-supervised-pretrain-llama-1b-5--epoch-1",
+   "cde--supervised--llama1b-6--epoch-2": "/fsx-checkpoints/jxm/cde/2024-10-21-supervised-pretrain-llama-1b-5--epoch-2",
 }

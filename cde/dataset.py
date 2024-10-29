@@ -606,6 +606,10 @@ class BGEDataset(torch.utils.data.Dataset, TokenizerMixin):
         document = document_prefix + ex["document"]
         random_document = document_prefix + document
 
+        if len(document) == 0:
+            # fix for empty documents
+            document = "[empty]"
+
         # print(ex["dataset"], is_symmetric, "/", query_prefix, "/", document_prefix)
 
         if len(ex["neg"]) < self.num_hard_negatives:

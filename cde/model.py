@@ -48,6 +48,7 @@ def disable_causality(model: torch.nn.Module):
         f"Set is_causal=False in {disabled_modules} modules from model type {type(model)}"
     )
 
+
 class ContextualModelMixin(nn.Module):
     @property
     def num_corpus_tokens(self) -> int:
@@ -153,6 +154,7 @@ class ContextualModelMixin(nn.Module):
             soft_prompt = soft_prompt.gather(1, randomized_order[..., None].expand_as(soft_prompt))
         
         return soft_prompt
+
 
 class BiEncoder(transformers.PreTrainedModel):
     embedder: transformers.PreTrainedModel
@@ -275,7 +277,7 @@ class DatasetConditionedAutoregressive(transformers.PreTrainedModel, ContextualM
         self.backbone_hidden_size = self.backbone.config.hidden_size
         self.hidden_size = first_stage_hidden_size # Input token size
         self.contextual_init()
-        # disable_causality(self.backbone)
+        disable_causality(self.backbone)
         
         self.input_ln = torch.nn.LayerNorm(
             self.backbone_hidden_size, 
@@ -351,6 +353,7 @@ class DatasetConditionedAutoregressive(transformers.PreTrainedModel, ContextualM
         # print("[3.a] inputs_embeds.shape =", inputs_embeds.shape)
         input_attention_mask = torch.cat((backbone_attention_mask, attention_mask), dim=1)
         # print("[3.b] attention_mask.shape =", attention_mask.shape)
+
         output = self.backbone(
             inputs_embeds=inputs_embeds,
             attention_mask=input_attention_mask,
@@ -376,7 +379,10 @@ class DatasetConditionedAutoregressive(transformers.PreTrainedModel, ContextualM
             is_instruction_token_mask = is_instruction_token_mask.where(
                 (instruction_end_idx > 0)[:, None], torch.zeros_like(is_instruction_token_mask)
             )
-            input_attention_mask = torch.cat((backbone_attention_mask, attention_mask & ~is_instruction_token_mask), dim=1)
+            input_attention_mask = torch.cat((
+                backbone_attention_mask, 
+                attention_mask & ~is_instruction_token_mask), dim=1
+            )
 
         output_attention_mask = input_attention_mask
         if self.pool_ignore_contextual_tokens:
@@ -636,6 +642,9 @@ def get_model_class(name: str):
         return DatasetTransformer
     elif name == 'biencoder':
         return BiEncoder
+    elif name == "biencoder_plus_plus":
+        from cde.model_extra import BiEncoderPlusPlus
+        return BiEncoderPlusPlus
     elif name == "dataset_prefix_biencoder":
         return DatasetPrefixBiencoder
     else:

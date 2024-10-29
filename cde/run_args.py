@@ -72,7 +72,7 @@ class ModelArguments:
     architecture: str = field(
         default="biencoder",
         metadata = {
-            "choices": ["biencoder", "dataset_prefix_biencoder", "transductive", "transductive__encoder_decoder", "two_head_mlp", "contextual_cross_attention"],
+            "choices": ["biencoder", "biencoder_plus_plus", "dataset_prefix_biencoder", "transductive", "transductive__encoder_decoder", "two_head_mlp", "contextual_cross_attention"],
         }
     )
     pooling_strategy: str = field(
