@@ -22,3 +22,4 @@ spider.egg-info/
 profile*.txt
 
 .ipynb_checkpoints/
+*.egg-info
