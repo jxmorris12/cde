@@ -457,7 +457,7 @@ class CustomTrainer(transformers.Trainer, TrainerNegativeFilterMixin):
                 negative_document_inputs["attention_mask_first_stage"] = negative_document_inputs["attention_mask_first_stage"].reshape(-1, seq_length)
 
         batch_size = query_inputs["input_ids"].shape[0]
-        if self.args.transductive_input_strategy == "fake":
+        if self.args.contextual_input_strategy == "fake":
             fake_seq_length = 128
             fake_dataset_input_ids = torch.ones(
                 (batch_size, fake_seq_length), device=query_inputs["input_ids"].device,
@@ -469,9 +469,9 @@ class CustomTrainer(transformers.Trainer, TrainerNegativeFilterMixin):
             )
             dataset_inputs["input_ids"] = fake_dataset_input_ids
             dataset_inputs["attention_mask"] = fake_dataset_attention_mask
-        elif self.args.transductive_input_strategy in ["topk", "random_corpus"]:
+        elif self.args.contextual_input_strategy in ["topk", "random_corpus"]:
             if len(negative_document_inputs) and ("input_ids" in negative_document_inputs) and len(negative_document_inputs["input_ids"]):
-                # Also consider negative documents in the transductive selection step
+                # Also consider negative documents in the contextual selection step
                 dataset_inputs["input_ids"] = torch.cat(
                     (document_inputs.get("input_ids_first_stage", "input_ids"), negative_document_inputs.get("input_ids_first_stage", "input_ids")),
                     dim=0
@@ -484,13 +484,13 @@ class CustomTrainer(transformers.Trainer, TrainerNegativeFilterMixin):
                 dataset_inputs["input_ids"] = document_inputs.get("input_ids_first_stage", "input_ids")
                 dataset_inputs["attention_mask"] = document_inputs.get("attention_mask_first_stage", "attention_mask")
 
-        elif self.args.transductive_input_strategy == "random_corpus":
+        elif self.args.contextual_input_strategy == "random_corpus":
             dataset_inputs["input_ids"] = random_document_inputs.get("input_ids_first_stage", "input_ids")
             dataset_inputs["attention_mask"] = random_document_inputs.get("attention_mask_first_stage", "attention_mask")
         else:
             pass
         
-        # Aggregate all transductive inputs from all GPUs
+        # Aggregate all contextual inputs from all GPUs
         dataset_inputs["input_ids"] = self.consider_gather(dataset_inputs["input_ids"])
         dataset_inputs["attention_mask"] = self.consider_gather(dataset_inputs["attention_mask"])
     
@@ -500,7 +500,7 @@ class CustomTrainer(transformers.Trainer, TrainerNegativeFilterMixin):
             self.model.config.transductive_corpus_size * 
             self.model.config.transductive_tokens_per_document
         )
-        # assert transductive_corpus_size <= effective_batch_size, "cannot provide more transductive inputs than in batch"
+        # assert transductive_corpus_size <= effective_batch_size, "cannot provide more contextual inputs than in batch"
 
         # Randomly reorder dataset input ids.
         R1 = torch.randperm(effective_batch_size)[:transductive_corpus_size]
@@ -517,7 +517,7 @@ class CustomTrainer(transformers.Trainer, TrainerNegativeFilterMixin):
         return (query_inputs, document_inputs, negative_document_inputs)
 
     def get_model_stages(self, model: torch.nn.Module) -> Optional[Tuple[torch.nn.Module, torch.nn.Module]]:
-        """We have to individually wrap models when our model is two stages (in the transductive setting) so
+        """We have to individually wrap models when our model is two stages (in the contextual setting) so
         that we can make sure DDP works properly, since it needs to individually hook into the forward() of
         both models.
         """
@@ -786,8 +786,8 @@ class CustomTrainer(transformers.Trainer, TrainerNegativeFilterMixin):
             batch_size=self.args.max_batch_size_fits_in_memory,
             max_reranking_queries=n,
             name=metric_key_prefix,
-            transductive_n_outputs_ensemble=self.args.transductive_n_outputs_ensemble,
-            transductive_input_strategy=self.args.transductive_input_strategy,
+            contextual_n_outputs_ensemble=self.args.contextual_n_outputs_ensemble,
+            contextual_input_strategy=self.args.contextual_input_strategy,
         )
         # Rerank top-k results using the reranker provided
         rerank_results_model = reranker.rerank(

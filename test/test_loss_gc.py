@@ -122,7 +122,7 @@ def test_loss_gradcache():
     assert torch.isclose(gc_loss, true_loss)
 
 
-def test_loss_gradcache__transductive():
+def test_loss_gradcache__contextual():
     tiny_model_name = 'distilbert-base-uncased'
     tiny_model = transformers.AutoModel.from_pretrained(
         tiny_model_name)
@@ -274,7 +274,7 @@ def test_gradient_gradcache__biencoder():
     assert torch.isclose(true_grad_sum, gc_grad_sum)
 
 
-def test_gradient_gradcache__transductive():
+def test_gradient_gradcache__contextual():
     tiny_model_name = 'distilbert-base-uncased'
     tiny_model = transformers.AutoModel.from_pretrained(
         tiny_model_name)

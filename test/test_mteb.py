@@ -22,12 +22,12 @@ def test_mteb_retrieval():
         task_langs=["en"],
         embedder_rerank="sentence-transformers/gtr-t5-base",
     )
-    transductive_model = FakeDatasetTransformer()
+    contextual_model = FakeDatasetTransformer()
 
     mteb_encoder = TwoStageDenseEncoder(
         model_name_or_path=gtr_mn,
         max_seq_length=16,
-        encoder=transductive_model,
+        encoder=contextual_model,
         query_prefix="search_query: ",
         document_prefix="search_document: ",
     )

@@ -40,7 +40,7 @@ def test_contextual_cross_attention():
         limit_layers=False,
         disable_dropout=False,
         logit_scale=50,
-        transductive_tie_token_embeddings=False,
+        contextual_tie_token_embeddings=False,
         transductive_corpus_size=2, 
         tokens_per_document=3,
     )

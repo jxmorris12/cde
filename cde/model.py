@@ -64,7 +64,7 @@ class ContextualModelMixin(nn.Module):
         self.transductive_corpus_size = vars(self.config).get("transductive_corpus_size", 1)
         self.transductive_tokens_per_document = vars(self.config).get("transductive_tokens_per_document", 1)
         self.randomize_dataset_sequence_order = True
-        self.sequence_dropout_prob = vars(self.config).get("transductive_sequence_dropout_prob", 0.0)
+        self.sequence_dropout_prob = vars(self.config).get("contextual_sequence_dropout_prob", 0.0)
         if self.sequence_dropout_prob > 0.0:
             self.sequence_dropout_null_embedding = torch.nn.Parameter(
                 torch.randn(self.hidden_size) * 0.01,
@@ -310,7 +310,7 @@ class DatasetConditionedAutoregressive(transformers.PreTrainedModel, ContextualM
         return self.hidden_size % self.backbone_hidden_size
     
     def _shift_rotary_embedding(self) -> None:
-        disable_transductive_rotary_embedding = vars(self.config).get("disable_transductive_rotary_embedding", True)
+        disable_contextual_rotary_embedding = vars(self.config).get("disable_contextual_rotary_embedding", True)
         # TODO: Can we do this for LLAMA?
         print0("Warning: Positional embedding disabling not implemented for LLAMA.")
     
@@ -430,8 +430,8 @@ class DatasetConditionedBiencoder(transformers.PreTrainedModel, ContextualModelM
         return self.config.transductive_corpus_size * self.transductive_tokens_per_document
     
     def _shift_rotary_embedding(self) -> None:
-        disable_transductive_rotary_embedding = vars(self.config).get("disable_transductive_rotary_embedding", True)
-        if self.backbone.config.model_type.startswith("nomic") and disable_transductive_rotary_embedding:
+        disable_contextual_rotary_embedding = vars(self.config).get("disable_contextual_rotary_embedding", True)
+        if self.backbone.config.model_type.startswith("nomic") and disable_contextual_rotary_embedding:
             # We only want to apply positional embeddings to the
             # *text* portion of the backbone network.
             self.backbone.config.rotary_start_pos = 0.0
@@ -606,8 +606,8 @@ class DatasetTransformer(transformers.PreTrainedModel):
         if config.disable_dropout:
             disable_dropout(self)
         
-        transductive_tie_token_embeddings = vars(self.config).get("transductive_tie_token_embeddings", False)
-        if transductive_tie_token_embeddings:
+        contextual_tie_token_embeddings = vars(self.config).get("contextual_tie_token_embeddings", False)
+        if contextual_tie_token_embeddings:
             self.second_stage_model.backbone.embeddings.word_embeddings.weight = (
                 self.first_stage_model.embedder.embeddings.word_embeddings.weight
             )
@@ -638,7 +638,7 @@ class DatasetTransformer(transformers.PreTrainedModel):
 
 
 def get_model_class(name: str):
-    if name in 'transductive': 
+    if name in 'contextual': 
         return DatasetTransformer
     elif name == 'biencoder':
         return BiEncoder

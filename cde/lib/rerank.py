@@ -57,9 +57,9 @@ class RerankHelper:
             max_reranking_queries: int, 
             max_seq_length: int, 
             name: str, 
-            transductive_input_strategy: str,
+            contextual_input_strategy: str,
             pooling_factor: int = 1,
-            transductive_n_outputs_ensemble: int = 1,
+            contextual_n_outputs_ensemble: int = 1,
             default_dtype = torch.bfloat16,
         ):
         self.model = model
@@ -68,14 +68,14 @@ class RerankHelper:
         self.max_seq_length = max_seq_length
         self.name = name
 
-        assert transductive_input_strategy in ["fake", "dummy", "random_corpus", "random_corpus__topk__interp", "topk", "topk_pool", "null", "null_topk"]
-        self.transductive_input_strategy = transductive_input_strategy
+        assert contextual_input_strategy in ["fake", "dummy", "random_corpus", "random_corpus__topk__interp", "topk", "topk_pool", "null", "null_topk"]
+        self.contextual_input_strategy = contextual_input_strategy
         # Subsample queries from large sets so that we can evaluate
         # in a reasonable amount of time. Also remember this will be
         # distributed across GPUs. So it's not that bad.
         self.max_reranking_queries = max_reranking_queries
         self.pooling_factor = 4
-        self.transductive_n_outputs_ensemble = transductive_n_outputs_ensemble
+        self.contextual_n_outputs_ensemble = contextual_n_outputs_ensemble
         self._pad = lambda t: torch.nn.functional.pad(t, pad=[0, self.max_seq_length - t.shape[-1]], value=self.tokenizer.pad_token_id)
         # self.default_dtype = torch.float16
         self.default_dtype = torch.bfloat16
@@ -103,7 +103,7 @@ class RerankHelper:
             tokenize_corpus_func,
             top_k: int
         ) -> TensorPair:
-        if self.transductive_input_strategy == "fake":
+        if self.contextual_input_strategy == "fake":
             batch_size = document_inputs["input_ids"].shape[0]
             fake_seq_length = top_k
             fake_dataset_input_ids = torch.ones(
@@ -116,13 +116,13 @@ class RerankHelper:
             )
             dataset_input_ids = fake_dataset_input_ids
             dataset_attention_mask = fake_dataset_attention_mask
-        elif self.transductive_input_strategy == "random_corpus":
+        elif self.contextual_input_strategy == "random_corpus":
             corpus_ids = random.choices(range(len(corpus)), k=top_k)
             corpus_inputs = tokenize_corpus_func(corpus[corpus_ids])
             corpus_inputs = corpus_inputs.to(document_inputs["input_ids"].device)
             dataset_input_ids = corpus_inputs.input_ids
             dataset_attention_mask = corpus_inputs.attention_mask
-        elif self.transductive_input_strategy == "random_corpus__topk__interp":
+        elif self.contextual_input_strategy == "random_corpus__topk__interp":
             corpus_ids = random.choices(range(len(corpus)), k=top_k)
             corpus_inputs = tokenize_corpus_func(corpus[corpus_ids])
             corpus_inputs = corpus_inputs.to(document_inputs["input_ids"].device)
@@ -145,7 +145,7 @@ class RerankHelper:
             idxs = torch.randperm(len(dataset_input_ids))[:top_k]
             dataset_input_ids = dataset_input_ids[idxs]
             dataset_attention_mask = dataset_attention_mask[idxs]
-        elif self.transductive_input_strategy == "topk_pool":
+        elif self.contextual_input_strategy == "topk_pool":
             num_docs_to_pool = self.pooling_factor * top_k
             topk_docs = all_topk_docs[:num_docs_to_pool]
             dataset_input_ids = []
@@ -249,7 +249,7 @@ class RerankHelper:
 
             ensemble_query_embedding = []
             ensemble_document_embeddings = []
-            for k in range(self.transductive_n_outputs_ensemble):
+            for k in range(self.contextual_n_outputs_ensemble):
                 topk_docs = all_topk_docs[k*top_k:(k+1)*top_k]
 
                 # TODO: Enable assertion...
@@ -264,7 +264,7 @@ class RerankHelper:
                     doc_j += 1
                     docs.append(corpus[corpus_idx_dict[doc_id]]["text"])
                 
-                if self.transductive_input_strategy == "dummy":
+                if self.contextual_input_strategy == "dummy":
                     from sentence_transformers import SentenceTransformer
                     if self.dummy_model is None:
                         self.dummy_model = SentenceTransformer("Snowflake/snowflake-arctic-embed-l")
@@ -301,7 +301,7 @@ class RerankHelper:
                         input_ids=dataset_input_ids,
                         attention_mask=dataset_attention_mask,
                     )
-                    null_dataset_embedding_query = self.transductive_input_strategy in ["null", "null_topk"]
+                    null_dataset_embedding_query = self.contextual_input_strategy in ["null", "null_topk"]
                     query_embedding = self._forward_batched(
                         model=self.model.second_stage_model,
                         input_ids=query_inputs.input_ids,
@@ -309,7 +309,7 @@ class RerankHelper:
                         dataset_embeddings=dataset_embeddings,
                         null_dataset_embedding=null_dataset_embedding_query,
                     ).flatten()
-                    null_dataset_embedding_document = self.transductive_input_strategy in ["null"]
+                    null_dataset_embedding_document = self.contextual_input_strategy in ["null"]
                     document_embeddings = self._forward_batched(
                         model=self.model.second_stage_model,
                         input_ids=document_inputs.input_ids,

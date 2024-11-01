@@ -21,7 +21,7 @@ def load_fake_embedder_and_tokenizer():
 
 @pytest.fixture
 def fake_trainer():
-    args_str = "--per_device_train_batch_size 8 --per_device_eval_batch_size 8 --use_wandb 0 --bf16 0 --dataset nomic_supervised --sampling_strategy cluster_within_domain --num_hard_negatives 7 --exp_name unsupervised-2-cluster-kmeans-test --num_train_epochs 1.2 --learning_rate 2e-6 --embedder \"sentence-transformers/gtr-t5-base\" --clustering_model gtr_base --clustering_query_to_doc 1 --architecture transductive --max_seq_length 32"
+    args_str = "--per_device_train_batch_size 8 --per_device_eval_batch_size 8 --use_wandb 0 --bf16 0 --dataset nomic_supervised --sampling_strategy cluster_within_domain --num_hard_negatives 7 --exp_name unsupervised-2-cluster-kmeans-test --num_train_epochs 1.2 --learning_rate 2e-6 --embedder \"sentence-transformers/gtr-t5-base\" --clustering_model gtr_base --clustering_query_to_doc 1 --architecture contextual --max_seq_length 32"
     parser = transformers.HfArgumentParser((ModelArguments, DataArguments, TrainingArguments))
     model_args, data_args, training_args = (
         parser.parse_args_into_dataclasses(
