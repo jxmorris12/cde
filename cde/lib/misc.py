@@ -489,7 +489,7 @@ def exit_if_running_or_finished_wandb(
 
     api = wandb.Api()
     running_runs = api.runs(
-        path="tti-nomic-7",
+        path=project_name,
         filters={
             "display_name": exp_name,
             "state": {"$regex": "Running|Finished"},
