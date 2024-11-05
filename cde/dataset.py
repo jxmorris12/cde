@@ -364,7 +364,7 @@ class NomicSupervisedDataset(torch.utils.data.Dataset, TokenizerMixin):
             num_hard_negatives: int = 0, use_prefix: bool = False
         ):
         self.dataset = datasets.load_dataset(
-            "nomic-ai/nomic_embed_supervised",
+            "jxm/nomic_embed_supervised",
             keep_in_memory=False,
             num_proc=32,
         )["train"]
@@ -514,7 +514,7 @@ class BGEDataset(torch.utils.data.Dataset, TokenizerMixin):
             use_short_prefix: bool = True,
         ):
         dataset = datasets.load_dataset(
-            "cfli/bge-full-data",
+            "jxm/bge-full-data",
             num_proc=32,
         )
         self.dataset = process_bge_dataset_cached(dataset)
@@ -705,7 +705,7 @@ class NomicUnsupervisedDataset(torch.utils.data.Dataset, TokenizerMixin):
         print0("[NomicUnsupervisedDataset] loading dataset")
         self.dataset = (
             datasets.load_dataset(
-                "nomic-ai/nomic_embed_unsupervised",
+                "jxm/nomic_embed_unsupervised",
                 num_proc=32,
                 keep_in_memory=False,
             )["train"]
