@@ -471,7 +471,7 @@ class CustomTrainer(transformers.Trainer, TrainerNegativeFilterMixin):
             dataset_inputs["attention_mask"] = fake_dataset_attention_mask
         elif self.args.transductive_input_strategy in ["topk", "random_corpus"]:
             if len(negative_document_inputs) and ("input_ids" in negative_document_inputs) and len(negative_document_inputs["input_ids"]):
-                # Also consider negative documents in the transductive selection step
+                # Also consider negative documents in the contextual selection step
                 dataset_inputs["input_ids"] = torch.cat(
                     (document_inputs.get("input_ids_first_stage", "input_ids"), negative_document_inputs.get("input_ids_first_stage", "input_ids")),
                     dim=0
@@ -490,7 +490,7 @@ class CustomTrainer(transformers.Trainer, TrainerNegativeFilterMixin):
         else:
             pass
         
-        # Aggregate all transductive inputs from all GPUs
+        # Aggregate all contextual inputs from all GPUs
         dataset_inputs["input_ids"] = self.consider_gather(dataset_inputs["input_ids"])
         dataset_inputs["attention_mask"] = self.consider_gather(dataset_inputs["attention_mask"])
     
@@ -500,7 +500,7 @@ class CustomTrainer(transformers.Trainer, TrainerNegativeFilterMixin):
             self.model.config.transductive_corpus_size * 
             self.model.config.transductive_tokens_per_document
         )
-        # assert transductive_corpus_size <= effective_batch_size, "cannot provide more transductive inputs than in batch"
+        # assert transductive_corpus_size <= effective_batch_size, "cannot provide more contextual inputs than in batch"
 
         # Randomly reorder dataset input ids.
         R1 = torch.randperm(effective_batch_size)[:transductive_corpus_size]
@@ -517,7 +517,7 @@ class CustomTrainer(transformers.Trainer, TrainerNegativeFilterMixin):
         return (query_inputs, document_inputs, negative_document_inputs)
 
     def get_model_stages(self, model: torch.nn.Module) -> Optional[Tuple[torch.nn.Module, torch.nn.Module]]:
-        """We have to individually wrap models when our model is two stages (in the transductive setting) so
+        """We have to individually wrap models when our model is two stages (in the contextual setting) so
         that we can make sure DDP works properly, since it needs to individually hook into the forward() of
         both models.
         """
@@ -639,42 +639,30 @@ class CustomTrainer(transformers.Trainer, TrainerNegativeFilterMixin):
                 smart_labels_neg = qd_scores >= qd_scores.diag()[:, None]
             else:
                 smart_labels_neg = qd_scores >= self.args.hn_tune_threshold
-            
-            # Don't mask hard negatives for a given sample!
-            if num_hn > 0:
-                neg_doc_idx = torch.cat((inputs["idx"].flatten(), negative_document_inputs["idx"].flatten()))
-                hn_match_mask = (inputs["idx"].flatten()[:, None] == neg_doc_idx[None, :]).to(smart_labels_neg.device)
-                smart_labels_neg = smart_labels_neg & (~hn_match_mask)
-            
-            try:
-                assert smart_labels_neg.shape == smart_labels.shape, f"got different shapes {smart_labels_neg.shape} and {smart_labels.shape}"
-            except AssertionError:
-                print("shape 0", qd_scores.shape)
-                print("shape 1", inputs["idx"].shape)
-                # print("shape 2", neg_doc_idx.shape)
-                print("shape 3", torch.zeros_like(inputs["idx"]).shape)
-                # print("shape 4", hn_match_mask.shape)
-                print("shape 5", all_document_input_ids.shape)
-                print("shape 6", all_query_input_ids.shape)
-                print("shape 7", document_inputs["input_ids"].shape)
-                for k,v in inputs.items():
-                    if isinstance(v, torch.Tensor):
-                        print("-->", k, v.shape)
-                    elif isinstance(v, list):
-                        print("-->", k, len(v))
-                    else:
-                        print("--> unknown", k, type(v))
-
-                print("(offending shapes...)", smart_labels_neg.shape, smart_labels.shape)
-            
-            smart_labels = smart_labels | smart_labels_neg
-            hard_negatives_metrics = {
+            qd_metrics = {
                 "smart_hn_exceed_threshold": (qd_scores >= self.args.hn_tune_threshold).long().sum(),
                 "smart_hn_score_mean": qd_scores.mean(),
                 "smart_hn_score_max": qd_scores.max(),
                 "smart_hn_score_min": qd_scores.min(),
-                "smart_hn_neg_mean": smart_labels_neg.float().mean(),
             }
+        else:
+            smart_labels_neg = smart_labels
+            qd_metrics = {}
+            # Don't mask hard negatives for a given sample!
+        if num_hn > 0:
+            neg_doc_idx = torch.cat((inputs["idx"].flatten(), negative_document_inputs["idx"].flatten()))
+            hn_match_mask = (inputs["idx"].flatten()[:, None] == neg_doc_idx[None, :]).to(smart_labels_neg.device)
+            if self.args.use_in_batch_negatives:
+                smart_labels_neg = smart_labels_neg & (~hn_match_mask)
+            else:
+                smart_labels_neg = smart_labels_neg | (~hn_match_mask)
+        
+        assert smart_labels_neg.shape == smart_labels.shape, f"got different shapes {smart_labels_neg.shape} and {smart_labels.shape}"
+
+        smart_labels = smart_labels | smart_labels_neg
+        hard_negatives_metrics = qd_metrics | {
+            "smart_hn_neg_mean": smart_labels_neg.float().mean(),
+        }
 
         # Aggregate labels for duplicate queries.
         # num_unique_documents = document_unique_ids.unique().numel()

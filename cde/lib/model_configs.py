@@ -67,4 +67,17 @@ MODEL_FOLDER_DICT = {
    # same as two above but with weighted-mean pooling
    "cde--supervised--llama1b-6--epoch-1": "/fsx-checkpoints/jxm/cde/2024-10-21-supervised-pretrain-llama-1b-5--epoch-1",
    "cde--supervised--llama1b-6--epoch-2": "/fsx-checkpoints/jxm/cde/2024-10-21-supervised-pretrain-llama-1b-5--epoch-2",
+   # longer train
+   "cde--unsupervised--llama1b-7--epoch-3": "/fsx-checkpoints/jxm/cde/2024-10-26-llama-1b-pretrain-6--non-causal",
+   "cde--supervised--llama1b-7--epoch-1": "/fsx-checkpoints/jxm/cde/2024-10-30-supervised-pretrain-llama-1b-7--epoch-1",
+   "cde--supervised--llama1b-7--epoch-2": "/fsx-checkpoints/jxm/cde/2024-10-30-supervised-pretrain-llama-1b-7--epoch-2",
+   "cde--supervised--llama1b-7--epoch-3": "/fsx-checkpoints/jxm/cde/2024-10-30-supervised-pretrain-llama-1b-7--epoch-3",
+   "cde--supervised--llama1b-7--epoch-4": "/fsx-checkpoints/jxm/cde/2024-10-30-supervised-pretrain-llama-1b-7--epoch-4",
+   "cde--supervised--llama1b-7--epoch-5": "/fsx-checkpoints/jxm/cde/2024-10-30-supervised-pretrain-llama-1b-7--epoch-5",
+   # longer train (about .7 more of one epoch) and better finetuning (no in-batch negatives)
+   "cde--unsupervised--llama1b-8--epoch-1": "/fsx-checkpoints/jxm/cde/2024-11-07-supervised-finetune-llama-1b-7-4--epoch-1",
+   "cde--unsupervised--llama1b-8--epoch-2": "/fsx-checkpoints/jxm/cde/2024-11-07-supervised-finetune-llama-1b-7-4--epoch-2",
+   # same as -8 but wiht "domain" finetune
+   "cde--unsupervised--llama1b-9--epoch-1": "/fsx-checkpoints/jxm/cde/2024-11-07-supervised-finetune-llama-1b-7-5--epoch-1/",
+   "cde--unsupervised--llama1b-9--epoch-2": "/fsx-checkpoints/jxm/cde/2024-11-07-supervised-finetune-llama-1b-7-5--epoch-2/",
 }

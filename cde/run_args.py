@@ -260,6 +260,10 @@ class TrainingArguments(transformers.TrainingArguments):
         default=False,
         metadata={"help": "whether to use GradCache"}
     )
+    use_in_batch_negatives: bool = field(
+        default=True,
+        metadata={"help": "whether to use in-batch negatives"}
+    )
     num_train_epochs: float = field(
         default=3.0, 
         metadata={
