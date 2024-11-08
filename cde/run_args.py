@@ -72,7 +72,7 @@ class ModelArguments:
     architecture: str = field(
         default="biencoder",
         metadata = {
-            "choices": ["biencoder", "biencoder_plus_plus", "dataset_prefix_biencoder", "contextual", "contextual__encoder_decoder", "two_head_mlp", "contextual_cross_attention"],
+            "choices": ["biencoder", "biencoder_plus_plus", "dataset_prefix_biencoder", "transductive", "transductive__encoder_decoder", "two_head_mlp", "contextual_cross_attention"],
         }
     )
     pooling_strategy: str = field(
@@ -105,10 +105,10 @@ class ModelArguments:
             "help": "temperature for contrastive learning",
         }
     )
-    disable_contextual_rotary_embedding: bool = field(
+    disable_transductive_rotary_embedding: bool = field(
         default=True,
         metadata={
-            "help": "Whether to disable rotary embedding on the contextual part of that model"
+            "help": "Whether to disable rotary embedding on the transductive part of that model"
         }
     )
     embedding_output_dim: Optional[int] = field(
@@ -117,22 +117,22 @@ class ModelArguments:
             "help": "If set, sets bottleneck dim for contrastive outputs"
         }
     )
-    contextual_sequence_dropout_prob: float = field(
+    transductive_sequence_dropout_prob: float = field(
         default=0.0,
         metadata={
-            "help": "Sequence dropout val for contextual model"
+            "help": "Sequence dropout val for transductive model"
         }
     )
     transductive_tokens_per_document: int = field(
         default=1,
         metadata={
-            "help": "Number of tokens per document for contextual model"
+            "help": "Number of tokens per document for transductive model"
         }
     )
-    contextual_tie_token_embeddings: bool = field(
+    transductive_tie_token_embeddings: bool = field(
         default=False,
         metadata={
-            "help": "Whether to tie token embeddings for contextual model"
+            "help": "Whether to tie token embeddings for transductive model"
         }
     )
     pool_ignore_instruction_tokens: bool = field(
@@ -149,7 +149,7 @@ class ModelArguments:
     )
     def __post_init__(self):
         if self.transductive_tokens_per_document > 1:
-            assert self.architecture in ["contextual", "contextual_cross_attention"], "transductive_tokens_per_document only works with contextual architectures"
+            assert self.architecture in ["transductive", "contextual_cross_attention"], "transductive_tokens_per_document only works with transductive architectures"
 
 
 @dataclass
@@ -238,14 +238,14 @@ class DataArguments:
 
 @dataclass
 class TrainingArguments(transformers.TrainingArguments):
-    contextual_input_strategy: str = field(
+    transductive_input_strategy: str = field(
         default="topk",
         metadata={
             "help": "dataset-level info to feed into dataset-conditioned model",
             "choices": ["fake", "dummy", "random_corpus", "topk", "random_corpus__topk__interp", "topk_pool", "null_topk", "null"],
         }
     )
-    contextual_n_outputs_ensemble: int = field(
+    transductive_n_outputs_ensemble: int = field(
         default=1,
         metadata={
             "help": "Number of heads(?) to use, if doing ensembling over top-k outputs"
@@ -259,6 +259,10 @@ class TrainingArguments(transformers.TrainingArguments):
     use_gc: bool = field(
         default=False,
         metadata={"help": "whether to use GradCache"}
+    )
+    use_in_batch_negatives: bool = field(
+        default=True,
+        metadata={"help": "whether to use in-batch negatives"}
     )
     num_train_epochs: float = field(
         default=3.0, 
@@ -302,7 +306,7 @@ class TrainingArguments(transformers.TrainingArguments):
     transductive_corpus_size: int = field(
         default=256,
         metadata={
-            "help": "Corpus input size for contextual encoder",
+            "help": "Corpus input size for transductive encoder",
         }
     )
     evaluation_strategy: str = "steps"
