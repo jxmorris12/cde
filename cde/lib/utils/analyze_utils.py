@@ -57,6 +57,7 @@ def load_trainer_from_checkpoint_and_args(
         del training_args.__dict__[k]
 
     if not torch.cuda.is_available():
+        from accelerate import PartialState
         print("[analyze_utils] No GPU available, loading model on CPU")
         training_args.use_cpu = True
         training_args._n_gpu = 0
@@ -120,7 +121,8 @@ def load_trainer_from_checkpoint_and_args(
         eval_sampler_fns={},
         retrieval_datasets=retrieval_datasets,
     )
-    trainer._load_from_checkpoint(checkpoint_path)
+    # trainer._load_from_checkpoint(checkpoint_path)
+    trainer.model = trainer.model.__class__.from_pretrained(checkpoint_path)
     trainer.model.eval()
 
     if return_args:
