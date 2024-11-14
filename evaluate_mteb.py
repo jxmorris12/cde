@@ -10,7 +10,16 @@ import transformers
 
 # from cde.lib import cluster_dataset
 from cde.lib.embed import DenseEncoder
-from cde.lib.eval.mteb import TASK_LIST_STS, TASK_LIST, task2prefix_short, task2prefix_long
+from cde.lib.eval.mteb import (
+    TASK_LIST_STS, 
+    TASK_LIST, 
+    task2prefix_short, 
+    task2prefix_long, 
+    TASK_LIST_RETRIEVAL, 
+    TASK_LIST_CLUSTERING, 
+    TASK_LIST_PAIR_CLASSIFICATION, 
+    TASK_LIST_RERANKING
+)
 from cde.lib.model_configs import MODEL_FOLDER_DICT
 from cde.lib.utils import analyze_utils
 
@@ -19,14 +28,15 @@ from mteb import MTEB
 
 os.environ['OPENBLAS_NUM_THREADS'] = '16'
 
-# TASK_LIST = TASK_LIST_RETRIEVAL
-# TASK_LIST = TASK_LIST_STS
-# TASK_LIST = TASK_LIST_CLUSTERING
-# TASK_LIST = TASK_LIST_PAIR_CLASSIFICATION
-# TASK_LIST = TASK_LIST_RERANKING
-# TASK_LIST = ["Touche2020"]
-# TASK_LIST = ["ArguAna"]
-# TASK_LIST = ["ArguAna", "Touche2020", "STS12", "STS22"]
+TASKS_BY_CATEGORY = {
+    "retrieval": TASK_LIST_RETRIEVAL,
+    "retrieval_tiny": ["NFCorpus", "ArguAna"],
+    "sts": TASK_LIST_STS,
+    "clustering": TASK_LIST_CLUSTERING,
+    "pair_classification": TASK_LIST_PAIR_CLASSIFICATION,
+    "reranking": TASK_LIST_RERANKING,
+    "all": TASK_LIST,
+}
 
 def parse_args() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Process model key")
@@ -42,12 +52,18 @@ def parse_args() -> argparse.ArgumentParser:
         type=int, 
         default=512,
     )
+    parser.add_argument(
+        "--tasks",
+        choices=TASKS_BY_CATEGORY.keys(),
+        default="all",
+
+    )
     return parser.parse_args()
 
 
 def main():
     args = parse_args()
-    model_folder = MODEL_FOLDER_DICT[args.model_key]
+    model_folder = MODEL_FOLDER_DICT.get(args.model_key, model_folder)
     model, (model_args, data_args, training_args) = analyze_utils.load_trainer_from_checkpoint_and_args(
         model_folder=model_folder,
         load_from_checkpoint=True,
@@ -78,8 +94,10 @@ def main():
     first_stage_tokenizer = transformers.AutoTokenizer.from_pretrained(model.config.embedder)
     second_stage_tokenizer = transformers.AutoTokenizer.from_pretrained(vars(model.config).get("dataset_backbone") or model.config.embedder)
 
-    random.Random(time.time()).shuffle(TASK_LIST)
-    for task_idx, task in enumerate(TASK_LIST):
+    tasks = TASKS_BY_CATEGORY[args.tasks]
+
+    random.Random(time.time()).shuffle(tasks)
+    for task_idx, task in enumerate(tasks):
         document_prefix = ""
         query_prefix = ""
         if data_args.use_prefix:
@@ -99,7 +117,7 @@ def main():
         mteb_encoder.normalize_embeds = "Clustering" in task
         print(f"[{task}] Set prefixes to {mteb_encoder.query_prefix} and {mteb_encoder.document_prefix}")
 
-        print(f"Beginning {task} ({task_idx+1} / {len(TASK_LIST)})")
+        print(f"Beginning {task} ({task_idx+1} / {len(tasks)})")
         evaluation = MTEB(
             tasks=[task], 
             task_langs=["en"],
