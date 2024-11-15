@@ -157,6 +157,7 @@ class ContextualModelMixin(nn.Module):
 
 
 class BiEncoder(transformers.PreTrainedModel):
+    config_class = ContextualModelConfig
     embedder: transformers.PreTrainedModel
     def __init__(
             self, 

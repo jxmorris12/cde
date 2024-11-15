@@ -47,6 +47,7 @@ for file_name in os.listdir(results_folder):
         results = json.load(f)
         all_results = {**all_results, **{file_name.replace(".json", ""): results}}
 
+print(f"Found {len(all_results)} results")
 # Use "train" split instead
 TRAIN_SPLIT = ["DanishPoliticalCommentsClassification"]
 # Use "validation" split instead

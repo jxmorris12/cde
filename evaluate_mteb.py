@@ -10,7 +10,16 @@ import transformers
 
 # from cde.lib import cluster_dataset
 from cde.lib.embed import DenseEncoder
-from cde.lib.eval.mteb import TASK_LIST_STS, TASK_LIST, task2prefix_short, task2prefix_long
+from cde.lib.eval.mteb import (
+    TASK_LIST_STS, 
+    TASK_LIST, 
+    task2prefix_short, 
+    task2prefix_long, 
+    TASK_LIST_RETRIEVAL, 
+    TASK_LIST_CLUSTERING, 
+    TASK_LIST_PAIR_CLASSIFICATION, 
+    TASK_LIST_RERANKING
+)
 from cde.lib.model_configs import MODEL_FOLDER_DICT
 from cde.lib.utils import analyze_utils
 
@@ -19,14 +28,15 @@ from mteb import MTEB
 
 os.environ['OPENBLAS_NUM_THREADS'] = '16'
 
-# TASK_LIST = TASK_LIST_RETRIEVAL
-# TASK_LIST = TASK_LIST_STS
-# TASK_LIST = TASK_LIST_CLUSTERING
-# TASK_LIST = TASK_LIST_PAIR_CLASSIFICATION
-# TASK_LIST = TASK_LIST_RERANKING
-# TASK_LIST = ["Touche2020"]
-# TASK_LIST = ["ArguAna"]
-# TASK_LIST = ["ArguAna", "Touche2020", "STS12", "STS22"]
+TASKS_BY_CATEGORY = {
+    "retrieval": TASK_LIST_RETRIEVAL,
+    "retrieval_tiny": ["NFCorpus", "ArguAna"],
+    "sts": TASK_LIST_STS,
+    "clustering": TASK_LIST_CLUSTERING,
+    "pair_classification": TASK_LIST_PAIR_CLASSIFICATION,
+    "reranking": TASK_LIST_RERANKING,
+    "all": TASK_LIST,
+}
 
 def parse_args() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Process model key")
@@ -34,7 +44,7 @@ def parse_args() -> argparse.ArgumentParser:
         "model_key", 
         help="The key for the model", 
         type=str, 
-        choices=MODEL_FOLDER_DICT.keys()
+        # choices=MODEL_FOLDER_DICT.keys()
     )
     parser.add_argument(
         "--batch_size", 
@@ -42,12 +52,68 @@ def parse_args() -> argparse.ArgumentParser:
         type=int, 
         default=512,
     )
+    parser.add_argument(
+        "--tasks",
+        choices=TASKS_BY_CATEGORY.keys(),
+        default="all",
+
+    )
     return parser.parse_args()
+
+
+def run_eval_contextual(args, evaluation, split, mteb_encoder, model,training_args, first_stage_tokenizer, corpus_documents):
+    model.first_stage_model.cuda()
+
+    dataset_inputs = first_stage_tokenizer(
+        corpus_documents,
+        return_tensors="pt",
+        max_length=model.config.max_seq_length,
+        padding=True,
+        truncation=True,
+    ).to(training_args.device)
+    ##################################################
+    with torch.no_grad(), torch.autocast("cuda", dtype=torch.bfloat16):
+        dataset_embeddings = model.first_stage_model(
+            **dataset_inputs
+        )
+    hidden_dim = dataset_embeddings.shape[-1]
+    dataset_embeddings = dataset_embeddings.reshape((1, -1, hidden_dim)) # flatten for multiple contextual tokens
+    dataset_embeddings = dataset_embeddings.to(torch.float32).cpu().numpy()
+
+    ##################################################
+    mteb_encoder.model_kwargs = {
+        "dataset_embeddings": dataset_embeddings,
+        "null_dataset_embedding": False,
+        # ""
+    }
+    return evaluation.run(
+        mteb_encoder, 
+        output_folder=os.path.join("results_mteb", args.model_key),
+        corpus_chunk_size=500_000,
+        verbosity=2,
+        eval_splits=[split],
+        # encode_kwargs={"batch_size": args.batch_size, "num_workers": 0},
+        # encode_kwargs={"batch_size": args.batch_size, "num_workers": 1},
+        encode_kwargs={"batch_size": args.batch_size, "num_workers": 8 },
+    )
+
+
+def run_eval_biencoder(args, evaluation, split, mteb_encoder):
+    return evaluation.run(
+        mteb_encoder, 
+        output_folder=os.path.join("results_mteb", args.model_key),
+        corpus_chunk_size=500_000,
+        verbosity=2,
+        eval_splits=[split],
+        # encode_kwargs={"batch_size": args.batch_size, "num_workers": 0},
+        # encode_kwargs={"batch_size": args.batch_size, "num_workers": 1},
+        encode_kwargs={"batch_size": args.batch_size, "num_workers": 32 },
+    )
 
 
 def main():
     args = parse_args()
-    model_folder = MODEL_FOLDER_DICT[args.model_key]
+    model_folder = MODEL_FOLDER_DICT.get(args.model_key, args.model_key)
     model, (model_args, data_args, training_args) = analyze_utils.load_trainer_from_checkpoint_and_args(
         model_folder=model_folder,
         load_from_checkpoint=True,
@@ -61,14 +127,14 @@ def main():
 
     datasets.enable_caching()
 
-    if hasattr(model.config, "dataset_backbone"):
+    if hasattr(model.config, "dataset_backbone") and model.config.dataset_backbone:
         model_name_or_path = model.config.dataset_backbone
     else:
         model_name_or_path = model.config.embedder
     
     mteb_encoder = DenseEncoder(
         model_name_or_path=model_name_or_path,
-        encoder=model.second_stage_model,
+        encoder=model.second_stage_model if hasattr(model, "second_stage_model") else model,
         max_seq_length=model.config.max_seq_length,
         query_prefix="",        # Set later
         document_prefix="",     # Set later
@@ -78,8 +144,10 @@ def main():
     first_stage_tokenizer = transformers.AutoTokenizer.from_pretrained(model.config.embedder)
     second_stage_tokenizer = transformers.AutoTokenizer.from_pretrained(vars(model.config).get("dataset_backbone") or model.config.embedder)
 
-    random.Random(time.time()).shuffle(TASK_LIST)
-    for task_idx, task in enumerate(TASK_LIST):
+    tasks = TASKS_BY_CATEGORY[args.tasks]
+
+    random.Random(time.time()).shuffle(tasks)
+    for task_idx, task in enumerate(tasks):
         document_prefix = ""
         query_prefix = ""
         if data_args.use_prefix:
@@ -99,7 +167,7 @@ def main():
         mteb_encoder.normalize_embeds = "Clustering" in task
         print(f"[{task}] Set prefixes to {mteb_encoder.query_prefix} and {mteb_encoder.document_prefix}")
 
-        print(f"Beginning {task} ({task_idx+1} / {len(TASK_LIST)})")
+        print(f"Beginning {task} ({task_idx+1} / {len(tasks)})")
         evaluation = MTEB(
             tasks=[task], 
             task_langs=["en"],
@@ -112,7 +180,7 @@ def main():
             corpus = evaluation.tasks[0].corpus[split]
             documents = random.choices(list(corpus.values()), k=model.config.transductive_corpus_size)
             corpus_documents = [
-                mteb_encoder.document_prefix + '{} {}'.format(doc.get('title', ''), doc['text']).strip() 
+                mteb_encoder.document_prefix + doc
                 for doc in documents
             ]
         elif hasattr(evaluation.tasks[0], 'dataset'):
@@ -150,41 +218,27 @@ def main():
         print(f"Got {len(corpus_documents)} documents...")
         assert len(corpus_documents) == model.config.transductive_corpus_size
         print(corpus_documents[2])
-        model.first_stage_model.cuda()
 
-        dataset_inputs = first_stage_tokenizer(
-            corpus_documents,
-            return_tensors="pt",
-            max_length=model.config.max_seq_length,
-            padding=True,
-            truncation=True,
-        ).to(training_args.device)
-        ##################################################
-        with torch.no_grad(), torch.autocast("cuda", dtype=torch.bfloat16):
-            dataset_embeddings = model.first_stage_model(
-                **dataset_inputs
+        if hasattr(model, "first_stage_model"):
+            results = run_eval_contextual(
+                args=args,
+                evaluation=evaluation, 
+                split=split, 
+                mteb_encoder=mteb_encoder, 
+                model=model,
+                training_args=training_args, 
+                first_stage_tokenizer=first_stage_tokenizer, 
+                corpus_documents=corpus_documents
             )
-        hidden_dim = dataset_embeddings.shape[-1]
-        dataset_embeddings = dataset_embeddings.reshape((1, -1, hidden_dim)) # flatten for multiple contextual tokens
-        dataset_embeddings = dataset_embeddings.to(torch.float32).cpu().numpy()
-
-        ##################################################
-        mteb_encoder.model_kwargs = {
-            "dataset_embeddings": dataset_embeddings,
-            "null_dataset_embedding": False,
-            # ""
-        }
-        results = evaluation.run(
-            mteb_encoder, 
-            output_folder=os.path.join("results_mteb", "fixed", args.model_key),
-            corpus_chunk_size=500_000,
-            verbosity=2,
-            eval_splits=[split],
-            # encode_kwargs={"batch_size": args.batch_size, "num_workers": 0},
-            # encode_kwargs={"batch_size": args.batch_size, "num_workers": 1},
-            encode_kwargs={"batch_size": args.batch_size, "num_workers": 8 },
-        )
-        print(task)
+        else:
+            # biencoder
+            results = run_eval_biencoder(
+                args=args, 
+                evaluation=evaluation, 
+                split=split, 
+                mteb_encoder=mteb_encoder
+            )
+        
         print("\t", results)
         if len(results):
             results_dict = results[0].to_dict()["scores"][split][0]

@@ -80,4 +80,7 @@ MODEL_FOLDER_DICT = {
    # same as -8 but wiht "domain" finetune
    "cde--unsupervised--llama1b-9--epoch-1": "/fsx-checkpoints/jxm/cde/2024-11-07-supervised-finetune-llama-1b-7-5--epoch-1/",
    "cde--unsupervised--llama1b-9--epoch-2": "/fsx-checkpoints/jxm/cde/2024-11-07-supervised-finetune-llama-1b-7-5--epoch-2/",
+   # with fix from 9 (there was a bug that made in-batch negatives still used)
+   "cde--unsupervised--llama1b-10--epoch-1": "/fsx-checkpoints/jxm/cde/2024-11-08-supervised-finetune-llama-1b-8-1--epoch-1",
+
 }

@@ -425,7 +425,7 @@ def load_embedder_and_tokenizer(name: str) -> Tuple[
         model = transformers.AutoModelForCausalLM.from_pretrained(
             name, 
             # torch_dtype=torch.bfloat16,
-            attn_implementation="flash_attention_2",
+            attn_implementation="flash_attention_2" if torch.cuda.is_available() else "sdpa",
             low_cpu_mem_usage=True,
             # device_map="auto",
         )
