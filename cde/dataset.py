@@ -655,6 +655,8 @@ def get_subdomain_idxs_cached(dataset: datasets.Dataset):
     else:
         subdomain_idxs = collections.defaultdict(list)
         print0("Getting subdomains from dataset")
+        dataset.set_format(None)
+        dataset = dataset.flatten_indices()
         subdomains = dataset["dataset"]
         for i in tqdm.trange(len(dataset), desc="Counting dataset subdomains", colour="blue"):
             subdomain = subdomains[i]
