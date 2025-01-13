@@ -78,7 +78,8 @@ class ContextualModelMixin(nn.Module):
 
     def _prepare_dataset_embeddings(
             self, 
-            input_ids: torch.Tensor, dataset_embeddings: torch.Tensor,
+            input_ids: torch.Tensor, 
+            dataset_embeddings: torch.Tensor,
             null_dataset_embedding: bool = False,
         ) -> torch.Tensor:
         if not isinstance(dataset_embeddings, torch.Tensor):
@@ -130,28 +131,12 @@ class ContextualModelMixin(nn.Module):
             null_embeddings = self.sequence_dropout_null_embedding[None, None].expand(batch_size, corpus_size, -1)
             dataset_embeddings = null_embeddings
         
-        # print(f"[ContextualModelMixin] dataset_embeddings.shape = {dataset_embeddings.shape}")
-        
         # backbone_max_seq_length = self.backbone.config.max_trained_positions
         # assert batch_size + (2 * self.n_soft_prompt + corpus_size) <= backbone_max_seq_length, "too many hard negatives for backbone model"
         soft_prompt = torch.ones((1, self.hidden_size), device=dataset_embeddings.device, dtype=dataset_embeddings.dtype)
         soft_prompt = self.prompt_projection(soft_prompt).reshape((1, self.n_soft_prompt, self.hidden_size))
         soft_prompt = soft_prompt.expand((len(dataset_embeddings), -1, -1)) # -> (b, 4+b, d) # soft_prompt.repeat((len(input_ids), 1, 1))  
         soft_prompt = torch.cat((dataset_embeddings, soft_prompt), dim=1)
-
-        # print(f"[ContextualModelMixin] soft_prompt.shape = {soft_prompt.shape}")
-
-        if self.training and self.randomize_dataset_sequence_order:
-            randomized_order = torch.stack(
-                [
-                    torch.cat(
-                        (
-                            torch.randperm(corpus_size, device=soft_prompt.device), 
-                            torch.arange(self.n_soft_prompt, device=soft_prompt.device) + corpus_size
-                        ), dim=0) 
-                        for _ in range(batch_size)])
-            randomized_order = randomized_order.to(soft_prompt.device)
-            soft_prompt = soft_prompt.gather(1, randomized_order[..., None].expand_as(soft_prompt))
         
         return soft_prompt
 
@@ -206,22 +191,14 @@ class BiEncoder(transformers.PreTrainedModel):
                 [d1, d2, d3, hn1_1, hn1_2, hn2_1, hn2_2, hn3_1, hn3_2]
                 for a corpus with three documents and two hard negatives per document
         """
-        # del dataset_input_ids
-        # del dataset_attention_mask
         del token_type_ids
 
-        # from cde.lib.dist import get_rank
-        # tokenizer = transformers.AutoTokenizer.from_pretrained("bert-base-uncased")
-        # if get_rank() == 0:
-        #     breakpoint()
-        # torch.distributed.barrier()
         outputs = (
             self.embedder(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
             ).last_hidden_state
         )
-
         if self.transductive_tokens_per_document > 1:
             document_embeddings = None
             batch_size, seq_length, output_dim = outputs.shape
@@ -256,6 +233,7 @@ class BiEncoder(transformers.PreTrainedModel):
             else:
                 document_embeddings = document_embeddings.max(dim=1)
         output = self.mlp(document_embeddings)
+        # breakpoint()
 
         if output_hidden_states:
             return {
@@ -280,11 +258,6 @@ class DatasetConditionedAutoregressive(transformers.PreTrainedModel, ContextualM
         self.contextual_init()
         disable_causality(self.backbone)
         
-        self.input_ln = torch.nn.LayerNorm(
-            self.backbone_hidden_size, 
-            eps=1e-5
-        )
-
         self.pool_ignore_contextual_tokens = vars(self.config).get("pool_ignore_contextual_tokens", False)
         self.pool_ignore_instruction_tokens = vars(self.config).get("pool_ignore_instruction_tokens", False)
         self.pool_instruction_end_id = self.backbone.config.bos_token_id
@@ -339,7 +312,6 @@ class DatasetConditionedAutoregressive(transformers.PreTrainedModel, ContextualM
         soft_prompt = soft_prompt.reshape(
             (soft_prompt.shape[0], -1, self.backbone_hidden_size)
         )
-        soft_prompt = self.input_ln(soft_prompt)
         # print("[DatasetConditionedAutoregressive] 2 -> soft_prompt.shape =", soft_prompt.shape)
 
         backbone_attention_mask = torch.ones(
@@ -423,8 +395,11 @@ class DatasetConditionedBiencoder(transformers.PreTrainedModel, ContextualModelM
         self.contextual_init()
         self._shift_rotary_embedding()
 
-        self.pool_ignore_contextual_tokens = vars(self.config).get("pool_ignore_contextual_tokens", False)
+        self.pool_ignore_contextual_tokens = vars(self.config).get("pool_ignore_contextual_tokens", True)
         self.pool_ignore_instruction_tokens = vars(self.config).get("pool_ignore_instruction_tokens", False)
+
+        tokenizer = transformers.AutoTokenizer.from_pretrained(self.config.embedder)
+        self.pool_instruction_end_id = tokenizer.encode(": ", add_special_tokens=False)[0] # Hardcoded for colon-ending prefixes.
                 
     @property
     def num_corpus_tokens(self) -> int:
@@ -465,10 +440,10 @@ class DatasetConditionedBiencoder(transformers.PreTrainedModel, ContextualModelM
         )
         inputs_embeds = self.backbone.embeddings(input_ids) # (b, s) -> (b, s, d)
         inputs_embeds = torch.cat((soft_prompt, inputs_embeds), dim=1) # (v, 4+b+s, d)
-        attention_mask = torch.cat((backbone_attention_mask, attention_mask), dim=1)
+        input_attention_mask = torch.cat((backbone_attention_mask, attention_mask), dim=1)
         output = self.backbone(
             inputs_embeds=inputs_embeds,
-            attention_mask=attention_mask,
+            attention_mask=input_attention_mask,
         ) # (1, 4 + b + s, d)
         # trim soft prompt
         output_vectors = output.last_hidden_state
@@ -492,21 +467,16 @@ class DatasetConditionedBiencoder(transformers.PreTrainedModel, ContextualModelM
             is_instruction_token_mask = is_instruction_token_mask.where(
                 (instruction_end_idx > 0)[:, None], torch.zeros_like(is_instruction_token_mask)
             )
-            input_attention_mask = torch.cat((backbone_attention_mask, attention_mask & ~is_instruction_token_mask), dim=1)
+            output_attention_mask = torch.cat((backbone_attention_mask, attention_mask & ~is_instruction_token_mask), dim=1)
+        else:
+            output_attention_mask = input_attention_mask
 
-        output_attention_mask = input_attention_mask
         if self.pool_ignore_contextual_tokens:
             output_vectors = output_vectors[:, n_soft_prompt_tokens:, :]
             output_attention_mask = output_attention_mask[:, n_soft_prompt_tokens:]
         output_pooled = mean_pool(output_vectors, output_attention_mask)
-
         # average with original vectors
-        # TODO: Argparse for pooling strategy.
-        # output_vectors = torch.cat((soft_prompt_pooled, output_pooled), dim=1) # (b, d) + (b, d) -> (b, 2d)
-        # print("output_pooled.shape =", output_pooled.shape)
-        output = self.output_projection(output_pooled) # (b, 2d) -> (b, d)
-
-        # print("returning output.shape =", output.shape)
+        output = self.output_projection(output_pooled) + output_pooled # (b, d) -> (b, d) / with residual connection
 
         if output_hidden_states:
             return {
@@ -567,7 +537,7 @@ class DatasetPrefixBiencoder(transformers.PreTrainedModel, ContextualModelMixin)
             return output
 
 
-class DatasetTransformer(transformers.PreTrainedModel):
+class ContextualDocumentEmbeddingTransformer(transformers.PreTrainedModel):
     config_class = ContextualModelConfig
     embedder: transformers.PreTrainedModel
     dataset_backbone: transformers.PreTrainedModel
@@ -640,12 +610,9 @@ class DatasetTransformer(transformers.PreTrainedModel):
 
 def get_model_class(name: str):
     if name in 'transductive': 
-        return DatasetTransformer
+        return ContextualDocumentEmbeddingTransformer
     elif name == 'biencoder':
         return BiEncoder
-    elif name == "biencoder_plus_plus":
-        from cde.model_extra import BiEncoderPlusPlus
-        return BiEncoderPlusPlus
     elif name == "dataset_prefix_biencoder":
         return DatasetPrefixBiencoder
     else:
