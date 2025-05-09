@@ -176,7 +176,7 @@ class FixedSubdomainSampler(RandomSampler):
         effective_length = len(self.dataset) - (len(self.dataset) % effective_batch_size)
         # 2. Trim off the end (effectively drop_last=True)
         all_assignments = all_assignments[:effective_length]
-        num_batches = int(effective_length // effective_batch_size)
+        num_batches = max(1, int(effective_length // effective_batch_size))
         # 3. Reshape into batches
         all_assignments = all_assignments.reshape(
             (num_batches, effective_batch_size)
@@ -281,7 +281,7 @@ class AutoClusterWithinDomainSampler(FixedSubdomainSampler):
             seed=seed,
         )
         self.batch_assignments = self.dataset.subdomain_idxs
-        assert sum(map(len, self.batch_assignments.values())) == len(dataset)
+        assert sum(map(len, self.batch_assignments.values())) == len(dataset), f"error: {sum(map(len, self.batch_assignments.values()))} != {len(dataset)}"
         
         self.query_to_doc = query_to_doc
         self.batch_size = batch_size
@@ -333,8 +333,8 @@ def get_sampler(
     cluster_size: int,
     shuffle: bool,
     share_negatives_between_gpus: bool,
-    downscale_and_normalize: bool,
     clustering_model: str,
+    downscale_and_normalize: bool = False,
     clustering_query_to_doc: bool = True,
     num_samples: Optional[int] = None,
     batch_packing_strategy: str = "random",
