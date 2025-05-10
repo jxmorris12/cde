@@ -201,7 +201,11 @@ class BeirDataset(torch.utils.data.Dataset):
 
 
 class TokenizerMixin:
+    hn_filter_tokenizer: Optional[transformers.AutoTokenizer] = None
     def _tokenize(self, ex):
+        if self.tokenizer is None:
+            return ex
+        
         max_num_chars = 4 * self.max_seq_length
         tokenize_fn = functools.partial(
             self.tokenizer, 
@@ -218,7 +222,17 @@ class TokenizerMixin:
                 truncation=True,
                 max_length=self.max_seq_length
             )
-        for col in ["query", "document", "negative_document", "text"]:
+
+        if (self.hn_filter_tokenizer is not None):
+            hn_filter_tokenize_fn = functools.partial(
+                self.hn_filter_tokenizer, 
+                return_tensors="pt", 
+                padding="max_length",
+                truncation=True,
+                max_length=self.max_seq_length
+            )
+
+        for col in ["query", "document", "negative_document", "text", "query_text__no_prefix", "document_text__no_prefix", "negative_document_text__no_prefix"]:
             if not len(ex.get(col, [])): continue 
             ex_col = ex[col]
             if isinstance(ex_col, list):
@@ -230,6 +244,10 @@ class TokenizerMixin:
                     tokenized_col = dataset_tokenize_fn([s[:max_num_chars] for s in ex_col])
                     ex[f'{col}_input_ids_first_stage'] = tokenized_col.input_ids
                     ex[f'{col}_attention_mask_first_stage'] = tokenized_col.attention_mask
+                if (self.hn_filter_tokenizer is not None):
+                    tokenized_col = hn_filter_tokenize_fn([s[:max_num_chars] for s in ex_col])
+                    ex[f'{col}_input_ids__hn_filter'] = tokenized_col.input_ids
+                    ex[f'{col}_attention_mask__hn_filter'] = tokenized_col.attention_mask
             elif isinstance(ex_col, str):
                 ex_col = ex_col[:max_num_chars]
                 if not len(ex_col):
@@ -243,6 +261,11 @@ class TokenizerMixin:
                     tokenized_col = dataset_tokenize_fn(ex_col_no_suffix)
                     ex[f'{col}_input_ids_first_stage'] = tokenized_col.input_ids.squeeze()
                     ex[f'{col}_attention_mask_first_stage'] = tokenized_col.attention_mask.squeeze()
+                if (self.hn_filter_tokenizer is not None):
+                    ex_col_no_suffix = ex_col[:max_num_chars]
+                    tokenized_col = hn_filter_tokenize_fn(ex_col_no_suffix)
+                    ex[f'{col}_input_ids__hn_filter'] = tokenized_col.input_ids.squeeze()
+                    ex[f'{col}_attention_mask__hn_filter'] = tokenized_col.attention_mask.squeeze()
             else:
                 raise ValueError(f"Cannot tokenize value from column {col} of type {type(ex_col)}")
         return ex
@@ -261,7 +284,7 @@ class FineWeb(torch.utils.data.Dataset, TokenizerMixin):
             num_proc=64,
         )["train"]
         # self.dataset = self.dataset.select(range(999))
-        self.subdomain_idxs = { 0: range(len(self.dataset)) }
+        self.subdomain_idxs = { 0: list(range(len(self.dataset))) }
         self.tokenizer = tokenizer
         self.max_seq_length = max_seq_length
 
@@ -313,7 +336,7 @@ class FineWebEdu(torch.utils.data.Dataset, TokenizerMixin):
             num_proc=64,
         )["train"]
         # self.dataset = self.dataset.select(range(999))
-        self.subdomain_idxs = { 0: range(len(self.dataset)) }
+        self.subdomain_idxs = { 0: list(range(len(self.dataset))) }
         self.tokenizer = tokenizer
         self.max_seq_length = max_seq_length
 
@@ -364,7 +387,7 @@ class NomicSupervisedDataset(torch.utils.data.Dataset, TokenizerMixin):
             num_hard_negatives: int = 0, use_prefix: bool = False
         ):
         self.dataset = datasets.load_dataset(
-            "jxm/nomic_embed_supervised",
+            "nomic-ai/nomic_embed_supervised",
             keep_in_memory=False,
             num_proc=32,
         )["train"]
@@ -514,8 +537,9 @@ class BGEDataset(torch.utils.data.Dataset, TokenizerMixin):
             use_short_prefix: bool = True,
         ):
         dataset = datasets.load_dataset(
-            "jxm/bge-full-data",
+            "cfli/bge-full-data",
             num_proc=32,
+            # revision="9c485f2b91be2f94cd2ee617f0a3a6c50a806618",
         )
         self.dataset = process_bge_dataset_cached(dataset)
         self.subdomain_idxs = get_subdomain_idxs_cached(dataset=self.dataset)
@@ -547,7 +571,7 @@ class BGEDataset(torch.utils.data.Dataset, TokenizerMixin):
         return (
             self.max_seq_length,
             self._fingerprint,
-            self.tokenizer.name_or_path,
+            self.tokenizer.name_or_path if self.tokenizer else None,
         )
 
     @property
@@ -602,15 +626,16 @@ class BGEDataset(torch.utils.data.Dataset, TokenizerMixin):
         else:
             query_prefix = ""
             document_prefix = ""
-        query = query_prefix + ex["query"]
-        document = document_prefix + ex["document"]
+        query = ex["query"]
+        document = ex["document"]
         random_document = document_prefix + document
 
+        # fix for empty documents and queries, which sadly exist
+        if len(query) == 0:
+            query = "[empty]"
         if len(document) == 0:
-            # fix for empty documents
             document = "[empty]"
-
-        # print(ex["dataset"], is_symmetric, "/", query_prefix, "/", document_prefix)
+        ex["neg"] = ["[empty]" if len(d) == 0 else d for d in ex["neg"]]
 
         if len(ex["neg"]) < self.num_hard_negatives:
             # sample w/ replacement
@@ -622,12 +647,12 @@ class BGEDataset(torch.utils.data.Dataset, TokenizerMixin):
         out_ex = self._tokenize({
             "idx": query_id,
             ######################################################################
-            "query": query,
+            "query": query_prefix + query,
             "query_prefix": query_prefix,
-            "query_text": query_prefix + ex["query"],
-            "query_text__no_prefix": ex["query"],
+            "query_text": query_prefix + query,
+            "query_text__no_prefix": query,
             "document_prefix": document_prefix,
-            "document": document,
+            "document": document_prefix + document,
             "document_text": document_prefix + document,
             "document_text__no_prefix": document,
             ######################################################################
@@ -654,12 +679,12 @@ def get_subdomain_idxs_cached(dataset: datasets.Dataset):
         return pickle.load(open(cache_file_path, 'rb'))
     else:
         subdomain_idxs = collections.defaultdict(list)
-        print0("Getting subdomains from dataset")
+        print0(f"[get_subdomain_idxs] not found at {cache_file_path}. getting subdomains from dataset.")
         dataset.set_format(None)
         dataset = dataset.flatten_indices()
-        subdomains = dataset["dataset"]
+        datasets = dataset["dataset"]
         for i in tqdm.trange(len(dataset), desc="Counting dataset subdomains", colour="blue"):
-            subdomain = subdomains[i]
+            subdomain = datasets[i]
             subdomain_idxs[subdomain].append(i)
         pickle.dump(subdomain_idxs, open(cache_file_path, 'wb'))
         return subdomain_idxs
@@ -682,6 +707,7 @@ def process_bge_dataset_cached(dataset: datasets.Dataset):
         for split_name in sorted(dataset.keys()):
             split = dataset[split_name]
             split = split.add_column("dataset", [split_name] * len(split))
+            subdomains = dataset["dataset"]
             split = split.rename_column("pos", "document")
             split = split.map(_flatten_docs)
             splits.append(split)
@@ -707,10 +733,11 @@ class NomicUnsupervisedDataset(torch.utils.data.Dataset, TokenizerMixin):
         print0("[NomicUnsupervisedDataset] loading dataset")
         self.dataset = (
             datasets.load_dataset(
-                "jxm/nomic_embed_unsupervised",
-                num_proc=32,
+                "nomic-ai/nomic_embed_unsupervised",
+                num_proc=4,
                 keep_in_memory=False,
-            )["train"]
+                split="train",
+            )
         )
         print0("[NomicUnsupervisedDataset] loading subdomain idxs")
         # TODO: Share dict between processes.
@@ -821,5 +848,8 @@ class NomicUnsupervisedDataset(torch.utils.data.Dataset, TokenizerMixin):
 
 
 if __name__ == '__main__':
-    ds_train = NomicSupervisedDataset()
+    tokenizer = transformers.AutoTokenizer.from_pretrained("gpt2")
+    tokenizer.pad_token = tokenizer.eos_token
+    ds_train = BGEDataset(tokenizer=tokenizer, first_stage_tokenizer=None, max_seq_length=50, num_hard_negatives=0)
     print0(ds_train[0])
+
