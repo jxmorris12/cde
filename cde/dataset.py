@@ -707,7 +707,7 @@ def process_bge_dataset_cached(dataset: datasets.Dataset):
         for split_name in sorted(dataset.keys()):
             split = dataset[split_name]
             split = split.add_column("dataset", [split_name] * len(split))
-            subdomains = dataset["dataset"]
+            subdomains = split["dataset"]
             split = split.rename_column("pos", "document")
             split = split.map(_flatten_docs)
             splits.append(split)
