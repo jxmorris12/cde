@@ -535,12 +535,17 @@ class BGEDataset(torch.utils.data.Dataset, TokenizerMixin):
             num_hard_negatives: int = 0, 
             use_prefix: bool = False,
             use_short_prefix: bool = True,
+            split: Optional[str] = None,
         ):
         dataset = datasets.load_dataset(
             "cfli/bge-full-data",
             num_proc=32,
-            # revision="9c485f2b91be2f94cd2ee617f0a3a6c50a806618",
         )
+        if split is not None:
+            assert split in dataset.keys(), f"split {split} not in {dataset.keys()}"
+            dataset = datasets.DatasetDict({
+                split: dataset[split],
+            })
         self.dataset = process_bge_dataset_cached(dataset)
         self.subdomain_idxs = get_subdomain_idxs_cached(dataset=self.dataset)
         self.tokenizer = tokenizer
