@@ -543,10 +543,7 @@ class BGEDataset(torch.utils.data.Dataset, TokenizerMixin):
         )
         if split is not None:
             assert split in dataset.keys(), f"split {split} not in {dataset.keys()}"
-            dataset = datasets.DatasetDict({
-                split: dataset[split],
-            })
-        self.dataset = process_bge_dataset_cached(dataset)
+        self.dataset = process_bge_dataset_cached(dataset, split=split)
         self.subdomain_idxs = get_subdomain_idxs_cached(dataset=self.dataset)
         self.tokenizer = tokenizer
         self.first_stage_tokenizer = first_stage_tokenizer
@@ -700,16 +697,17 @@ def _flatten_docs(ex):
     return ex
 
 
-def process_bge_dataset_cached(dataset: datasets.Dataset):
+def process_bge_dataset_cached(dataset: datasets.Dataset, split: Optional[str] = None):
     cache_folder = os.path.join(get_cde_cache_dir(), "bge")
     os.makedirs(cache_folder, exist_ok=True)
-    cache_name = "bge_processed.dataset"
+    cache_name = "bge_processed.dataset" if split is None else f"bge_processed_{split}.dataset"
     cache_file_path = os.path.join(cache_folder, cache_name)
     if os.path.exists(cache_file_path):
         return datasets_fast_load_from_disk(cache_file_path)
     else:
         splits = []
-        for split_name in sorted(dataset.keys()):
+        split_keys = [split] if split is not None else dataset.keys()
+        for split_name in sorted(split_keys):
             split = dataset[split_name]
             split = split.add_column("dataset", [split_name] * len(split))
             subdomains = split["dataset"]
