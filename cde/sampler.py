@@ -179,7 +179,8 @@ class FixedSubdomainSampler(RandomSampler):
         if self.drop_last:
             effective_length = len(self.dataset) - (len(self.dataset) % effective_batch_size)
             all_assignments = all_assignments[:effective_length]
-        breakpoint()
+        else:
+            effective_length = len(self.dataset)
         num_batches = max(1, int(effective_length // effective_batch_size))
         # 3. Reshape into batches
         print(f"reshaping {len(all_assignments)} assignments into {num_batches} batches with batch_size {effective_batch_size}")
