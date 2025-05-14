@@ -179,6 +179,7 @@ class FixedSubdomainSampler(RandomSampler):
         if self.drop_last:
             effective_length = len(self.dataset) - (len(self.dataset) % effective_batch_size)
             all_assignments = all_assignments[:effective_length]
+        breakpoint()
         num_batches = max(1, int(effective_length // effective_batch_size))
         # 3. Reshape into batches
         print(f"reshaping {len(all_assignments)} assignments into {num_batches} batches with batch_size {effective_batch_size}")
@@ -222,6 +223,7 @@ class AutoClusterSampler(FixedSubdomainSampler):
             num_samples: Optional[int] = None,
             batch_packing_strategy: str = "random",
             seed: int = 42,
+            drop_last: bool = True,
         ):
         super().__init__(
             dataset=dataset, 
@@ -230,6 +232,7 @@ class AutoClusterSampler(FixedSubdomainSampler):
             num_samples=num_samples,
             share_negatives_between_gpus=share_negatives_between_gpus,
             seed=seed,
+            drop_last=drop_last,
         )
         self.dataset = dataset
         self.model = model
@@ -274,6 +277,7 @@ class AutoClusterWithinDomainSampler(FixedSubdomainSampler):
             num_samples: Optional[int] = None,
             batch_packing_strategy: str = "random",
             seed: int = 42,
+            drop_last: bool = True,
         ):
         # TODO: shuffle?
         super().__init__(
@@ -283,6 +287,7 @@ class AutoClusterWithinDomainSampler(FixedSubdomainSampler):
             num_samples=num_samples,
             share_negatives_between_gpus=share_negatives_between_gpus,
             seed=seed,
+            drop_last=drop_last,
         )
         self.batch_assignments = self.dataset.subdomain_idxs
         assert sum(map(len, self.batch_assignments.values())) == len(dataset), f"error: {sum(map(len, self.batch_assignments.values()))} != {len(dataset)}"
@@ -392,6 +397,7 @@ def get_sampler(
             model=clustering_model,
             num_samples=num_samples,
             seed=seed,
+            drop_last=drop_last,
         )
     else:
         raise ValueError(f"unknown sampling strategy {sampling_strategy}")
