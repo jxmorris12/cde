@@ -134,6 +134,7 @@ class FixedSubdomainSampler(RandomSampler):
             num_samples: Optional[int] = None,
             batch_packing_strategy = "random",
             seed: int = 42,
+            drop_last: bool = True,
         ):
         super().__init__(
             dataset=dataset, 
@@ -143,6 +144,7 @@ class FixedSubdomainSampler(RandomSampler):
             num_samples=num_samples,
             seed=seed,
         )
+        self.drop_last = drop_last
         self.batch_assignments = self.dataset.subdomain_idxs
         assert hasattr(self.dataset, 'subdomain_idxs')
         self.share_negatives_between_gpus = share_negatives_between_gpus
@@ -173,11 +175,13 @@ class FixedSubdomainSampler(RandomSampler):
             else 
             self.batch_size
         )
-        effective_length = len(self.dataset) - (len(self.dataset) % effective_batch_size)
         # 2. Trim off the end (effectively drop_last=True)
-        all_assignments = all_assignments[:effective_length]
+        if self.drop_last:
+            effective_length = len(self.dataset) - (len(self.dataset) % effective_batch_size)
+            all_assignments = all_assignments[:effective_length]
         num_batches = max(1, int(effective_length // effective_batch_size))
         # 3. Reshape into batches
+        print(f"reshaping {len(all_assignments)} assignments into {num_batches} batches with batch_size {effective_batch_size}")
         all_assignments = all_assignments.reshape(
             (num_batches, effective_batch_size)
         )
@@ -339,6 +343,7 @@ def get_sampler(
     num_samples: Optional[int] = None,
     batch_packing_strategy: str = "random",
     seed: int = 42,
+    drop_last: bool = True,
 ) -> Sampler:
     if sampling_strategy == "random":
         return RandomSampler(
@@ -358,6 +363,7 @@ def get_sampler(
             batch_packing_strategy=batch_packing_strategy,
             num_samples=num_samples,
             seed=seed,
+            drop_last=drop_last,
         )
     elif sampling_strategy == "cluster":
         return AutoClusterSampler(
